@@ -198,14 +198,4 @@ describe('<ToolConfigEditor />', () => {
     fireEvent.change(screen.getByLabelText('Tool'), { target: { value: 'text.uppercase' } })
     expect(await screen.findByLabelText(/^Value/)).toHaveValue('hello')
   })
-
-  it('sets the authored approval flag from the inspector', () => {
-    const onUpdate = vi.fn()
-    render(<ToolConfigEditor nodeId="snooze" config={{ tool: 'text.uppercase' }} tools={tools} onUpdate={onUpdate} />)
-
-    const toggle = screen.getByTestId('tool-require-approval')
-    expect(toggle).not.toBeChecked()
-    fireEvent.click(toggle)
-    expect(onUpdate).toHaveBeenLastCalledWith({ tool: 'text.uppercase', requireApproval: true })
-  })
 })

@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -155,17 +154,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 	// recorded configuration reflects what actually ran (the contract
 	// replays the patched snapshot; the runtime's revive-in-place equivalent
 	// is the snapshot swap).
-	var fix *domain.Workflow
 	if len(opts.FixWorkflowJSON) > 0 {
-		if fix, _ = domain.Parse(opts.FixWorkflowJSON); fix == nil {
-			return fmt.Errorf("apply fix snapshot: the fix does not parse")
-		}
-	}
-	// Every redrive re-runs a step, so it meets the same gates as a start.
-	if err := requireRunToolApprovals(ctx, q, orgID, deadLetter.RunID, fix, true); err != nil {
-		return err
-	}
-	if fix != nil {
 		if err := q.UpdateRunWorkflowSnapshot(ctx, store.UpdateRunWorkflowSnapshotParams{
 			ID: deadLetter.RunID, Workflow: opts.FixWorkflowJSON,
 		}); err != nil {
@@ -282,9 +271,6 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 		}
 		return fmt.Errorf("requeue failed node: %w", err)
 	}
-	if err := requireRunToolApprovals(ctx, q, orgID, runID, nil, true); err != nil {
-		return err
-	}
 	if err := recordRedriveForApprovals(ctx, q, runID, nodeID, actor); err != nil {
 		return err
 	}
@@ -320,7 +306,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 // re-runs and retires any undecided or unspent approval for the step.
 func recordRedriveForApprovals(ctx context.Context, q *store.Queries, runID, nodeID, actor string) error {
 	if actor != "" {
-		if err := q.RecordRunRedriver(ctx, store.RecordRunRedriverParams{RunID: runID, Actor: actor}); err != nil {
+		if err := q.RecordRunActor(ctx, store.RecordRunActorParams{RunID: runID, Role: "redrive", Actor: actor}); err != nil {
 			return fmt.Errorf("record redriver: %w", err)
 		}
 	}

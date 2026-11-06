@@ -519,8 +519,6 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 		return expected(err.Error())
 	case errors.Is(err, engine.ErrRedriveConflict):
 		return expected("dead letter replay already claimed")
-	case errors.As(err, new(*engine.ToolApprovalDroppedError)):
-		return expected(err.Error())
 	default:
 		return nil, nil, err
 	}

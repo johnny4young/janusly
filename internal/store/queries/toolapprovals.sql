@@ -11,13 +11,13 @@ FOR UPDATE;
 
 -- name: InsertToolApproval :one
 INSERT INTO tool_approval_requests
-  (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(requester_ids)::text[], now() + interval '30 minutes')
+  (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, eligible_approvers, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.arg(requester_ids)::text[], sqlc.narg(eligible_approvers), now() + interval '30 minutes')
 RETURNING *;
 
--- Everyone behind this execution: the creators of the run and its subworkflow
--- parents, the users who saved those versions, every redriver, and whoever an
--- earlier request for this step already excluded.
+-- The people who caused this execution: the creators of the run and its
+-- subworkflow parents, anyone who submitted a form along that lineage, and
+-- whoever redrove this run most recently.
 -- name: ListToolApprovalRequesters :many
 WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
   SELECT r.id, r.parent_run_id,
@@ -32,20 +32,17 @@ WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
 SELECT DISTINCT actor::text FROM (
   SELECT r.created_by AS actor FROM runs r JOIN lineage l ON r.id = l.id
   UNION ALL
-  SELECT v.created_by FROM workflow_versions v JOIN runs r ON v.id = r.workflow_version_id JOIN lineage l ON r.id = l.id
+  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id WHERE a.role = 'resume'
   UNION ALL
-  SELECT rn.recovery_requested_by FROM run_nodes rn JOIN lineage l ON rn.run_id = l.id
-  UNION ALL
-  SELECT rr.actor FROM run_redrivers rr JOIN lineage l ON rr.run_id = l.id
-  UNION ALL
-  SELECT unnest(t.requester_ids) FROM tool_approval_requests t
-  WHERE t.run_id = sqlc.arg(run_id) AND t.node_id = sqlc.arg(node_id)
+  (SELECT a.actor FROM run_actors a WHERE a.run_id = sqlc.arg(run_id) AND a.role = 'redrive'
+   ORDER BY a.acted_at DESC LIMIT 1)
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
 ORDER BY actor;
 
--- name: RecordRunRedriver :exec
-INSERT INTO run_redrivers (run_id, actor) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+-- name: RecordRunActor :exec
+INSERT INTO run_actors (run_id, role, actor) VALUES ($1, $2, $3)
+ON CONFLICT (run_id, role, actor) DO UPDATE SET acted_at = now();
 
 -- A step that fails or is redriven before the gate spends its decision gives
 -- the decision up, so the next execution asks again.
@@ -67,10 +64,12 @@ UPDATE tool_approval_requests SET status = 'expired'
 WHERE id = $1 AND status = 'pending' AND consumed_at IS NULL AND expires_at <= now();
 
 -- A worker acts on a decision exactly once: execute, or fail the step.
+-- A timely approval stays spendable for a while after the decision deadline,
+-- so a busy queue does not fail it.
 -- name: ConsumeToolApproval :one
 UPDATE tool_approval_requests SET consumed_at = now()
 WHERE id = $1 AND consumed_at IS NULL AND status <> 'pending'
-RETURNING expires_at > now() AS in_time;
+RETURNING status <> 'approved' OR now() <= decided_at + interval '30 minutes' AS in_time;
 
 -- name: RequeueToolApprovalNode :one
 UPDATE run_nodes

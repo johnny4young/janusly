@@ -116,9 +116,6 @@ func (s *V1Server) validateFixCore(r *http.Request, rc v1Request) opResult {
 
 	runID, err := s.engine.ReplayDeadLetterAsValidationWithPlaybook(r.Context(), rc.orgID, body.DeadLetterID, wf, rc.userID, playbookID)
 	if err != nil {
-		if result, ok := toolApprovalDropped(err); ok {
-			return result
-		}
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "DLQ entry not found", nil)

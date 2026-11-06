@@ -3581,6 +3581,7 @@ CREATE TABLE public.tool_approval_requests (
     decided_at timestamp with time zone,
     consumed_at timestamp with time zone,
     expires_at timestamp with time zone NOT NULL,
+    eligible_approvers integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT tool_approval_requests_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
     CONSTRAINT tool_approval_requests_decision_check CHECK ((status IN ('approved', 'denied')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
@@ -3588,13 +3589,17 @@ CREATE TABLE public.tool_approval_requests (
     CONSTRAINT tool_approval_requests_consumed_check CHECK (consumed_at IS NULL OR status <> 'pending')
 );
 CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests (run_id, node_id) WHERE consumed_at IS NULL;
+CREATE INDEX tool_approval_requests_run_node_idx ON public.tool_approval_requests (run_id, node_id);
 
--- Everyone who redrove a run; they may not approve the calls it re-runs.
-CREATE TABLE public.run_redrivers (
+-- People who moved a run along: a form submitter or a redriver may not
+-- approve the calls that their action caused.
+CREATE TABLE public.run_actors (
     run_id text NOT NULL,
+    role text NOT NULL,
     actor text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    PRIMARY KEY (run_id, actor)
+    acted_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (run_id, role, actor),
+    CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'resume'))
 );
 
 -- +goose StatementEnd

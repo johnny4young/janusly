@@ -32,6 +32,13 @@ func executeRegisteredTool(ctx context.Context, registry *tools.Registry, httpEx
 	if err := registry.ValidateResolvedInput(name, input); err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
+	// A listed tool runs only as its approved tool step; loops and agents
+	// cannot reach it. A validation run still skips the write as usual.
+	if in.ApprovalRequired != nil && in.ApprovalRequired(name) && name != in.ApprovedTool &&
+		!(in.DryRun && ToolCallWriteSide(registry, name, input)) {
+		return map[string]any{"ok": false, "code": "TOOL_APPROVAL_REQUIRED",
+			"error": fmt.Sprintf("Tool %s needs a person's approval and runs only as an approved tool step", name)}
+	}
 	// http.request must be semantically identical whether selected by a tool,
 	// loop, or agent node. The shared HTTP executor is the only path that
 	// applies tenant bounds, method-aware dry-run behavior, SSRF protection,

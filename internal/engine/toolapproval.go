@@ -4,7 +4,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/json"
@@ -17,10 +16,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/executors"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
 	"github.com/johnny4young/janusly/internal/tokenhmac"
 )
@@ -116,13 +117,17 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 	err = e.inCompletionTx(ctx, claim.RunID, func(q *store.Queries, _ *runEventBuffer) error {
 		live, err := q.GetLiveToolApproval(ctx, store.GetLiveToolApprovalParams{RunID: claim.RunID, NodeID: claim.NodeID})
 		if errors.Is(err, pgx.ErrNoRows) {
-			requesters, err := q.ListToolApprovalRequesters(ctx, store.ListToolApprovalRequestersParams{RunID: claim.RunID, NodeID: claim.NodeID})
+			requesters, err := q.ListToolApprovalRequesters(ctx, claim.RunID)
 			if err != nil {
 				return fmt.Errorf("list tool approval requesters: %w", err)
 			}
+			eligible, err := eligibleApprovers(ctx, q, claim.OrgID, requesters)
+			if err != nil {
+				return err
+			}
 			live, err = q.InsertToolApproval(ctx, store.InsertToolApprovalParams{
 				ID: e.newID(), OrgID: claim.OrgID, RunID: claim.RunID, NodeID: claim.NodeID, Tool: grammar.RedactString(tool, redacted),
-				ParamsJson: params, ParamsDigest: digest, RequesterIds: requesters,
+				ParamsJson: params, ParamsDigest: digest, RequesterIds: requesters, EligibleApprovers: eligible,
 			})
 			if err != nil {
 				return fmt.Errorf("insert tool approval: %w", err)
@@ -150,7 +155,7 @@ func (e *Engine) gateToolApproval(ctx context.Context, claim ClaimedNode, tool s
 		switch {
 		case live.Status == ToolApprovalDenied:
 			outcome = toolApprovalError("TOOL_APPROVAL_DENIED", "An approver denied this tool call")
-		case live.Status != ToolApprovalApproved || !inTime:
+		case live.Status != ToolApprovalApproved || !inTime.Bool:
 			outcome = toolApprovalError("TOOL_APPROVAL_EXPIRED", "No approver decided before the request expired")
 		case !hmac.Equal([]byte(live.ParamsDigest), []byte(digest)):
 			outcome = toolApprovalError("TOOL_APPROVAL_PARAMS_CHANGED", "Tool parameters differ from the approved ones")
@@ -170,15 +175,54 @@ func toolApprovalWaiting(row store.ToolApprovalRequest) executors.Waiting {
 	}
 	_ = json.Unmarshal(row.ParamsJson, &params)
 	deadline := row.ExpiresAt.UTC()
-	return executors.Waiting{
-		Reason: "Waiting for human approval",
-		Metadata: map[string]any{
-			"kind": "tool_approval", "approvalId": row.ID, "tool": row.Tool,
-			"params": params.Values, "maskedPaths": params.Masked, "paramsDigest": row.ParamsDigest, "requiredApprovals": 1,
-			"deadlineAt": deadline.Format("2006-01-02T15:04:05.000Z"),
-		},
-		WakeAt: &deadline,
+	metadata := map[string]any{
+		"kind": "tool_approval", "approvalId": row.ID, "tool": row.Tool,
+		"params": params.Values, "maskedPaths": params.Masked, "paramsDigest": row.ParamsDigest, "requiredApprovals": 1,
+		"requesterIds": row.RequesterIds, "deadlineAt": deadline.Format("2006-01-02T15:04:05.000Z"),
 	}
+	if row.EligibleApprovers.Valid {
+		metadata["eligibleApprovers"] = row.EligibleApprovers.Int32
+	}
+	return executors.Waiting{Reason: "Waiting for human approval", Metadata: metadata, WakeAt: &deadline}
+}
+
+// eligibleApprovers counts members who may decide: they can start runs and
+// did not cause this execution. An org without member rows (local headers
+// mode) reports unknown rather than nobody.
+func eligibleApprovers(ctx context.Context, q *store.Queries, orgID string, requesters []string) (pgtype.Int4, error) {
+	members, err := q.ListOrgMembers(ctx, orgID)
+	if err != nil {
+		return pgtype.Int4{}, fmt.Errorf("list members for tool approval: %w", err)
+	}
+	if len(members) == 0 {
+		return pgtype.Int4{}, nil
+	}
+	canDecide := map[string]bool{}
+	count := int32(0)
+	for _, member := range members {
+		if slices.Contains(requesters, member.UserID) {
+			continue
+		}
+		allowed, seen := canDecide[member.Role]
+		if !seen {
+			role, err := auth.ResolveRoleFromMembership(ctx, q, orgID, member.Role, auth.ModeSupabase)
+			if err != nil {
+				return pgtype.Int4{}, err
+			}
+			if role != nil && auth.Rank[role.InheritsFrom] >= auth.Rank[auth.RoleEditor] {
+				permissions, err := auth.EffectivePermissions(ctx, q, orgID, role)
+				if err != nil {
+					return pgtype.Int4{}, err
+				}
+				allowed = permissions["runs.start"]
+			}
+			canDecide[member.Role] = allowed
+		}
+		if allowed {
+			count++
+		}
+	}
+	return pgtype.Int4{Int32: count, Valid: true}, nil
 }
 
 // ToolApprovalDecision is one approver's answer to one request.
@@ -276,72 +320,18 @@ func (e *Engine) requeueToolApproval(ctx context.Context, q *store.Queries, even
 	return nil
 }
 
-// ToolApprovalDroppedError refuses a document that would run a gated tool step
-// without its gate.
-type ToolApprovalDroppedError struct{ NodeID string }
-
-func (e *ToolApprovalDroppedError) Error() string {
-	return fmt.Sprintf("Step %q requires tool approval and this workflow drops it", e.NodeID)
-}
-
-// requireToolApprovals refuses wf when it drops a gate that before, or the
-// latest saved version of either workflow id, puts on a tool step. Checking
-// before's id too means a document cannot dodge the saved gates by renaming.
-func requireToolApprovals(ctx context.Context, q *store.Queries, orgID string, before, wf *domain.Workflow) error {
-	if id := domain.DroppedToolApproval(before, wf); id != "" {
-		return &ToolApprovalDroppedError{NodeID: id}
+// toolApprovalPolicy reads the org's listed tools. Unlike ordinary settings
+// it fails closed: an unreadable or malformed policy stops the step.
+func (e *Engine) toolApprovalPolicy(ctx context.Context, orgID string) (map[string]bool, error) {
+	raw, err := store.New(e.pool).GetOrgConfigValue(ctx, store.GetOrgConfigValueParams{OrgID: orgID, Key: orgconfig.ToolApprovalPolicyKey})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("read tool approval policy: %w", err)
 	}
-	if wf == nil {
-		return nil
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil, fmt.Errorf("tool approval policy is not a string")
 	}
-	if orgID == "" {
-		orgID = "default"
-	}
-	ids := []string{wf.ID}
-	if before != nil && before.ID != wf.ID {
-		ids = append(ids, before.ID)
-	}
-	for _, workflowID := range ids {
-		if workflowID == "" {
-			continue
-		}
-		row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !bytes.Contains(row.DagJson, []byte("requireApproval"))) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("read saved workflow for tool approvals: %w", err)
-		}
-		saved, _ := domain.Parse(row.DagJson)
-		if saved == nil {
-			return fmt.Errorf("saved workflow %s cannot be parsed for tool approvals", workflowID)
-		}
-		if id := domain.DroppedToolApproval(saved, wf); id != "" {
-			return &ToolApprovalDroppedError{NodeID: id}
-		}
-	}
-	return nil
-}
-
-// requireRunToolApprovals applies requireToolApprovals against the snapshot
-// of the run wf replays or replaces; a nil wf re-runs that snapshot as is.
-// keepID refuses a replacement that would rename the run's workflow.
-func requireRunToolApprovals(ctx context.Context, q *store.Queries, orgID, runID string, wf *domain.Workflow, keepID bool) error {
-	run, err := q.GetRunExecution(ctx, runID)
-	if err != nil {
-		return fmt.Errorf("read run snapshot for tool approvals: %w", err)
-	}
-	before, _, err := workflowFromRunInput(run.InputJson)
-	if err != nil {
-		if wf == nil && errors.Is(err, ErrRunSnapshotInvalid) {
-			return nil // the claim fails this snapshot durably before any executor runs
-		}
-		return err
-	}
-	if wf == nil {
-		wf = before
-	}
-	if keepID && wf.ID != before.ID {
-		return ErrRedriveWorkflowIDChanged
-	}
-	return requireToolApprovals(ctx, q, orgID, before, wf)
+	return orgconfig.ParseToolApprovalPolicy(text)
 }

@@ -2,14 +2,15 @@
 
 ## Unreleased
 
-- A tool step can require approval (Requires approval in its inspector). The run
-  pauses right before the call, and the paused step shows the tool, its exact
-  parameters with secrets masked, and the policy. Approve runs exactly those
-  parameters once; Deny, or no decision within 30 minutes, fails the step so it
-  takes its error route. The person who started the run, whoever saved its
-  version, anyone who redrove it, and service tokens cannot decide. A retry,
-  redrive or restart asks again, and no start, rerun, replay or fix can run
-  that step without its approval once the saved workflow requires it.
+- Admins can make a tool require approval in every workflow (Require approval
+  for this tool in every workflow, in the tool inspector). Each call of that
+  tool pauses right before it runs, and the paused step shows the tool, its
+  exact parameters with secrets masked and where masked values sit, and the
+  policy. Approve runs exactly those parameters once; Deny, or no decision
+  within 30 minutes, fails the step so it takes its error route. The person who
+  started the run, anyone who submitted a form in it, and whoever last redrove
+  it cannot decide, and the card says when nobody else can. A listed tool cannot
+  run inside a loop or an agent.
 - The experiment comparison lists metrics by row, with either arm as the
   baseline. Each change says Better or Worse according to whether higher or
   lower is better for that metric. Diff only hides metrics that did not change.

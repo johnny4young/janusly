@@ -117,6 +117,8 @@ export type ToolApprovalRequest = {
   params: unknown
   paramsDigest: string
   maskedPaths: string[]
+  requesterIds: string[]
+  eligibleApprovers: number | null
   requiredApprovals: number
 }
 
@@ -135,6 +137,10 @@ export function getToolApprovalRequest(node: RunNode): ToolApprovalRequest | nul
   const paramsDigest = readNonEmptyString(waiting.paramsDigest)
   if (!approvalId || !tool || !paramsDigest || !Object.hasOwn(waiting, 'params')) return null
   const required = typeof waiting.requiredApprovals === 'number' ? waiting.requiredApprovals : 1
-  const maskedPaths = Array.isArray(waiting.maskedPaths) ? waiting.maskedPaths.filter(path => typeof path === 'string') : []
-  return { approvalId, tool, params: waiting.params, paramsDigest, maskedPaths, requiredApprovals: required }
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  const eligibleApprovers = typeof waiting.eligibleApprovers === 'number' ? waiting.eligibleApprovers : null
+  return {
+    approvalId, tool, params: waiting.params, paramsDigest, maskedPaths: strings(waiting.maskedPaths),
+    requesterIds: strings(waiting.requesterIds), eligibleApprovers, requiredApprovals: required,
+  }
 }

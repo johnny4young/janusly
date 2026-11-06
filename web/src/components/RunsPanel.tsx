@@ -181,6 +181,7 @@ export function RunsPanel({
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
   const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
   const addToast = useWorkflowStore(state => state.addToast)
+  const userId = useWorkflowStore(state => state.userId)
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   // Replay Lab source — set when the operator clicks "Open in Lab" from
   // the active-run card or a history row. The dialog mounts overlay-style
@@ -565,7 +566,9 @@ export function RunsPanel({
                   </div>
                 )}
                 {toolApproval ? (
-                  canStartRuns && (
+                  toolApproval.eligibleApprovers === 0 ? (
+                    <span className="helper-text" data-testid={`tool-approval-no-eligible-${node.nodeId}`}>{t('rightPanel.runs.toolApproval.noEligible')}</span>
+                  ) : canStartRuns && !(userId && toolApproval.requesterIds.includes(userId)) && (
                     <div className="we-run-overview__actions">
                       {(['approve', 'deny'] as const).map(decision => (
                         <Button

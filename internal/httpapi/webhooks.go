@@ -536,9 +536,6 @@ func (s *V1Server) runsRedriveCore(r *http.Request, rc v1Request) opResult {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
 	if err := s.engine.RedriveDeadLetterWithOptions(r.Context(), rc.orgID, deadLetterID, engine.RedriveOptions{Actor: rc.userID}); err != nil {
-		if refused, ok := toolApprovalDropped(err); ok {
-			return refused
-		}
 		switch {
 		case errors.Is(err, engine.ErrDeadLetterNotFound):
 			return opError(http.StatusNotFound, "dlq_not_found", "Not found", nil)

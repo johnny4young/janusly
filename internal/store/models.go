@@ -738,6 +738,13 @@ type Run struct {
 	TriggerKind                          pgtype.Text
 }
 
+type RunActor struct {
+	RunID   string
+	Role    string
+	Actor   string
+	ActedAt time.Time
+}
+
 type RunEvent struct {
 	ID        string
 	RunID     string
@@ -769,12 +776,6 @@ type RunNode struct {
 	QueuePublicationRepairAfter *time.Time
 	QueuePublicationGeneration  int32
 	EnqueuedAt                  time.Time
-}
-
-type RunRedriver struct {
-	RunID     string
-	Actor     string
-	CreatedAt time.Time
 }
 
 type RunStartIdempotency struct {
@@ -941,20 +942,21 @@ type SsoStateNonce struct {
 }
 
 type ToolApprovalRequest struct {
-	ID           string
-	OrgID        string
-	RunID        string
-	NodeID       string
-	Tool         string
-	ParamsJson   json.RawMessage
-	ParamsDigest string
-	RequesterIds []string
-	Status       string
-	DecidedBy    pgtype.Text
-	DecidedAt    *time.Time
-	ConsumedAt   *time.Time
-	ExpiresAt    time.Time
-	CreatedAt    time.Time
+	ID                string
+	OrgID             string
+	RunID             string
+	NodeID            string
+	Tool              string
+	ParamsJson        json.RawMessage
+	ParamsDigest      string
+	RequesterIds      []string
+	Status            string
+	DecidedBy         pgtype.Text
+	DecidedAt         *time.Time
+	ConsumedAt        *time.Time
+	ExpiresAt         time.Time
+	EligibleApprovers pgtype.Int4
+	CreatedAt         time.Time
 }
 
 type TriggerEvent struct {

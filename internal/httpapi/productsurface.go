@@ -767,9 +767,6 @@ func (s *V1Server) postSolutionPacksSampleRunCore(r *http.Request, rc v1Request)
 		OrgID: rc.orgID, Workflow: wf, CreatedBy: rc.userID,
 		Input: sample.Input, Source: "pack:" + pack.ID,
 	})
-	if result, ok := toolApprovalDropped(err); ok {
-		return result
-	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}

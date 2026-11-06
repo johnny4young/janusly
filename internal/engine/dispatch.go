@@ -308,15 +308,24 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			d.engine.claimConfigBool(ctx, claim, "ai.agentWriteConsent") &&
 			domain.HasApprovalAncestorIn(wf, node.ID)
 	}
-	// The authored flag, never the rendered one, decides; a validation run
-	// skips only calls whose write the executor suppresses anyway.
-	if node.Type == "tool" && domain.ToolApprovalRequired(config) {
+	// The org policy names tools by the call actually rendered, so no node id
+	// or document edit can move a listed call out of the gate.
+	var approvalRequired func(string) bool
+	approvedTool := ""
+	if node.Type == "tool" || node.Type == "loop" || node.Type == "agent" || node.Type == "multi_agent" {
+		policy, err := d.engine.toolApprovalPolicy(ctx, claim.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		approvalRequired = func(name string) bool { return policy[name] }
+	}
+	if node.Type == "tool" {
 		name, _ := renderedConfig["tool"].(string)
 		input, _ := renderedConfig["input"].(map[string]any)
 		if input == nil {
 			input = map[string]any{}
 		}
-		if !dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input) {
+		if approvalRequired(name) && (!dryRun || !executors.ToolCallWriteSide(executors.SharedToolRegistry(), name, input)) {
 			waiting, paused, err := d.engine.gateToolApproval(ctx, claim, name, input, rendered.RedactedValues)
 			if err != nil {
 				return nil, err
@@ -324,6 +333,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			if paused {
 				return waiting, nil
 			}
+			approvedTool = name
 		}
 	}
 	output, execErr := execute(ctx, executors.Input{
@@ -335,6 +345,8 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 		AgentAllowedHTTPRequests:        agentAllowedHTTPRequests,
 		AgentAllowedHTTPRequestsByIndex: agentAllowedHTTPRequestsByIndex,
 		DryRun:                          dryRun,
+		ApprovalRequired:                approvalRequired,
+		ApprovedTool:                    approvedTool,
 		Emit: func(eventType string, payload map[string]any) string {
 			eventAt := d.engine.eventNow()
 			raw := d.engine.persistence.Payload(payload, grammar.PersistOptions{

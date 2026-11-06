@@ -332,62 +332,6 @@ func TestToolResultPolicyValues(t *testing.T) {
 	}
 }
 
-func TestToolRequireApprovalIsAuthoredAndFailsClosed(t *testing.T) {
-	result := Validate(parseOK(t, `{"nodes":[
-		{"id":"templated","type":"tool","config":{"tool":"text.uppercase","requireApproval":"{{context.input.gate}}"}},
-		{"id":"gated","type":"tool","config":{"tool":"text.uppercase","requireApproval":true}}
-	],"edges":[]}`), nil)
-	if issue := requireIssue(t, result, CodeToolInvalidInput, "requireApproval must be a boolean"); issue.NodeID != "templated" {
-		t.Fatalf("only the non-boolean flag is invalid: %+v", result.Issues)
-	}
-	for value, want := range map[any]bool{true: true, false: false, "false": true, "{{x}}": true, 0: true} {
-		if got := ToolApprovalRequired(map[string]any{"requireApproval": value}); got != want {
-			t.Errorf("requireApproval %#v: got %v", value, got)
-		}
-	}
-	if ToolApprovalRequired(map[string]any{}) {
-		t.Error("an unflagged tool must not wait")
-	}
-}
-
-func TestRequireApprovalOnlyOnToolSteps(t *testing.T) {
-	result := Validate(parseOK(t, `{"nodes":[
-		{"id":"agent","type":"agent","config":{"goal":"x","requireApproval":true}},
-		{"id":"loop","type":"loop","config":{"items":"{{context.input.rows}}","mapping":{"v":"{{item}}"},"requireApproval":true}}
-	],"edges":[]}`), nil)
-	flagged := map[string]bool{}
-	for _, issue := range result.Issues {
-		if strings.Contains(issue.Message, "requireApproval is enforced only on tool steps") {
-			flagged[issue.NodeID] = true
-		}
-	}
-	if !flagged["agent"] || !flagged["loop"] {
-		t.Fatalf("an ungated step accepted requireApproval: %+v", result.Issues)
-	}
-}
-
-func TestDroppedToolApproval(t *testing.T) {
-	gated := Node{ID: "call", Type: "tool", Config: map[string]any{"requireApproval": true}}
-	required := &Workflow{Nodes: []Node{gated, {ID: "plain", Type: "tool", Config: map[string]any{}}}}
-	for name, test := range map[string]struct {
-		candidate *Workflow
-		want      string
-	}{
-		"kept":      {&Workflow{Nodes: []Node{gated}}, ""},
-		"removed":   {&Workflow{Nodes: []Node{{ID: "plain", Type: "tool"}}}, "call"},
-		"ungated":   {&Workflow{Nodes: []Node{{ID: "call", Type: "tool", Config: map[string]any{"requireApproval": false}}}}, "call"},
-		"retyped":   {&Workflow{Nodes: []Node{{ID: "call", Type: "http", Config: map[string]any{"requireApproval": true}}}}, "call"},
-		"no source": {nil, "call"},
-	} {
-		if got := DroppedToolApproval(required, test.candidate); got != test.want {
-			t.Errorf("%s: got %q, want %q", name, got, test.want)
-		}
-	}
-	if DroppedToolApproval(nil, &Workflow{}) != "" {
-		t.Error("nothing to keep must pass")
-	}
-}
-
 func TestToolAndLoopStructuralConfigValidation(t *testing.T) {
 	result := Validate(parseOK(t, `{"nodes":[
 		{"id":"tool","type":"tool","config":{}},

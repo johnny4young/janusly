@@ -8,18 +8,22 @@ package store
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const consumeToolApproval = `-- name: ConsumeToolApproval :one
 UPDATE tool_approval_requests SET consumed_at = now()
 WHERE id = $1 AND consumed_at IS NULL AND status <> 'pending'
-RETURNING expires_at > now() AS in_time
+RETURNING status <> 'approved' OR now() <= decided_at + interval '30 minutes' AS in_time
 `
 
 // A worker acts on a decision exactly once: execute, or fail the step.
-func (q *Queries) ConsumeToolApproval(ctx context.Context, id string) (bool, error) {
+// A timely approval stays spendable for a while after the decision deadline,
+// so a busy queue does not fail it.
+func (q *Queries) ConsumeToolApproval(ctx context.Context, id string) (pgtype.Bool, error) {
 	row := q.db.QueryRow(ctx, consumeToolApproval, id)
-	var in_time bool
+	var in_time pgtype.Bool
 	err := row.Scan(&in_time)
 	return in_time, err
 }
@@ -70,7 +74,7 @@ func (q *Queries) ExpireToolApproval(ctx context.Context, id string) (int64, err
 
 const getLiveToolApproval = `-- name: GetLiveToolApproval :one
 
-SELECT id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, created_at FROM tool_approval_requests
+SELECT id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, eligible_approvers, created_at FROM tool_approval_requests
 WHERE run_id = $1 AND node_id = $2 AND consumed_at IS NULL
 FOR UPDATE
 `
@@ -98,13 +102,14 @@ func (q *Queries) GetLiveToolApproval(ctx context.Context, arg GetLiveToolApprov
 		&i.DecidedAt,
 		&i.ConsumedAt,
 		&i.ExpiresAt,
+		&i.EligibleApprovers,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getToolApprovalForOrg = `-- name: GetToolApprovalForOrg :one
-SELECT id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, created_at FROM tool_approval_requests WHERE id = $1 AND org_id = $2
+SELECT id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, eligible_approvers, created_at FROM tool_approval_requests WHERE id = $1 AND org_id = $2
 FOR UPDATE
 `
 
@@ -130,6 +135,7 @@ func (q *Queries) GetToolApprovalForOrg(ctx context.Context, arg GetToolApproval
 		&i.DecidedAt,
 		&i.ConsumedAt,
 		&i.ExpiresAt,
+		&i.EligibleApprovers,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -137,20 +143,21 @@ func (q *Queries) GetToolApprovalForOrg(ctx context.Context, arg GetToolApproval
 
 const insertToolApproval = `-- name: InsertToolApproval :one
 INSERT INTO tool_approval_requests
-  (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], now() + interval '30 minutes')
-RETURNING id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, created_at
+  (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, eligible_approvers, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, now() + interval '30 minutes')
+RETURNING id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, status, decided_by, decided_at, consumed_at, expires_at, eligible_approvers, created_at
 `
 
 type InsertToolApprovalParams struct {
-	ID           string
-	OrgID        string
-	RunID        string
-	NodeID       string
-	Tool         string
-	ParamsJson   json.RawMessage
-	ParamsDigest string
-	RequesterIds []string
+	ID                string
+	OrgID             string
+	RunID             string
+	NodeID            string
+	Tool              string
+	ParamsJson        json.RawMessage
+	ParamsDigest      string
+	RequesterIds      []string
+	EligibleApprovers pgtype.Int4
 }
 
 func (q *Queries) InsertToolApproval(ctx context.Context, arg InsertToolApprovalParams) (ToolApprovalRequest, error) {
@@ -163,6 +170,7 @@ func (q *Queries) InsertToolApproval(ctx context.Context, arg InsertToolApproval
 		arg.ParamsJson,
 		arg.ParamsDigest,
 		arg.RequesterIds,
+		arg.EligibleApprovers,
 	)
 	var i ToolApprovalRequest
 	err := row.Scan(
@@ -179,6 +187,7 @@ func (q *Queries) InsertToolApproval(ctx context.Context, arg InsertToolApproval
 		&i.DecidedAt,
 		&i.ConsumedAt,
 		&i.ExpiresAt,
+		&i.EligibleApprovers,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -198,29 +207,20 @@ WITH RECURSIVE lineage (id, parent_run_id, follow, depth) AS (
 SELECT DISTINCT actor::text FROM (
   SELECT r.created_by AS actor FROM runs r JOIN lineage l ON r.id = l.id
   UNION ALL
-  SELECT v.created_by FROM workflow_versions v JOIN runs r ON v.id = r.workflow_version_id JOIN lineage l ON r.id = l.id
+  SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id WHERE a.role = 'resume'
   UNION ALL
-  SELECT rn.recovery_requested_by FROM run_nodes rn JOIN lineage l ON rn.run_id = l.id
-  UNION ALL
-  SELECT rr.actor FROM run_redrivers rr JOIN lineage l ON rr.run_id = l.id
-  UNION ALL
-  SELECT unnest(t.requester_ids) FROM tool_approval_requests t
-  WHERE t.run_id = $1 AND t.node_id = $2
+  (SELECT a.actor FROM run_actors a WHERE a.run_id = $1 AND a.role = 'redrive'
+   ORDER BY a.acted_at DESC LIMIT 1)
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
 ORDER BY actor
 `
 
-type ListToolApprovalRequestersParams struct {
-	RunID  string
-	NodeID string
-}
-
-// Everyone behind this execution: the creators of the run and its subworkflow
-// parents, the users who saved those versions, every redriver, and whoever an
-// earlier request for this step already excluded.
-func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID)
+// The people who caused this execution: the creators of the run and its
+// subworkflow parents, anyone who submitted a form along that lineage, and
+// whoever redrove this run most recently.
+func (q *Queries) ListToolApprovalRequesters(ctx context.Context, runID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listToolApprovalRequesters, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,17 +239,19 @@ func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolAp
 	return items, nil
 }
 
-const recordRunRedriver = `-- name: RecordRunRedriver :exec
-INSERT INTO run_redrivers (run_id, actor) VALUES ($1, $2) ON CONFLICT DO NOTHING
+const recordRunActor = `-- name: RecordRunActor :exec
+INSERT INTO run_actors (run_id, role, actor) VALUES ($1, $2, $3)
+ON CONFLICT (run_id, role, actor) DO UPDATE SET acted_at = now()
 `
 
-type RecordRunRedriverParams struct {
+type RecordRunActorParams struct {
 	RunID string
+	Role  string
 	Actor string
 }
 
-func (q *Queries) RecordRunRedriver(ctx context.Context, arg RecordRunRedriverParams) error {
-	_, err := q.db.Exec(ctx, recordRunRedriver, arg.RunID, arg.Actor)
+func (q *Queries) RecordRunActor(ctx context.Context, arg RecordRunActorParams) error {
+	_, err := q.db.Exec(ctx, recordRunActor, arg.RunID, arg.Role, arg.Actor)
 	return err
 }
 

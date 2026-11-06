@@ -74,63 +74,58 @@ approval topology stay directly inspectable.
 
 ## Tool approval
 
-A `tool` node with the authored `config.requireApproval` waits for a person
-right before its call. Only a literal `false` removes the gate, and the
-rendered config is never consulted. Validation rejects the flag on any other
-step type, because only tool steps enforce it today. The dispatcher checks the
-gate under the run's completion lock after rendering, so no executor runs
-first.
+The org setting `tools.approvalRequired` lists tool names whose every call
+waits for a person. It is changed only by `org.config.write` through
+`POST /org/config`, which audits the change. The tool inspector shows the rule,
+and admins can switch it there.
 
-A missing request is created with:
+The dispatcher reads the policy for `tool`, `loop`, `agent` and `multi_agent`
+steps and fails closed when it is unreadable or malformed. It matches the tool
+name rendered for the call, so the step id, a decoy step, a replayed fix or a
+rerun override cannot move a listed call out of the gate. A listed tool runs
+only as an approved `tool` step: a `for_each` loop or an agent that reaches it
+gets a `TOOL_APPROVAL_REQUIRED` refusal. MCP tool steps are not covered yet.
+Validation runs and draft tests keep suppressing writes as before, so the gate
+waits only for listed calls that would really run there, which are reads.
+
+A tool step whose call is listed pauses before the executor runs, under the
+run's completion lock. The request records:
 
 - the tool;
 - its parameters with resolved secrets and sensitive keys masked, plus the
   paths of the masked values (at most 64 KB, or the step fails);
-- an HMAC digest of the full rendered call, which also covers the id, kind,
+- an HMAC digest of the full rendered call that also covers the id, kind,
   reference and revision of a named `credential`;
-- every requester: the creators of the run and its subworkflow parents, the
-  users who saved those versions, every redriver recorded in `run_redrivers`,
-  and everyone an earlier request for the step excluded.
+- the requesters, who are the people who caused this execution: the creators
+  of the run and its subworkflow parents, anyone who submitted a form or
+  resumed with input along that lineage (`run_actors`, role `resume`), and the
+  person who most recently redrove this run (role `redrive`);
+- how many members can approve: members who can start runs and are not
+  requesters. When none can, the card says so.
 
-The node then waits with `kind: "tool_approval"` and a 30-minute
-`tool_approval_timeout` wake-up.
+The node then waits with `kind: "tool_approval"` and a 30-minute decision
+deadline (`tool_approval_timeout` wake-up).
 
 `POST /runs/tool-approvals/decide` takes the approval id, the digest the person
 reviewed and `approve` or `deny`. It:
 
 - needs `runs.start` and refuses service tokens;
 - refuses the requesters, also with a database check;
-- refuses a stale digest or an expired request;
+- refuses a stale digest or a request past its decision deadline;
 - serializes concurrent approvers on the run lock, so the first decision wins;
   repeating your own decision is a no-op.
 
 A decision requeues the step, and the next claim spends it exactly once. An
-approval runs only before its deadline and only when the freshly rendered call
-has the approved digest. A deny, an expiry or a changed digest fails the step
-with a `ToolApprovalError` that never retries. A retry, redrive or replay of the
-step, or a restart that reaches the gate again, asks again. A retry or redrive
-also gives up an approval nobody spent, and every redrive path records its
-operator: the HTTP user, the MCP principal, or the user who started a replay
-campaign. The generic resume route cannot complete a tool approval. Validation
-runs skip the gate only for write-side calls, which they suppress anyway.
+approval may be spent up to 30 minutes after it was given, even past the
+decision deadline, so a busy queue does not fail a timely approval. It runs only
+when the freshly rendered call has the approved digest. A deny, an expiry or a
+changed digest fails the step with a `ToolApprovalError` that never retries.
 
-Nothing may run a gated step without its gate. A start, rerun, Replay Lab run
-or fork, fix validation, sample run, or any redrive (with or without a fix, and
-including the run-panel redrive) is refused with `tool_approval_dropped` in
-either case:
-
-- its document removes, retypes or ungates a step that the source run's
-  snapshot gates;
-- its document removes, retypes or ungates a step that the latest saved
-  version of the run's own workflow id, or of the document's id, gates.
-
-A fix that would rename the run's workflow is refused with
-`dlq_workflow_id_changed`.
-
-The refusal also covers explicit older versions, active rollouts and
-subworkflow pins. An AI config patch that changes the flag is not offered. A
-brand-new workflow id that was never saved is not covered unless
-`runs.requireSavedWorkflow` is on.
+Any later claim of the step asks again: a retry, a redrive, a replay, or a
+restart that reaches the gate. A retry or redrive also gives up an approval
+nobody spent. Every redrive path records its operator: the HTTP user, the MCP
+principal, or the user who started a replay campaign. The generic resume route
+cannot complete a tool approval.
 
 ## Retry policy
 

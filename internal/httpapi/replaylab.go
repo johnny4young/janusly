@@ -138,9 +138,6 @@ func (s *V1Server) replayLabCore(r *http.Request, rc v1Request) opResult {
 	}
 
 	replayRunID, err := s.engine.ReplayRunAsValidation(r.Context(), rc.orgID, body.SourceRunID, wf, triggerInput, rc.userID, hasPatch)
-	if result, ok := toolApprovalDropped(err); ok {
-		return result
-	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
@@ -188,9 +185,6 @@ func (s *V1Server) replayLabForkCore(r *http.Request, rc v1Request) opResult {
 		return *failed
 	}
 	result, err := s.engine.ReplayRunAsValidationFork(r.Context(), rc.orgID, body.SourceRunID, wf, body.ForkNodeID, override, triggerInput, rc.userID)
-	if result, ok := toolApprovalDropped(err); ok {
-		return result
-	}
 	if err != nil {
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}

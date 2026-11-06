@@ -1113,6 +1113,19 @@ CREATE TABLE public.routing_stats (
 
 
 --
+-- Name: run_actors; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_actors (
+    run_id text NOT NULL,
+    role text NOT NULL,
+    actor text NOT NULL,
+    acted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT run_actors_role_check CHECK ((role = ANY (ARRAY['redrive'::text, 'resume'::text])))
+);
+
+
+--
 -- Name: run_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1152,17 +1165,6 @@ CREATE TABLE public.run_nodes (
     queue_publication_repair_after timestamp with time zone,
     queue_publication_generation integer DEFAULT 0 NOT NULL,
     enqueued_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL
-);
-
-
---
--- Name: run_redrivers; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.run_redrivers (
-    run_id text NOT NULL,
-    actor text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1453,6 +1455,7 @@ CREATE TABLE public.tool_approval_requests (
     decided_at timestamp with time zone,
     consumed_at timestamp with time zone,
     expires_at timestamp with time zone NOT NULL,
+    eligible_approvers integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT tool_approval_requests_consumed_check CHECK (((consumed_at IS NULL) OR (status <> 'pending'::text))),
     CONSTRAINT tool_approval_requests_decision_check CHECK (((status = ANY (ARRAY['approved'::text, 'denied'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
@@ -2142,6 +2145,14 @@ ALTER TABLE ONLY public.routing_stats
 
 
 --
+-- Name: run_actors run_actors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_actors
+    ADD CONSTRAINT run_actors_pkey PRIMARY KEY (run_id, role, actor);
+
+
+--
 -- Name: run_events run_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2155,14 +2166,6 @@ ALTER TABLE ONLY public.run_events
 
 ALTER TABLE ONLY public.run_nodes
     ADD CONSTRAINT run_nodes_pkey PRIMARY KEY (id);
-
-
---
--- Name: run_redrivers run_redrivers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.run_redrivers
-    ADD CONSTRAINT run_redrivers_pkey PRIMARY KEY (run_id, actor);
 
 
 --
@@ -3493,6 +3496,13 @@ CREATE UNIQUE INDEX sso_state_nonces_org_nonce_idx ON public.sso_state_nonces US
 --
 
 CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests USING btree (run_id, node_id) WHERE (consumed_at IS NULL);
+
+
+--
+-- Name: tool_approval_requests_run_node_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_approval_requests_run_node_idx ON public.tool_approval_requests USING btree (run_id, node_id);
 
 
 --
