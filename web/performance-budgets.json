@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 619.9,
+  "artifactGzipKiB": 620.2,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 574.2
+    "maxGzipKiB": 574.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -98,13 +98,13 @@
     "BudgetSettingsPanel.js": 3.25,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 41.49,
-    "catalog-es.js": 46.19,
+    "catalog-en.js": 41.55,
+    "catalog-es.js": 46.23,
     "CommandPalette.js": 3,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
-    "ExperimentsPanel.css": 1.03,
-    "ExperimentsPanel.js": 5.03,
+    "ExperimentsPanel.css": 1.05,
+    "ExperimentsPanel.js": 5.26,
     "ExternalRuntimePanel.css": 0.89,
     "ExternalRuntimePanel.js": 2.54,
     "FailureClustersCard.css": 0.61,
