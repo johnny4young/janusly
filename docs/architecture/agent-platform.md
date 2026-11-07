@@ -437,6 +437,8 @@ the gate.
 
 ## Owner decisions
 
+The owner accepted each recommendation below on 2026-11-07.
+
 **D1. Workflow ids per organization.** `workflows.id` is a global primary key.
 Saving an id another organization uses answers "workflow id is already
 taken", which confirms that the id exists elsewhere, and the public PagerDuty
@@ -444,34 +446,34 @@ callback and schedule, subworkflow and webhook paths find the organization
 from the id. Options: (a) key workflows by organization and id and move public
 callbacks to opaque per-trigger tokens, which changes every registered
 callback URL; (b) keep global ids but let the server assign them for new
-workflows, with a per-organization slug for people. *Recommendation: (b).*
+workflows, with a per-organization slug for people. *Decided: (b).*
 Agents never choose a global id, so the agent surface has no oracle, and no
 public URL changes. Revisit (a) only if people need to choose ids.
 
 **D2. Loopback by default with development headers.** When development
 headers are active (no identity provider, not production) and
 `JANUSLY_HTTP_HOST` is unset, the API listens on every interface, so anyone on
-the network can act as any user. *Recommendation:* in that mode default to
+the network can act as any user. *Decided:* in that mode default to
 `127.0.0.1`; Compose and E2E set `JANUSLY_HTTP_HOST=0.0.0.0` explicitly.
 `/mcp` refuses development headers in every mode.
 
 **D3. `CI gate` as a required check on `main`.** The workflow already computes
 a stable `CI gate` result; making it required is a repository ruleset setting
-only the owner can change. *Recommendation:* require it, with no bypass for
+only the owner can change. *Decided:* require it, with no bypass for
 automation, before agents open pull requests here.
 
 **D4. Who manages agent clients, and who approves an agent's publication.**
-*Recommendation:* editors and admins may create clients within their own
+*Decided:* editors and admins may create clients within their own
 permissions; only the creator rotates, and admins may revoke any. The creator may approve their own
 client's publish request by default, because the person is the accountable
 approver and the agent the requester; an organization setting requires a
 second person.
 
-**D5. Remote MCP in production.** *Recommendation:* off until enabled with
+**D5. Remote MCP in production.** *Decided:* off until enabled with
 `JANUSLY_MCP_HTTP_ENABLED=true` and an `https` `JANUSLY_WEB_BASE_URL`, so upgrading never
 opens a new surface by itself.
 
-**D6. What the hooks bridge records.** *Recommendation:* tool names, status,
+**D6. What the hooks bridge records.** *Decided:* tool names, status,
 timing and agent structure by default; inputs, commands and prompts only when
 a client enables `captureContent`, because they can carry customer data and
 credentials that shape-based scrubbing misses.
