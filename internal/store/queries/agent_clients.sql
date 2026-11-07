@@ -68,7 +68,7 @@ LIMIT sqlc.arg(page_limit);
 -- name: ListAgentScopedRuns :many
 SELECT r.id, r.status, r.workflow_id, coalesce(w.name, '')::text AS workflow_name, r.created_at
 FROM runs r
-LEFT JOIN workflows w ON w.id = r.workflow_id
+LEFT JOIN workflows w ON w.id = r.workflow_id AND w.org_id = r.org_id
 WHERE r.org_id = sqlc.arg(org_id)
   AND r.workflow_id = ANY(sqlc.arg(workflow_ids)::text[])
   AND (r.created_at, r.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)

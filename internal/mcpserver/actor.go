@@ -52,26 +52,17 @@ func (d Deps) agent() *agentclient.Principal {
 	return d.actor.principal
 }
 
-func (d Deps) onBehalfOf() string {
-	if principal := d.agent(); principal != nil {
-		return principal.CreatedBy
-	}
-	return ""
-}
-
 func (d Deps) scoped() bool {
 	return d.agent() != nil && d.agent().Scoped()
 }
 
-// scopeSet is the explicit workflow ids plus every workflow carrying a scope
-// tag, resolved once per call.
+// scopeSet holds the organization's workflows the client lists or that carry
+// one of its tags, resolved once per call. Listed ids that do not exist in
+// the organization are left out, so they cannot point anywhere else.
 func (d Deps) scopeSet(ctx context.Context) (map[string]bool, error) {
 	d.actor.once.Do(func() {
 		principal := d.actor.principal
 		set := map[string]bool{}
-		for _, id := range principal.ScopeWorkflowIDs {
-			set[id] = true
-		}
 		ids, err := store.New(d.Pool).ResolveAgentScopeWorkflowIDs(ctx, store.ResolveAgentScopeWorkflowIDsParams{
 			OrgID: principal.OrgID, WorkflowIds: principal.ScopeWorkflowIDs, Tags: principal.ScopeTags,
 		})

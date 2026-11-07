@@ -208,9 +208,22 @@ func TestAgentTokenIsRefusedBeforeEveryProvider(t *testing.T) {
 		t.Fatal("agent token reached the identity provider")
 		return "", "", false
 	}
-	if p := principalFor(t, rv, map[string]string{
-		"Authorization": "Bearer " + agentToken, "x-org-id": "org-a", "x-user-id": "u1",
-	}); p != nil {
-		t.Fatalf("agent token authenticated a general route: %+v", p)
+	for _, header := range []string{"Bearer " + agentToken, "Bearer  " + agentToken, "bearer " + agentToken, "Bearer \t" + agentToken} {
+		if p := principalFor(t, rv, map[string]string{
+			"Authorization": header, "x-org-id": "org-a", "x-user-id": "u1",
+		}); p != nil {
+			t.Fatalf("agent token authenticated a general route via %q: %+v", header, p)
+		}
+	}
+}
+
+func TestOnlyPersonModesDecide(t *testing.T) {
+	for mode, person := range map[Mode]bool{
+		ModeJanuslySession: true, ModeSupabase: true, ModeDevHeaders: true,
+		ModeServiceToken: false, ModeAgent: false, "": false,
+	} {
+		if IsPersonMode(mode) != person {
+			t.Fatalf("IsPersonMode(%q) = %v", mode, !person)
+		}
 	}
 }

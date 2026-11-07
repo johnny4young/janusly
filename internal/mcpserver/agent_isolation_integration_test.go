@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -249,6 +250,34 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 	}
 }
 
+// A workflow id another organization owns, even listed in a scope, stays
+// unreachable, and a run that names it never shows that organization's name.
+func TestAgentClientScopeIgnoresForeignWorkflowIDs(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	home := seedAgentTenant(t, pool, eng, "scopehome")
+	foreign := seedAgentTenant(t, pool, eng, "scopeforeign")
+	planted := "run-" + uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json)
+		VALUES ($1, $2, 'adhoc', $3, 'succeeded', '{}')`, planted, home.org, foreign.workflowID); err != nil {
+		t.Fatal(err)
+	}
+	issued := issueAgentClient(t, pool, home, agentclient.IssueInput{ScopeWorkflowIDs: []string{foreign.workflowID, home.workflowID}})
+	session := agentSession(t, pool, eng, issued.Token)
+	res, _ := callTool(t, session, "workflows.get", map[string]any{"workflowId": foreign.workflowID})
+	missing, _ := callTool(t, session, "workflows.get", map[string]any{"workflowId": "missing-" + uuid.NewString()})
+	if !res.IsError || resultText(res) != resultText(missing) {
+		t.Fatalf("foreign id in scope answered differently: %q", resultText(res))
+	}
+	_, runs := callTool(t, session, "runs.list", map[string]any{"limit": 100})
+	raw, _ := json.Marshal(runs)
+	if strings.Contains(string(raw), planted) || strings.Contains(string(raw), "scopeforeign") {
+		t.Fatalf("runs.list exposed a foreign workflow: %s", raw)
+	}
+	if !strings.Contains(string(raw), home.runID) {
+		t.Fatalf("runs.list lost the in-scope run: %s", raw)
+	}
+}
+
 func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 	pool, eng := agentTestPool(t)
 	tenant := seedAgentTenant(t, pool, eng, "lifecycle")
@@ -357,14 +386,21 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 	runID, _ := payload["runId"].(string)
 	actorID := "agent:" + issued.Client.ID
 	var createdBy string
-	var agentActors int
-	if err := pool.QueryRow(t.Context(), `SELECT created_by,
-		(SELECT count(*) FROM run_actors WHERE run_id = r.id AND role = 'agent' AND actor = $2)
-		FROM runs r WHERE id = $1`, runID, tenant.creator).Scan(&createdBy, &agentActors); err != nil {
+	if err := pool.QueryRow(t.Context(), `SELECT created_by FROM runs WHERE id = $1`, runID).Scan(&createdBy); err != nil || createdBy != actorID {
+		t.Fatalf("run attribution: created_by=%q %v", createdBy, err)
+	}
+	// The creator may not approve writes their agent caused, by start or by redrive.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO run_actors (run_id, node_id, role, actor) VALUES ($1, 'only', 'redrive', $2)`,
+		tenant.otherRunID, actorID); err != nil {
 		t.Fatal(err)
 	}
-	if createdBy != actorID || agentActors != 1 {
-		t.Fatalf("run attribution: created_by=%q agent actors=%d", createdBy, agentActors)
+	for _, id := range []string{runID, tenant.otherRunID} {
+		requesters, err := store.New(pool).ListToolApprovalRequesters(t.Context(), store.ListToolApprovalRequestersParams{
+			RunID: id, NodeID: "only", MaxDepth: 10,
+		})
+		if err != nil || !slices.Contains(requesters, tenant.creator) || !slices.Contains(requesters, actorID) {
+			t.Fatalf("requesters of %s = %v (%v); want the agent and its creator", id, requesters, err)
+		}
 	}
 	var invoked int
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs
@@ -379,6 +415,32 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 		WHERE org_id = $1 AND user_id = $2 AND action = 'run.started' AND target_id = $3
 		  AND metadata->'actor'->>'mode' = 'agent'`, tenant.org, actorID, runID).Scan(&startAudit); err != nil || startAudit != 1 {
 		t.Fatalf("run.started not attributed to the agent: %d %v", startAudit, err)
+	}
+
+	// Idempotency keys are per client: a key someone else used never replays their run.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO run_start_idempotency (org_id, idempotency_key, run_id) VALUES ($1, 'shared-key', $2)`,
+		tenant.org, tenant.otherRunID); err != nil {
+		t.Fatal(err)
+	}
+	first, firstPayload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "idempotencyKey": "shared-key"})
+	again, againPayload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "idempotencyKey": "shared-key"})
+	if first.IsError || again.IsError || firstPayload["runId"] == tenant.otherRunID || firstPayload["replayed"] == true ||
+		againPayload["runId"] != firstPayload["runId"] || againPayload["replayed"] != true {
+		t.Fatalf("idempotency across actors: first %v, again %v", firstPayload, againPayload)
+	}
+
+	// The catalog version does not move when an out-of-scope workflow changes.
+	_, before := callTool(t, session, "catalog.describe", map[string]any{})
+	if _, err := eng.SaveWorkflowVersion(t.Context(), engine.SaveWorkflowVersionInput{
+		OrgID: tenant.org, UserID: tenant.creator, NewID: uuid.NewString,
+		Workflow: &domain.Workflow{ID: tenant.org + "-later", Name: "later", DSLVersion: "1.0",
+			Nodes: []domain.Node{{ID: "only", Type: "noop", Config: map[string]any{}}}, Edges: []domain.Edge{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, after := callTool(t, session, "catalog.describe", map[string]any{})
+	if before["catalogVersion"] == nil || before["catalogVersion"] != after["catalogVersion"] {
+		t.Fatalf("catalogVersion reveals out-of-scope changes: %v -> %v", before["catalogVersion"], after["catalogVersion"])
 	}
 
 	limited := issueAgentClient(t, pool, tenant, agentclient.IssueInput{RateLimitPerMinute: 2})

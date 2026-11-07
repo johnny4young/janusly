@@ -281,9 +281,15 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	if (workflowID == "") == (document == nil) {
 		return expected("pass exactly one of workflowId or workflow; workflows.list shows saved ids")
 	}
-	if d.agent() != nil && document != nil {
-		// An unsaved document would reach production without publication.
-		return expected("an agent client starts saved workflows by workflowId; it cannot run an unsaved document")
+	if principal := d.agent(); principal != nil {
+		if document != nil {
+			// An unsaved document would reach production without publication.
+			return expected("an agent client starts saved workflows by workflowId; it cannot run an unsaved document")
+		}
+		if idempotencyKey != "" {
+			// A per-client key space: a replay never returns someone else's run.
+			idempotencyKey = principal.ActorID() + ":" + idempotencyKey
+		}
 	}
 	if workflowID != "" {
 		if requestedVersionID != "" {
@@ -327,7 +333,7 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	started, err := (runstart.Service{
 		Engine: d.Engine, Pool: d.Pool, NewID: d.NewID,
 	}).Start(ctx, runstart.Request{
-		OrgID: d.OrgID, CreatedBy: d.UserID, ServicePrincipal: d.UserID, OnBehalfOf: d.onBehalfOf(), Workflow: wf,
+		OrgID: d.OrgID, CreatedBy: d.UserID, ServicePrincipal: d.UserID, Workflow: wf,
 		RequestedVersionID: requestedVersionID, Input: startInput, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {

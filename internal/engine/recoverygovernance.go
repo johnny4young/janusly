@@ -278,7 +278,7 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 	// apply, but must never create or renew the human authority they depend on.
 	// Dev headers remain available for local provider-free qualification; they
 	// are refused entirely in production by the authentication boundary.
-	if input.Auth.Mode == auth.ModeServiceToken {
+	if !auth.IsPersonMode(input.Auth.Mode) {
 		return store.RecoveryApprovalGrant{}, ErrRecoveryHumanApprovalRequired
 	}
 	now := e.now().UTC().Truncate(time.Millisecond)

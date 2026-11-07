@@ -113,8 +113,6 @@ type StartInput struct {
 	// ServicePrincipal names the service token that started the run; such a
 	// run has no person behind it for tool-approval purposes.
 	ServicePrincipal string
-	// OnBehalfOf is the person behind an agent client start.
-	OnBehalfOf string
 	// ReplayMode marks a validation replay ("validation"): write-side
 	// skips apply and the ai node never dials the SDK. Empty = production.
 	ReplayMode string
@@ -313,9 +311,6 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		return "", fmt.Errorf("insert run: %w", err)
 	}
 	if err := recordRunActor(ctx, q, runID, "", "service", in.ServicePrincipal); err != nil {
-		return "", err
-	}
-	if err := recordRunActor(ctx, q, runID, "", "agent", in.OnBehalfOf); err != nil {
 		return "", err
 	}
 

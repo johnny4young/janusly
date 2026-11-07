@@ -254,7 +254,7 @@ func (d Deps) tenantCatalog(ctx context.Context) (authoring.Catalog, error) {
 		}
 	}
 	catalog.Subworkflows = visible
-	return catalog, nil
+	return authoring.Redigest(catalog), nil
 }
 
 func actionableIssues(issues []domain.Issue) []map[string]any {

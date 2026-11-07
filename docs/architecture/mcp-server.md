@@ -67,18 +67,22 @@ Each call then runs with:
   `workflows.save` and `workflows.propose` are in none of them;
 - the ceiling's permissions intersected with the creator's current ones, so a
   demoted creator's client loses the matching tools;
-- for a scoped client, only workflows it lists or that carry one of its tags,
-  and their runs, dead letters and recovery cases. Lists filter in SQL, and
+- for a scoped client, only the organization's workflows it lists or that
+  carry one of its tags, and their runs, dead letters and recovery cases. Lists filter in SQL, and
   anything outside the scope answers with the same text as a missing id.
   `operations.brief` is organization-wide, so a scoped client is refused it;
-  `catalog.describe` lists only its subworkflows;
+  `catalog.describe` lists only its subworkflows, with a catalog version
+  computed over what it sees;
+- `runs.start` by `workflowId` only, never a document, and an
+  `idempotencyKey` that is the client's own;
 - the per-client limit, before the per-organization tool limits.
 
 Every call writes one `mcp.tool.invoked` row as `agent:<clientId>` with the
 client, the creator (`onBehalfOf`) and the transport; rows written by the work
-it causes carry the same actor with mode `agent`. A run an agent starts records
-the creator as an `agent` run actor, so they count as a requester of its tool
-approvals. `agent.info` describes the client, its tools, its effective and
+it causes carry the same actor with mode `agent`. Wherever an agent caused a
+call (a start, a redrive, a fix), its creator counts as a requester of the
+call's tool approval, so the person accountable for an agent cannot approve its
+writes alone. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
 
 ## Catalog

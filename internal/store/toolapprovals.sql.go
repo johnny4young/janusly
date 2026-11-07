@@ -222,19 +222,20 @@ WITH RECURSIVE lineage (id, parent_run_id, follow, via_subworkflow, own, depth) 
          p.parent_node_id IS NOT NULL AND coalesce(p.parent_link_kind, 'subworkflow') = 'subworkflow',
          l.own AND l.via_subworkflow, l.depth + 1
   FROM runs p JOIN lineage l ON p.id = l.parent_run_id
-  WHERE l.follow AND l.depth < $3::int
+  WHERE l.follow AND l.depth < $2::int
 ),
 tree (id, depth) AS (
   SELECT l.id, 0 FROM lineage l
   UNION
   SELECT c.id, t.depth + 1 FROM runs c JOIN tree t ON c.parent_run_id = t.id
   WHERE c.parent_node_id IS NOT NULL AND coalesce(c.parent_link_kind, 'subworkflow') = 'subworkflow'
-    AND t.depth < $3::int
+    AND t.depth < $2::int
 ),
 started AS (
   SELECT r.id, r.created_by, r.trigger_kind, r.workflow_version_id, l.own FROM runs r JOIN lineage l ON r.id = l.id
-)
-SELECT DISTINCT actor::text FROM (
+),
+found AS (
+SELECT DISTINCT actor::text AS actor FROM (
   SELECT created_by AS actor FROM started
   UNION ALL
   SELECT a.actor FROM run_actors a JOIN tree t ON a.run_id = t.id WHERE a.role <> 'redrive'
@@ -242,7 +243,7 @@ SELECT DISTINCT actor::text FROM (
   SELECT a.actor FROM run_actors a JOIN lineage l ON a.run_id = l.id WHERE a.role = 'redrive'
   UNION ALL
   SELECT unnest(t.requester_ids) FROM tool_approval_requests t
-  WHERE t.run_id = $1 AND t.node_id = $2
+  WHERE t.run_id = $1 AND t.node_id = $3
   UNION ALL
   SELECT v.created_by FROM workflow_versions v JOIN started s ON v.id = s.workflow_version_id
   WHERE NOT EXISTS (
@@ -252,13 +253,19 @@ SELECT DISTINCT actor::text FROM (
   )
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
+)
+SELECT f.actor FROM found f
+UNION
+SELECT ac.created_by FROM found f
+JOIN agent_clients ac ON f.actor = 'agent:' || ac.id
+  AND ac.org_id = (SELECT r.org_id FROM runs r WHERE r.id = $1)
 ORDER BY actor
 `
 
 type ListToolApprovalRequestersParams struct {
 	RunID    string
-	NodeID   string
 	MaxDepth int32
+	NodeID   string
 }
 
 // The people who caused this call. Run-tree roles count anywhere in the tree
@@ -269,10 +276,10 @@ type ListToolApprovalRequestersParams struct {
 // it, whose steps can feed this call, but not in sibling or child runs. Plus
 // the creators up the lineage, everyone an earlier request for the step
 // excluded, and, when no person started this run or a subworkflow parent (a
-// replay or rerun source does not count), whoever saved its versions. Walks
-// stop at max_depth.
+// replay or rerun source does not count), whoever saved its versions. An
+// agent client counts with the member it acts for. Walks stop at max_depth.
 func (q *Queries) ListToolApprovalRequesters(ctx context.Context, arg ListToolApprovalRequestersParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.NodeID, arg.MaxDepth)
+	rows, err := q.db.Query(ctx, listToolApprovalRequesters, arg.RunID, arg.MaxDepth, arg.NodeID)
 	if err != nil {
 		return nil, err
 	}

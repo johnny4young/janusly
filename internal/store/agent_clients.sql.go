@@ -301,7 +301,7 @@ func (q *Queries) ListAgentScopedDeadLetters(ctx context.Context, arg ListAgentS
 const listAgentScopedRuns = `-- name: ListAgentScopedRuns :many
 SELECT r.id, r.status, r.workflow_id, coalesce(w.name, '')::text AS workflow_name, r.created_at
 FROM runs r
-LEFT JOIN workflows w ON w.id = r.workflow_id
+LEFT JOIN workflows w ON w.id = r.workflow_id AND w.org_id = r.org_id
 WHERE r.org_id = $1
   AND r.workflow_id = ANY($2::text[])
   AND (r.created_at, r.id) < ($3::timestamptz, $4::text)

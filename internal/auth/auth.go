@@ -204,6 +204,13 @@ func NewResolver(pool *pgxpool.Pool, cfg Config) *Resolver {
 // Tests that exercise extraction in isolation may leave it nil.
 func (rv *Resolver) SetPolicyEvaluator(evaluate PolicyEvaluator) { rv.evaluatePolicy = evaluate }
 
+// IsPersonMode reports a mode that proves a person is acting. Human decisions
+// (approvals, grants) accept only these, so a new automation mode stays out
+// by default.
+func IsPersonMode(mode Mode) bool {
+	return mode == ModeJanuslySession || mode == ModeSupabase || mode == ModeDevHeaders
+}
+
 // AgentTokenPrefix starts every agent client token.
 const AgentTokenPrefix = "jly_agent_"
 
@@ -244,7 +251,7 @@ func (rv *Resolver) extract(ctx context.Context, r *http.Request) (*principal, e
 	}
 	// Agent tokens authenticate only the MCP surface. Refusing them here
 	// also keeps them from being forwarded to the identity provider.
-	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer "+AgentTokenPrefix) {
+	if strings.Contains(r.Header.Get("Authorization"), AgentTokenPrefix) {
 		return nil, nil
 	}
 	// 2. Supabase JWT.
