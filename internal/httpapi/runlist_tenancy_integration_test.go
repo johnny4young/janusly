@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -30,33 +31,33 @@ func TestRunListNeverShowsAnotherOrganizationsWorkflowName(t *testing.T) {
 	runID := started.body["data"].(map[string]any)["runId"].(string)
 
 	for _, path := range []string{"/v1/runs?limit=100", "/runs?limit=100"} {
-		res := h.call("GET", path, nil, "")
-		if res.status != 200 {
-			t.Fatalf("%s: %d %v", path, res.status, res.body)
+		res, raw := h.rawGet(t, path)
+		if res.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", path, res.StatusCode, raw)
 		}
-		var rows []any
-		if data, ok := res.body["data"].([]any); ok {
-			rows = data
-		} else if items, ok := res.body["items"].([]any); ok {
-			rows = items
+		var rows []map[string]any
+		var envelope struct {
+			Data []map[string]any `json:"data"`
 		}
-		found := false
-		for _, raw := range rows {
-			row := raw.(map[string]any)
-			if row["id"] != runID {
-				continue
-			}
-			found = true
-			name := fmt.Sprint(row["workflowName"])
-			if strings.Contains(name, "Foreign Payroll") {
-				t.Fatalf("%s leaked another organization's workflow name: %q", path, name)
-			}
-			if name != "Mine "+suffix {
-				t.Fatalf("%s: workflowName = %q, want the run's own document name", path, name)
+		if err := json.Unmarshal(raw, &envelope); err == nil && envelope.Data != nil {
+			rows = envelope.Data
+		} else if err := json.Unmarshal(raw, &rows); err != nil {
+			t.Fatalf("%s: unexpected body %s", path, raw)
+		}
+		var name *string
+		for _, row := range rows {
+			if row["id"] == runID {
+				value := fmt.Sprint(row["workflowName"])
+				name = &value
 			}
 		}
-		if !found && path == "/v1/runs?limit=100" {
-			t.Fatalf("%s lost the run: %v", path, res.body)
+		switch {
+		case name == nil:
+			t.Fatalf("%s lost the run: %s", path, raw)
+		case strings.Contains(*name, "Foreign Payroll"):
+			t.Fatalf("%s leaked another organization's workflow name: %q", path, *name)
+		case *name != "Mine "+suffix:
+			t.Fatalf("%s: workflowName = %q, want the run's own document name", path, *name)
 		}
 	}
 }
