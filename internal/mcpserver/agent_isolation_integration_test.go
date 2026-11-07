@@ -402,6 +402,13 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 		t.Fatalf("an agent ran an unsaved document in production: %q", resultText(res))
 	}
 
+	pinned, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": tenant.versionID})
+	if pinned.IsError {
+		t.Fatalf("starting by workflowId with its latest version refused: %q", resultText(pinned))
+	}
+	if stale, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": "not-the-latest"}); !stale.IsError {
+		t.Fatal("a version that is not the latest ran by workflowId")
+	}
 	started, payload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID})
 	if started.IsError {
 		t.Fatalf("in-scope start refused: %q", resultText(started))

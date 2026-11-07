@@ -245,6 +245,34 @@ Reference numbers (p95 / p99 ms, 20-minute measured phases):
 | `7420403a` (before the 2026-09 program) | 57 / 169 | 25 / 70 | 123 / 280 |
 | `cd17e77b` (after) | 30 / 48 | 16 / 21 | 128 / 219 |
 
+## Agent cycle
+
+`scripts/agent-cycle/cycle.py` measures how far a real agent gets alone: ten
+English and Spanish tasks (create, gate, publish and run; diagnose; a missing
+credential; change a published workflow; schedule; pause and resume; cancel;
+redrive; CSV), each from a blank Codex or Claude Code session connected only
+to `/mcp`. The script creates one organization and agent client per task,
+seeds what the task needs, and scores each task from the database and the
+agent's final answer. It plays the only person in two ways: it approves
+publish requests whose draft uses only pure steps and a schedule (anything
+that reaches out is rejected, because the redrive simulator needs
+`ALLOW_PRIVATE_HTTP_TARGETS=true`), and it approves the Janusly tool calls a
+client asks a person about, such as the destructive ones, and no other
+server's.
+
+```bash
+JANUSLY_MCP_HTTP_ENABLED=true JANUSLY_MCP_WRITES_ENABLED=true ALLOW_PRIVATE_HTTP_TARGETS=true make dev
+CYCLE_CLIENT=codex CYCLE_PSQL="psql $DB_URL" python3 scripts/agent-cycle/cycle.py
+```
+
+A Codex session gets only `PATH`, `HOME`, `LANG`, `TERM` and its agent token
+(`CYCLE_PASS_ENV` adds more), no plugins or computer use, every MCP server
+from `codex mcp list` switched off, and neutral instructions; the script stops
+if it cannot list those servers. A Claude Code session uses
+`--strict-mcp-config`, but the operator's own settings and hooks still apply.
+`CYCLE_BASE_URL`, `CYCLE_SIM_PORT`, `CYCLE_OUT` and `CYCLE_CODEX_ARGS` adjust
+the rest. Each run spends real model usage; it is not part of CI.
+
 ## Bundle budgets
 
 `web/performance-budgets.json` is a ratchet: caps on the total artifact, the

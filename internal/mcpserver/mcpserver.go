@@ -264,7 +264,7 @@ func (d Deps) saveWorkflow(ctx context.Context, document map[string]any) (*mcp.C
 type startArgs struct {
 	WorkflowID        string         `json:"workflowId,omitempty" jsonschema:"saved workflow to run at its latest version; pass this or workflow"`
 	Workflow          map[string]any `json:"workflow,omitempty" jsonschema:"the workflow document to execute; pass this or workflowId"`
-	WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id that must exactly match the workflow document"`
+	WorkflowVersionID string         `json:"workflowVersionId,omitempty" jsonschema:"optional immutable version id: with workflow it must match the document; with workflowId it must be the latest version"`
 	Input             map[string]any `json:"input,omitempty" jsonschema:"optional run input payload"`
 	IdempotencyKey    string         `json:"idempotencyKey,omitempty" jsonschema:"retrying with the same key returns the first run instead of starting another"`
 }
@@ -295,15 +295,17 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		}
 	}
 	if workflowID != "" {
-		if requestedVersionID != "" {
-			return expected("workflowVersionId only applies to a workflow document; workflowId runs the latest version")
-		}
 		if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
 			return hiddenResult(err, "workflow not found or deactivated; workflows.list shows active workflows")
 		}
 		latest, result := d.latestWorkflowDocument(ctx, workflowID)
 		if result != nil {
 			return result, nil, nil
+		}
+		// Agents pass the version they just published; accept it while it is
+		// still the latest, which is what a workflowId start runs.
+		if requestedVersionID != "" && requestedVersionID != latest.versionID {
+			return expected("workflowVersionId is not this workflow's latest version; omit it to run the latest, or use workflows.rollback")
 		}
 		document, requestedVersionID = latest.document, latest.versionID
 	}
