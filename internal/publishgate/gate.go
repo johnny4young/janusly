@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -230,6 +231,16 @@ func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf
 	}
 	if len(EffectNodes(wf)) > 0 {
 		reasons = append(reasons, "writes")
+	}
+	if latest > 0 {
+		current, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
+		if err != nil {
+			return nil, err
+		}
+		production, _ := domain.Parse(current.DagJson)
+		if production == nil || !slices.Equal(OutboundSurface(production), OutboundSurface(wf)) {
+			reasons = append(reasons, "outbound")
+		}
 	}
 	return reasons, nil
 }

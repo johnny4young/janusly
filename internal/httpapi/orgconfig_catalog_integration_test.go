@@ -23,10 +23,11 @@ import (
 // governed agent-write consent adds one real executable control; the fictitious
 // embedding-provider selector was then retired because only Ollama's protocol
 // is implemented. Dead-letter retention adds one real executable control. Explicit experience
-// registration adds one default-off, tenant-only consent control.
+// registration adds one default-off, tenant-only consent control, and so does
+// requiring a second person for agent publications.
 func TestOrgConfigCatalogSurface(t *testing.T) {
-	if len(orgconfig.Definitions) != 70 {
-		t.Fatalf("catalog must pin at 70 definitions, got %d", len(orgconfig.Definitions))
+	if len(orgconfig.Definitions) != 71 {
+		t.Fatalf("catalog must pin at 71 definitions, got %d", len(orgconfig.Definitions))
 	}
 	for _, key := range []string{"ai.anthropic.model", "http.timeoutMs", "runs.requireSavedWorkflow",
 		"mcp.writeConsent", "retention.deletedWorkflowsDays", "onboarding.enabled", "ai.authoringExperienceEnabled"} {

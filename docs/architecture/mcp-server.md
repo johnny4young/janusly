@@ -116,10 +116,12 @@ through the gate, whose tools return failures as
 4. `workflows.publish` (`publish`, a business write) takes a passed receipt
    for the same digest, at most 24 hours old. A read-only change to a
    workflow that already has a version is appended at once through the
-   canonical engine save. A workflow that may write, or one never published,
-   opens a publish request instead (`approval_required`, reasons `writes`
-   and/or `first_publish`); a newer request for the same workflow supersedes
-   an older one. A draft whose workflow gained a version since it was drafted
+   canonical engine save. A workflow that may write, one never published, or
+   a change to what the workflow reaches outside its own logic (HTTP targets,
+   tools and their credentials, subworkflows, agents, triggers, secret
+   references) opens a publish request instead (`approval_required`, reasons
+   `writes`, `first_publish`, `outbound`), because a read can still carry data
+   out; a newer request for the same workflow supersedes an older one. A draft whose workflow gained a version since it was drafted
    is refused as stale.
 
 People decide publish requests through `GET /publish-requests`,

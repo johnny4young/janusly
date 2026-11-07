@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -253,4 +254,40 @@ func sortedKeys[V any](values map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+var secretReference = regexp.MustCompile(`\{\{\s*secret\.([A-Za-z0-9_.-]+)\s*\}\}`)
+
+// triggerTypes start runs from outside; changing one changes who can reach
+// the workflow.
+var triggerTypes = map[string]bool{
+	"schedule": true, "webhook": true, "webhook_received": true, "email_received": true,
+	"file_dropped": true, "pagerduty_incident": true, "mcp_server_event": true,
+}
+
+// OutboundSurface lists what a workflow reaches outside its own logic: HTTP
+// targets, tools and their credentials, subworkflows, agents, triggers and
+// secret references. A change to it needs a person, even without writes,
+// because a read can still carry data out.
+func OutboundSurface(wf *domain.Workflow) []string {
+	surface := map[string]bool{}
+	for _, node := range wf.Nodes {
+		config, _ := json.Marshal(node.Config)
+		switch {
+		case node.Type == "http":
+			surface[fmt.Sprintf("http %v %v", node.Config["method"], node.Config["url"])] = true
+		case node.Type == "tool":
+			input, _ := node.Config["input"].(map[string]any)
+			surface[fmt.Sprintf("tool %v %v", node.Config["tool"], input["credential"])] = true
+		case node.Type == "subworkflow":
+			surface[fmt.Sprintf("subworkflow %v", node.Config["workflowId"])] = true
+		case node.Type == "mcp_tool", node.Type == "agent", node.Type == "multi_agent", node.Type == "ai",
+			node.Type == "agent_reflection", triggerTypes[node.Type]:
+			surface[node.Type+" "+node.ID+" "+string(config)] = true
+		}
+		for _, match := range secretReference.FindAllStringSubmatch(string(config), -1) {
+			surface["secret "+match[1]] = true
+		}
+	}
+	return sortedKeys(surface)
 }

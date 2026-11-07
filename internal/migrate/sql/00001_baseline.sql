@@ -3714,7 +3714,7 @@ CREATE TABLE public.publish_requests (
     expires_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT publish_requests_status_check CHECK (status IN ('pending', 'published', 'rejected', 'expired', 'superseded')),
-    CONSTRAINT publish_requests_reasons_check CHECK (cardinality(reasons) >= 1 AND reasons <@ ARRAY['writes', 'first_publish']::text[]),
+    CONSTRAINT publish_requests_reasons_check CHECK (cardinality(reasons) >= 1 AND reasons <@ ARRAY['writes', 'first_publish', 'outbound']::text[]),
     CONSTRAINT publish_requests_self_check CHECK (decided_by IS NULL OR decided_by <> requested_by),
     CONSTRAINT publish_requests_decision_check CHECK ((status IN ('published', 'rejected')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
     CONSTRAINT publish_requests_published_check CHECK ((status = 'published') = (published_version_id IS NOT NULL))
