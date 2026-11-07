@@ -46,12 +46,14 @@ once at creation or rotation. The database keeps only its SHA-256 digest and
 last four characters; lookup is by digest, so no comparison runs on the
 plaintext. The fixed prefix lets secret scanners recognise a leaked token.
 Rotation replaces the token immediately and keeps the client id, so audit
-history stays continuous.
+history stays continuous. Only the creator rotates: the new token acts with
+the creator's authority, so nobody else may hold it.
 
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
 up) and `agents.write`. A person can only grant capabilities whose
 permissions they hold, and can only edit or revoke their own clients unless
-they hold `agents.write` as an admin. Agent tokens can never call these routes.
+they hold `agents.write` as an admin, and then only to revoke. Agent tokens
+can never call these routes.
 
 ### Capabilities
 
@@ -61,7 +63,7 @@ implied by every other capability.
 | Capability | Tools | Permissions |
 |---|---|---|
 | `read` | `agent.info`, `catalog.describe`, `workflows.list`, `workflows.get`, `workflows.assure`, `workflows.validate`, `runs.list`, `runs.status`, `runs.inspect`, `runs.output`, `dlq.list`, `operations.brief`, `recovery.cases.inspect`, draft and qualification reads | `workflows.read`, `runs.read`, `dlq.read`, `recovery.read`, `credentials.read` (names, kinds and status only) |
-| `propose` | `drafts.save`, `workflows.propose`, `credentials.request` | `workflows.write` |
+| `propose` | `drafts.save`, `credentials.request` | `workflows.write` |
 | `test` | `workflows.test`, `workflows.qualify` | `runs.start` |
 | `publish` | `workflows.publish` | `workflows.write` |
 | `operate` | `runs.start`, `runs.cancel`, `dlq.redrive`, `workflows.rollback`, `workflows.deactivate`, `workflows.reactivate`, `recovery.cases.diagnose`, `recovery.cases.validate`, `recovery.cases.apply` | `runs.start`, `runs.cancel`, `dlq.replay`, `workflows.write`, `recovery.write` |
@@ -69,7 +71,10 @@ implied by every other capability.
 
 `workflows.save` is not in any capability: an agent's saves go through drafts
 and the publish gate. It stays available to the local stdio server's
-operator-configured ceiling for development.
+operator-configured ceiling for development. `workflows.propose` needs
+`ai.write`, which agents do not get, so it is in none either. `runs.start`
+from an agent takes a saved `workflowId`, never a document, because an
+unsaved document would run in production without publication.
 
 Agent clients do not get `ai.write`. An agent brings its own model; Janusly's
 AI calls spend the organization's budget, and the deterministic paths
@@ -239,7 +244,8 @@ public listener, before `webdist`:
   `key` in the query string is refused with 400 before authentication; the
   parameter name is logged, never its value.
 - **Rebinding and cross-origin.** Requests whose `Host` is not loopback or the host of
-  `JANUSLY_WEB_BASE_URL` are refused (the SDK's localhost check stays on as well).
+  `JANUSLY_WEB_BASE_URL` are refused. This allowlist replaces the SDK's
+  localhost check, which would refuse a reverse proxy on the same host.
   A request with an `Origin` header is refused unless that origin is listed in
   `JANUSLY_MCP_ALLOWED_ORIGINS` (empty by default; native clients send none),
   and `http.CrossOriginProtection` wraps the handler.
@@ -451,7 +457,7 @@ automation, before agents open pull requests here.
 
 **D4. Who manages agent clients, and who approves an agent's publication.**
 *Recommendation:* editors and admins may create clients within their own
-permissions; admins may revoke any. The creator may approve their own
+permissions; only the creator rotates, and admins may revoke any. The creator may approve their own
 client's publish request by default, because the person is the accountable
 approver and the agent the requester; an organization setting requires a
 second person.
