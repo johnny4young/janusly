@@ -89,7 +89,8 @@ ORDER BY dl.created_at DESC, dl.id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- name: GetRunWorkflowForOrg :one
-SELECT coalesce(workflow_id, '')::text FROM runs WHERE org_id = $1 AND id = $2;
+SELECT coalesce(workflow_id, '')::text AS workflow_id, coalesce(created_by, '')::text AS created_by
+FROM runs WHERE org_id = $1 AND id = $2;
 
 -- name: GetDeadLetterWorkflowForOrg :one
 SELECT coalesce(r.workflow_id, '')::text

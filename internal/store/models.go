@@ -174,6 +174,19 @@ type DeadLetter struct {
 	ReplayMode       pgtype.Text
 }
 
+type DraftQualification struct {
+	ID          string
+	OrgID       string
+	DraftID     string
+	Digest      string
+	Status      string
+	Checks      json.RawMessage
+	FixtureRuns json.RawMessage
+	CreatedBy   string
+	CreatedAt   time.Time
+	CompletedAt *time.Time
+}
+
 type EvalDataset struct {
 	ID            string
 	OrgID         string
@@ -493,6 +506,25 @@ type PromptVersion struct {
 	Status       string
 	CreatedBy    pgtype.Text
 	CreatedAt    *time.Time
+}
+
+type PublishRequest struct {
+	ID                 string
+	OrgID              string
+	WorkflowID         string
+	DraftID            string
+	QualificationID    string
+	Reasons            []string
+	RequestedBy        string
+	OnBehalfOf         string
+	DraftedBy          string
+	ScopeTag           pgtype.Text
+	Status             string
+	DecidedBy          pgtype.Text
+	DecidedAt          *time.Time
+	PublishedVersionID pgtype.Text
+	ExpiresAt          time.Time
+	CreatedAt          time.Time
 }
 
 type RateLimitWindow struct {
@@ -1081,6 +1113,18 @@ type WorkflowBudget struct {
 	UpdatedBy   pgtype.Text
 	CreatedAt   *time.Time
 	UpdatedAt   *time.Time
+}
+
+type WorkflowDraft struct {
+	ID            string
+	OrgID         string
+	WorkflowID    string
+	BaseVersionID pgtype.Text
+	Document      json.RawMessage
+	Fixtures      json.RawMessage
+	Digest        string
+	CreatedBy     string
+	CreatedAt     time.Time
 }
 
 type WorkflowImprovement struct {

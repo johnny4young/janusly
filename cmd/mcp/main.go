@@ -107,7 +107,7 @@ func run() error {
 		Audit:  auditWriter,
 		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
 		Permissions: permissions, CatalogSource: mcpclient.New(pool, limiter), Limiter: limiter,
-		Transport: "stdio",
+		Transport: "stdio", WebBaseURL: os.Getenv("JANUSLY_WEB_BASE_URL"),
 	}
 	if token := os.Getenv("JANUSLY_AGENT_TOKEN"); token != "" {
 		resolver := agentclient.Resolver{Pool: pool}

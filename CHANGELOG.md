@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Agents publish through a gate. An agent saves a draft with behaviour
+  fixtures, tests it with writes suppressed, and qualifies it: Janusly checks
+  structure, readiness, declared outputs, a recovery contract when the
+  workflow writes, credentials, invented tools and secrets written in clear,
+  then runs every fixture. Only a passed qualification can publish. A
+  read-only change to a published workflow goes live at once; a workflow that
+  writes, or one published for the first time, waits for a person to approve
+  it, and a draft built on an outdated version is refused. Every failure says
+  what to change and where.
+
 - Agents can reach Janusly over the network. With
   `JANUSLY_MCP_HTTP_ENABLED=true`, the executable serves MCP at `/mcp` on its
   public port for agent client tokens, so Claude Code, Codex or Cursor connect
