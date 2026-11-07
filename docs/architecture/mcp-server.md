@@ -85,6 +85,53 @@ call's tool approval, so the person accountable for an agent cannot approve its
 writes alone. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
 
+## Publish gate
+
+An agent client never saves a version directly. It reaches production only
+through the gate, whose tools return failures as
+`{"error": {"code", "message", "path", "fix"}}` or, for a list of problems,
+`issues` with the same fields.
+
+1. `drafts.save` (`propose`) stores an immutable draft with its behaviour
+   fixtures in `workflow_drafts`. Without a `workflowId` the server assigns
+   `wf_<uuid>` to a new workflow; a scoped client needs a scope tag to create
+   one, and the published workflow gets that tag. Saving the same document
+   and fixtures again returns the existing draft with `unchanged: true`. A
+   draft never routes, schedules or triggers anything.
+2. `workflows.test` (`test`) runs a draft as a draft-test validation run:
+   writes are suppressed, stubs replace the steps they name, and the agent
+   reads the run with `runs.status` and `runs.output`. An agent always sees
+   the runs it started.
+3. `workflows.qualify` (`test`) records a receipt bound to the draft's digest.
+   Static checks come first: structural validation, production readiness
+   errors, declared outputs, a Recovery Contract v2 with passing evaluation
+   fixtures when any step may write, no write step with `resultPolicy:
+   envelope`, at least one behaviour fixture, no secret-shaped literal, and
+   every tool, subworkflow and credential bound to the tenant catalog. When
+   they pass, each fixture runs as a draft test; `qualifications.get`
+   settles the receipt once every run ended, comparing the end status
+   (`succeeded`, `failed`, or `waiting` at a person's step) and a subset of
+   the declared output. Runs still going after ten minutes fail. Thirty
+   qualifications per client per hour.
+4. `workflows.publish` (`publish`, a business write) takes a passed receipt
+   for the same digest, at most 24 hours old. A read-only change to a
+   workflow that already has a version is appended at once through the
+   canonical engine save. A workflow that may write, or one never published,
+   opens a publish request instead (`approval_required`, reasons `writes`
+   and/or `first_publish`); a newer request for the same workflow supersedes
+   an older one. A draft whose workflow gained a version since it was drafted
+   is refused as stale.
+
+People decide publish requests through `GET /publish-requests`,
+`GET /publish-requests/{id}` (the draft, the current version, the receipt) and
+`POST /publish-requests/{id}/approve` or `/reject` (`workflows.write`, person
+modes only). The requester can never decide its own request. The agent's
+creator may approve unless the organization sets
+`agents.publishRequiresSecondPerson`. Approval re-checks the receipt and the
+base version and appends the version as the approver; `publish.status`
+reports the outcome to the agent. `credentials.request` returns the link where
+a person creates a credential; no tool accepts a secret value.
+
 ## Remote transport
 
 With `JANUSLY_MCP_HTTP_ENABLED=true` the `janusly` executable serves the same
@@ -128,9 +175,12 @@ claude mcp add --transport http janusly https://janusly.example.com/mcp --header
 
 ## Catalog
 
-The stable catalog contains 24 tools:
+The stable catalog contains 33 tools:
 
 - agent: `agent.info`;
+- publish gate: `drafts.save`, `drafts.get`, `drafts.list`, `workflows.test`,
+  `workflows.qualify`, `qualifications.get`, `workflows.publish`,
+  `publish.status`, `credentials.request`;
 - authoring: `catalog.describe`, `workflows.validate`;
 - workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
   `workflows.propose`, `workflows.save`, `workflows.rollback`,

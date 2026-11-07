@@ -3661,4 +3661,65 @@ CREATE TABLE public.agent_clients (
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
 CREATE INDEX agent_clients_org_created_idx ON public.agent_clients (org_id, created_at DESC, id DESC);
 
+-- An agent's proposed workflow document. A draft is never a version: nothing
+-- routes, schedules or triggers it until a publication appends it.
+CREATE TABLE public.workflow_drafts (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    base_version_id text,
+    document jsonb NOT NULL,
+    fixtures jsonb DEFAULT '[]'::jsonb NOT NULL,
+    digest text NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT workflow_drafts_digest_check CHECK (char_length(digest) = 64)
+);
+CREATE UNIQUE INDEX workflow_drafts_digest_idx ON public.workflow_drafts (org_id, workflow_id, created_by, digest);
+CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts (org_id, created_at DESC, id DESC);
+
+-- The publish gate's receipt for one draft digest. Fixture runs are
+-- validation runs; the receipt settles when they reach a terminal state.
+CREATE TABLE public.draft_qualifications (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    draft_id text NOT NULL,
+    digest text NOT NULL,
+    status text NOT NULL,
+    checks jsonb NOT NULL,
+    fixture_runs jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT draft_qualifications_status_check CHECK (status IN ('running', 'passed', 'failed')),
+    CONSTRAINT draft_qualifications_completed_check CHECK ((status = 'running') = (completed_at IS NULL))
+);
+CREATE INDEX draft_qualifications_draft_idx ON public.draft_qualifications (org_id, draft_id, created_at DESC);
+
+-- A publication only a person may grant: the workflow writes, or it has
+-- never been published. The requester can never decide it.
+CREATE TABLE public.publish_requests (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    draft_id text NOT NULL,
+    qualification_id text NOT NULL,
+    reasons text[] NOT NULL,
+    requested_by text NOT NULL,
+    on_behalf_of text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    published_version_id text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT publish_requests_status_check CHECK (status IN ('pending', 'published', 'rejected', 'expired', 'superseded')),
+    CONSTRAINT publish_requests_reasons_check CHECK (cardinality(reasons) >= 1 AND reasons <@ ARRAY['writes', 'first_publish']::text[]),
+    CONSTRAINT publish_requests_self_check CHECK (decided_by IS NULL OR decided_by <> requested_by),
+    CONSTRAINT publish_requests_decision_check CHECK ((status IN ('published', 'rejected')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
+    CONSTRAINT publish_requests_published_check CHECK ((status = 'published') = (published_version_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX publish_requests_live_idx ON public.publish_requests (org_id, workflow_id) WHERE status = 'pending';
+CREATE INDEX publish_requests_org_created_idx ON public.publish_requests (org_id, created_at DESC, id DESC);
+
 -- +goose StatementEnd

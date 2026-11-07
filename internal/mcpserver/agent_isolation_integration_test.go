@@ -30,6 +30,8 @@ type agentTenant struct {
 	otherWorkflowID                 string
 	runID, otherRunID, deadLetterID string
 	caseID                          string
+	draftID, qualificationID        string
+	requestID                       string
 }
 
 func agentTestPool(t *testing.T) (*pgxpool.Pool, *engine.Engine) {
@@ -89,6 +91,14 @@ func seedAgentTenant(t *testing.T, pool *pgxpool.Pool, eng *engine.Engine, label
 		(id, org_id, run_id, workflow_id, workflow_version_id, source, detector_id, source_node_id, detector_kind, action, message, state, revision)
 		VALUES ($1, $2, $3, $4, $5, 'semantic_violation', 'det', 'only', 'expression', 'quarantine', 'seed', 'contained', 1)`,
 		tenant.caseID, tenant.org, tenant.runID, tenant.workflowID, tenant.versionID)
+	tenant.draftID, tenant.qualificationID, tenant.requestID = "draft_"+uuid.NewString(), "qual_"+uuid.NewString(), "pub_"+uuid.NewString()
+	exec(`INSERT INTO workflow_drafts (id, org_id, workflow_id, document, digest, created_by)
+		VALUES ($1, $2, $3, '{"id":"x","nodes":[],"edges":[]}', repeat('a', 64), $4)`, tenant.draftID, tenant.org, tenant.workflowID, tenant.creator)
+	exec(`INSERT INTO draft_qualifications (id, org_id, draft_id, digest, status, checks, created_by, completed_at)
+		VALUES ($1, $2, $3, repeat('a', 64), 'passed', '[]', $4, now())`, tenant.qualificationID, tenant.org, tenant.draftID, tenant.creator)
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, expires_at)
+		VALUES ($1, $2, $3, $4, $5, '{writes}', 'agent:seed', $6, now() + interval '1 day')`,
+		tenant.requestID, tenant.org, tenant.workflowID, tenant.draftID, tenant.qualificationID, tenant.creator)
 	return tenant
 }
 
@@ -153,7 +163,7 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 	pool, eng := agentTestPool(t)
 	home := seedAgentTenant(t, pool, eng, "home")
 	foreign := seedAgentTenant(t, pool, eng, "foreign")
-	issued := issueAgentClient(t, pool, home, agentclient.IssueInput{Capabilities: []string{"read", "operate"}})
+	issued := issueAgentClient(t, pool, home, agentclient.IssueInput{Capabilities: []string{"read", "operate", "propose", "test", "publish"}})
 	session := agentSession(t, pool, eng, issued.Token)
 
 	missing := "missing-" + uuid.NewString()
@@ -181,6 +191,17 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 		"recovery.cases.validate": byID(
 			map[string]any{"caseId": foreign.caseID, "expectedRevision": 1, "candidateArtifactId": "candidate"},
 			map[string]any{"caseId": missing, "expectedRevision": 1, "candidateArtifactId": "candidate"}),
+		"drafts.save": byID(
+			map[string]any{"workflowId": foreign.workflowID, "workflow": map[string]any{"name": "x", "nodes": []any{}, "edges": []any{}}},
+			map[string]any{"workflowId": missing, "workflow": map[string]any{"name": "x", "nodes": []any{}, "edges": []any{}}}),
+		"drafts.get":         byID(map[string]any{"draftId": foreign.draftID}, map[string]any{"draftId": missing}),
+		"workflows.test":     byID(map[string]any{"draftId": foreign.draftID}, map[string]any{"draftId": missing}),
+		"workflows.qualify":  byID(map[string]any{"draftId": foreign.draftID}, map[string]any{"draftId": missing}),
+		"qualifications.get": byID(map[string]any{"qualificationId": foreign.qualificationID}, map[string]any{"qualificationId": missing}),
+		"workflows.publish": byID(
+			map[string]any{"draftId": foreign.draftID, "qualificationId": foreign.qualificationID},
+			map[string]any{"draftId": missing, "qualificationId": missing}),
+		"publish.status": byID(map[string]any{"publishRequestId": foreign.requestID}, map[string]any{"publishRequestId": missing}),
 		"recovery.cases.apply": byID(
 			map[string]any{"caseId": foreign.caseID, "expectedRevision": 1, "candidateArtifactId": "candidate", "validationArtifactId": "validation"},
 			map[string]any{"caseId": missing, "expectedRevision": 1, "candidateArtifactId": "candidate", "validationArtifactId": "validation"}),
@@ -188,7 +209,7 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 	// Tools without a resource id are checked by what their results leak.
 	noForeignInput := map[string]bool{
 		"agent.info": true, "catalog.describe": true, "workflows.validate": true, "operations.brief": true,
-		"workflows.list": true, "runs.list": true, "dlq.list": true,
+		"workflows.list": true, "runs.list": true, "dlq.list": true, "drafts.list": true, "credentials.request": true,
 	}
 	for _, tool := range allAgentTools() {
 		if _, ok := cases[tool]; !ok && !noForeignInput[tool] {
@@ -210,7 +231,8 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 		res, _ := callTool(t, session, tool, args)
 		raw, _ := json.Marshal(res.StructuredContent)
 		text := resultText(res) + string(raw)
-		for _, id := range []string{foreign.org, foreign.workflowID, foreign.otherWorkflowID, foreign.runID, foreign.otherRunID, foreign.deadLetterID, foreign.caseID} {
+		for _, id := range []string{foreign.org, foreign.workflowID, foreign.otherWorkflowID, foreign.runID, foreign.otherRunID,
+			foreign.deadLetterID, foreign.caseID, foreign.draftID, foreign.qualificationID, foreign.requestID} {
 			if strings.Contains(text, id) {
 				t.Fatalf("%s leaked %s: %s", tool, id, text)
 			}
@@ -230,6 +252,7 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 		t.Fatalf("filtering by a foreign workflow returned runs: %s", text)
 	}
 	leaks("catalog.describe", map[string]any{"section": "subworkflows"})
+	leaks("drafts.list", map[string]any{"limit": 100})
 	leaks("operations.brief", map[string]any{})
 	if text := leaks("agent.info", map[string]any{}); !strings.Contains(text, home.org) {
 		t.Fatalf("agent.info names the wrong organization: %s", text)

@@ -57,6 +57,8 @@ type Deps struct {
 	ResolveActor ActorResolver
 	// Transport labels audit rows: "stdio" or "http".
 	Transport string
+	// WebBaseURL prefixes the links tools hand to people.
+	WebBaseURL string
 
 	actor *callActor
 }
@@ -169,6 +171,7 @@ func NewServer(deps Deps) *mcp.Server {
 	})
 
 	registerAgentTools(server, deps)
+	registerGateTools(server, deps)
 	registerOperatorTools(server, deps)
 	registerAuthoringTools(server, deps)
 	registerLifecycleTools(server, deps)

@@ -175,7 +175,8 @@ func (q *Queries) GetRecoveryCaseWorkflowForOrg(ctx context.Context, arg GetReco
 }
 
 const getRunWorkflowForOrg = `-- name: GetRunWorkflowForOrg :one
-SELECT coalesce(workflow_id, '')::text FROM runs WHERE org_id = $1 AND id = $2
+SELECT coalesce(workflow_id, '')::text AS workflow_id, coalesce(created_by, '')::text AS created_by
+FROM runs WHERE org_id = $1 AND id = $2
 `
 
 type GetRunWorkflowForOrgParams struct {
@@ -183,11 +184,16 @@ type GetRunWorkflowForOrgParams struct {
 	ID    string
 }
 
-func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowForOrgParams) (string, error) {
+type GetRunWorkflowForOrgRow struct {
+	WorkflowID string
+	CreatedBy  string
+}
+
+func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowForOrgParams) (GetRunWorkflowForOrgRow, error) {
 	row := q.db.QueryRow(ctx, getRunWorkflowForOrg, arg.OrgID, arg.ID)
-	var column_1 string
-	err := row.Scan(&column_1)
-	return column_1, err
+	var i GetRunWorkflowForOrgRow
+	err := row.Scan(&i.WorkflowID, &i.CreatedBy)
+	return i, err
 }
 
 const listAgentClients = `-- name: ListAgentClients :many

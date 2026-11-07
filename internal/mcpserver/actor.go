@@ -111,8 +111,13 @@ func (d Deps) runVisible(ctx context.Context, runID string) (bool, error) {
 	if !d.scoped() {
 		return true, nil
 	}
-	workflowID, err := store.New(d.Pool).GetRunWorkflowForOrg(ctx, store.GetRunWorkflowForOrgParams{OrgID: d.OrgID, ID: runID})
-	return d.visibleOwner(ctx, workflowID, err)
+	row, err := store.New(d.Pool).GetRunWorkflowForOrg(ctx, store.GetRunWorkflowForOrgParams{OrgID: d.OrgID, ID: runID})
+	if err == nil && row.CreatedBy == d.UserID {
+		// An agent always sees the runs it started, such as tests of a new
+		// workflow that is not in its scope until published.
+		return true, nil
+	}
+	return d.visibleOwner(ctx, row.WorkflowID, err)
 }
 
 func (d Deps) deadLetterVisible(ctx context.Context, deadLetterID string) (bool, error) {
