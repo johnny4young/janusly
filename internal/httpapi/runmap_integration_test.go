@@ -44,8 +44,8 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 	exec(`INSERT INTO usage_events (id, org_id, run_id, metric, quantity, metadata) VALUES
 		($1, $2, $3, 'llm.completion', 1200, '{"nodeId":"think","costUsd":0.0125}')`, "u-"+suffix, h.org, runID)
 	exec(`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload) VALUES
-		($1, $2, $3, 'think', 'agent.tool.started', '{"tool":"http.request"}'),
-		($4, $2, $3, 'think', 'agent.completed', '{"status":"ok"}')`, "e1-"+suffix, runID, h.org, "e2-"+suffix)
+		($1, $2, $3, 'think', 'agent.tool.started', '{"tool":"http.request","iteration":2,"input":{"secret":"x"}}'),
+		($4, $2, $3, 'think', 'agent.completed', '{"status":"ok","name":"planner","tool":7}')`, "e1-"+suffix, runID, h.org, "e2-"+suffix)
 
 	as := func(user string) map[string]string { return map[string]string{"x-user-id": user} }
 	res := h.callWithHeaders("GET", "/runs/"+runID+"/map", nil, "", as(editor))
@@ -66,6 +66,19 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 	lanes := res.body["lanes"].([]any)
 	if len(lanes) != 1 || len(lanes[0].(map[string]any)["steps"].([]any)) != 2 {
 		t.Fatalf("agent lane: %v", lanes)
+	}
+	steps := lanes[0].(map[string]any)["steps"].([]any)
+	called, done := steps[0].(map[string]any), steps[1].(map[string]any)
+	if called["tool"] != "http.request" || called["iteration"] != 2.0 || called["input"] != nil ||
+		done["agent"] != "planner" || done["status"] != "ok" || done["tool"] != nil {
+		t.Fatalf("lane steps must keep only typed fields: %v", steps)
+	}
+	if run := res.body["run"].(map[string]any); run["parentRunId"] != nil {
+		t.Fatalf("a run without a parent: %v", run)
+	}
+	if versioned := h.callWithHeaders("GET", "/v1/runs/"+runID+"/map", nil, "", as(editor)); versioned.status != 200 ||
+		versioned.body["apiVersion"] != "v1" || len(versioned.body["data"].(map[string]any)["nodes"].([]any)) != 4 {
+		t.Fatalf("versioned run map: %d %v", versioned.status, versioned.body)
 	}
 	if other := h.callWithHeaders("GET", "/runs/"+runID+"/map", nil, "", as(other)); other.body["nodes"] == nil {
 		t.Fatalf("another editor: %v", other.body)

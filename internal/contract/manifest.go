@@ -344,4 +344,8 @@ var Routes = []Route{
 		Response: operatorBrief},
 	{Method: "GET", Path: "/v1/runs/{runId}/investigation", Summary: "Rules-based hypotheses for a run's failed step",
 		Response: runInvestigation},
+	{Method: "GET", Path: "/v1/runs/{runId}/map", Summary: "Per-step state, time, cost, stuck signal and agent lanes of one run",
+		Response: runMap},
+	{Method: "GET", Path: "/v1/needs-you", Summary: "Decisions waiting on the signed-in person",
+		Response: needsYou},
 }

@@ -1647,6 +1647,131 @@
         ],
         "type": "string"
       },
+      "NeedsYou": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NeedsYouItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "NeedsYouItem": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expiresAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "tool_approval"
+              },
+              "nodeId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "workflowId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "runId",
+              "nodeId",
+              "workflowId",
+              "tool",
+              "expiresAt"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "approval",
+                  "human_form"
+                ],
+                "type": "string"
+              },
+              "nodeId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "since": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "workflowId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "runId",
+              "nodeId",
+              "workflowId",
+              "since"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "expiresAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "publish_request"
+              },
+              "reasons": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "requestedBy": {
+                "type": "string"
+              },
+              "workflowId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "workflowId",
+              "reasons",
+              "requestedBy",
+              "expiresAt"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "NullableCount": {
         "type": [
           "integer",
@@ -3943,6 +4068,214 @@
       },
       "RunInput": {},
       "RunJSON": {},
+      "RunMap": {
+        "additionalProperties": false,
+        "properties": {
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/RunMapLane"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/RunMapNode"
+            },
+            "type": "array"
+          },
+          "run": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "parentRunId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              "workflowVersionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "workflowVersionId",
+              "parentRunId"
+            ],
+            "type": "object"
+          },
+          "totals": {
+            "additionalProperties": false,
+            "properties": {
+              "costUsd": {
+                "type": "number"
+              },
+              "tokens": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "costUsd",
+              "tokens"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "run",
+          "nodes",
+          "lanes",
+          "totals"
+        ],
+        "type": "object"
+      },
+      "RunMapLane": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "iteration": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodeId",
+          "kind",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "RunMapNode": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "childRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "elapsedMs": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "needsYou": {
+            "type": "boolean"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "queued",
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "skipped",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "stuck": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "waitingKind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "nodeId",
+          "type",
+          "status",
+          "attempts",
+          "startedAt",
+          "finishedAt",
+          "elapsedMs",
+          "costUsd",
+          "tokens",
+          "stuck",
+          "needsYou",
+          "waitingKind",
+          "childRunId"
+        ],
+        "type": "object"
+      },
       "RunNode": {
         "additionalProperties": false,
         "properties": {
@@ -7367,6 +7700,46 @@
         "summary": "Tenant memory consent and purge posture"
       }
     },
+    "/needs-you": {
+      "get": {
+        "operationId": "get_v1_needs-you",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/NeedsYou"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Decisions waiting on the signed-in person"
+      }
+    },
     "/operations/brief": {
       "get": {
         "operationId": "get_v1_operations_brief",
@@ -8860,6 +9233,46 @@
           }
         },
         "summary": "Rules-based hypotheses for a run's failed step"
+      }
+    },
+    "/runs/{runId}/map": {
+      "get": {
+        "operationId": "get_v1_runs_runId_map",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/RunMap"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Per-step state, time, cost, stuck signal and agent lanes of one run"
       }
     },
     "/start": {

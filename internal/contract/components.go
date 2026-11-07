@@ -54,6 +54,11 @@ var Components = []Component{
 	{"RunJSON", runJSON},
 	{"RunUsage", runUsage},
 	{"UsageCosts", usageCosts},
+	{"RunMapNode", runMapNode},
+	{"RunMapLane", runMapLane},
+	{"RunMap", runMap},
+	{"NeedsYouItem", needsYouItem},
+	{"NeedsYou", needsYou},
 
 	// Dead letters
 	{"DeadLetterStatus", deadLetterStatus},

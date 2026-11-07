@@ -25,9 +25,13 @@ var runRecord = closedObj(map[string]any{
 	"parentLinkKind", "parentNotificationAfter", "recoveryPlaybookAppliedRecordedAt", "recoveryPlaybookValidationRecordedAt",
 	"replayMode", "traceId", "validationEvidenceLevel", "createdBy", "createdAt")
 
+func runNodeStatus() map[string]any {
+	return map[string]any{"type": "string", "enum": []any{"pending", "queued", "running", "waiting", "succeeded", "failed", "skipped", "cancelled"}}
+}
+
 var runNode = closedObj(map[string]any{
 	"id": str(), "runId": str(), "nodeId": str(),
-	"status":    map[string]any{"type": "string", "enum": []any{"pending", "queued", "running", "waiting", "succeeded", "failed", "skipped", "cancelled"}},
+	"status":    runNodeStatus(),
 	"stateJson": runJSON, "errorJson": runJSON,
 	"attempts":  map[string]any{"type": []any{"integer", "null"}, "minimum": 0},
 	"startedAt": nullableString(), "finishedAt": nullableString(),
@@ -45,3 +49,45 @@ var runView = closedObj(map[string]any{
 }, "run", "nodes", "events", "eventsCursor", "eventsHasMore")
 
 func nullableString() map[string]any { return map[string]any{"type": []any{"string", "null"}} }
+
+var runMapNode = closedObj(map[string]any{
+	"nodeId": str(), "type": str(), "status": runNodeStatus(), "attempts": countT(),
+	"startedAt": nullableString(), "finishedAt": nullableString(),
+	"elapsedMs": map[string]any{"type": []any{"integer", "null"}, "minimum": 0},
+	"costUsd":   num(), "tokens": countT(), "stuck": boolT(), "needsYou": boolT(),
+	"waitingKind": nullableString(), "childRunId": nullableString(),
+}, "nodeId", "type", "status", "attempts", "startedAt", "finishedAt", "elapsedMs", "costUsd", "tokens",
+	"stuck", "needsYou", "waitingKind", "childRunId")
+
+var runMapLane = closedObj(map[string]any{
+	"nodeId": str(), "kind": str(),
+	"steps": arr(closedObj(map[string]any{
+		"type": str(), "at": nullableString(), "tool": str(), "status": str(), "agent": str(), "iteration": countT(),
+	}, "type", "at")),
+}, "nodeId", "kind", "steps")
+
+var runMap = closedObj(map[string]any{
+	"run": closedObj(map[string]any{
+		"id": str(), "status": runStatusSchema, "workflowVersionId": str(), "parentRunId": nullableString(),
+	}, "id", "status", "workflowVersionId", "parentRunId"),
+	"nodes":  arr(runMapNode),
+	"lanes":  arr(runMapLane),
+	"totals": closedObj(map[string]any{"costUsd": num(), "tokens": countT()}, "costUsd", "tokens"),
+}, "run", "nodes", "lanes", "totals")
+
+var needsYouItem = map[string]any{"oneOf": []any{
+	closedObj(map[string]any{
+		"kind": map[string]any{"const": "tool_approval"}, "id": str(), "runId": str(), "nodeId": str(),
+		"workflowId": str(), "tool": str(), "expiresAt": str(),
+	}, "kind", "id", "runId", "nodeId", "workflowId", "tool", "expiresAt"),
+	closedObj(map[string]any{
+		"kind": strEnum([]string{"approval", "human_form"}), "runId": str(), "nodeId": str(),
+		"workflowId": str(), "since": nullableString(),
+	}, "kind", "runId", "nodeId", "workflowId", "since"),
+	closedObj(map[string]any{
+		"kind": map[string]any{"const": "publish_request"}, "id": str(), "workflowId": str(),
+		"reasons": arr(str()), "requestedBy": str(), "expiresAt": str(),
+	}, "kind", "id", "workflowId", "reasons", "requestedBy", "expiresAt"),
+}}
+
+var needsYou = closedObj(map[string]any{"items": arr(needsYouItem)}, "items")

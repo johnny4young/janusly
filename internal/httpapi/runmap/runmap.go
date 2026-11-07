@@ -47,14 +47,20 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	if s.now == nil {
 		s.now = time.Now
 	}
-	deps.Routes.Route(mux, "GET /runs/{runId}/map", httpkit.Gate{Role: auth.RoleViewer, Permission: "runs.read"},
-		func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-			httpkit.WriteUnversioned(w, s.runMap(r, rc))
-		})
-	deps.Routes.Route(mux, "GET /needs-you", httpkit.Gate{Role: auth.RoleViewer},
-		func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-			httpkit.WriteUnversioned(w, s.needsYou(r, rc))
-		})
+	read := httpkit.Gate{Role: auth.RoleViewer, Permission: "runs.read"}
+	inbox := httpkit.Gate{Role: auth.RoleViewer}
+	deps.Routes.Route(mux, "GET /runs/{runId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.runMap(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /v1/runs/{runId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.runMap(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /needs-you", inbox, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.needsYou(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /v1/needs-you", inbox, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.needsYou(r, rc))
+	})
 }
 
 type workflowSnapshot struct {
@@ -120,7 +126,7 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	return httpkit.OK(map[string]any{
 		"run": map[string]any{
 			"id": run.ID, "status": run.Status, "workflowVersionId": run.WorkflowVersionID,
-			"parentRunId": run.ParentRunID.String,
+			"parentRunId": optionalText(run.ParentRunID),
 		},
 		"nodes": views, "lanes": lanes, "totals": totals,
 	})
@@ -226,21 +232,35 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 		if len(byNode[event.NodeID]) >= maxLaneEvents {
 			continue
 		}
-		var payload map[string]any
-		_ = json.Unmarshal(event.Payload, &payload)
-		step := map[string]any{"type": event.Type, "at": optionalTime(event.CreatedAt)}
-		for _, key := range []string{"tool", "status", "step", "agent"} {
-			if value, ok := payload[key]; ok {
-				step[key] = value
-			}
-		}
-		byNode[event.NodeID] = append(byNode[event.NodeID], step)
+		byNode[event.NodeID] = append(byNode[event.NodeID], laneStep(event))
 	}
 	lanes := make([]map[string]any, 0, len(order))
 	for _, nodeID := range order {
 		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": byNode[nodeID]})
 	}
 	return lanes, nil
+}
+
+// laneStep keeps only typed payload fields, so a malformed event cannot widen
+// the wire. Crew lifecycle events name their agent as "name".
+func laneStep(event store.ListRunAgentEventsRow) map[string]any {
+	var payload map[string]any
+	_ = json.Unmarshal(event.Payload, &payload)
+	step := map[string]any{"type": event.Type, "at": optionalTime(event.CreatedAt)}
+	for _, key := range []string{"tool", "status", "agent"} {
+		if value, ok := payload[key].(string); ok && value != "" {
+			step[key] = value
+		}
+	}
+	if _, ok := step["agent"]; !ok {
+		if name, ok := payload["name"].(string); ok && name != "" {
+			step["agent"] = name
+		}
+	}
+	if iteration, ok := payload["iteration"].(float64); ok && iteration >= 0 && iteration == float64(int64(iteration)) {
+		step["iteration"] = int64(iteration)
+	}
+	return step
 }
 
 // deciderPermissions is the viewer's grant when they can decide at all: a
@@ -307,8 +327,12 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 			if secondPerson && s.accountableFor(r, rc, row) {
 				continue
 			}
+			reasons := row.Reasons
+			if reasons == nil {
+				reasons = []string{}
+			}
 			items = append(items, map[string]any{"kind": "publish_request", "id": row.ID, "workflowId": row.WorkflowID,
-				"reasons": row.Reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
+				"reasons": reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
 		}
 	}
 	return httpkit.OK(map[string]any{"items": items})
@@ -343,6 +367,13 @@ func (s *service) accountableFor(r *http.Request, rc httpkit.Request, row store.
 // secondPersonKey is publishrequests.SecondPersonKey; feature packages do not
 // import each other.
 const secondPersonKey = "agents.publishRequiresSecondPerson"
+
+func optionalText(value pgtype.Text) any {
+	if !value.Valid || value.String == "" {
+		return nil
+	}
+	return value.String
+}
 
 func optionalTime(at *time.Time) any {
 	if at == nil {
