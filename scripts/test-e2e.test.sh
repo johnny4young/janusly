@@ -19,7 +19,7 @@ result=$(JANUSLY_SOURCE_ROOT=/not-this-checkout \
   JANUSLY_E2E_PROJECT=janusly-e2e-selftest-1 \
   JANUSLY_E2E_PORT=33001 JANUSLY_E2E_POSTGRES_PORT=35432 \
   bash "$script" selftest)
-jq -e '.project == "janusly-e2e-selftest-1" and .ports.application == 33001 and .ports.postgres == 35432' \
+jq -e '.project == "janusly-e2e-selftest-1" and .ports == {application:33001,postgres:35432,internal:33002}' \
   <<<"$result" >/dev/null
 jq -e --arg commit "$expected_commit" --arg tree "$expected_tree" --arg id "$expected_id" \
   '.build == {commit:$commit,tree:$tree,id:$id}' <<<"$result" >/dev/null
@@ -76,6 +76,14 @@ if JANUSLY_E2E_PROJECT=janusly-e2e-selftest-2 \
   JANUSLY_E2E_PORT=35432 JANUSLY_E2E_POSTGRES_PORT=35432 \
   bash "$script" selftest >/dev/null 2>&1; then
   echo "overlapping ports were accepted" >&2
+  exit 1
+fi
+internal=$(JANUSLY_E2E_PROJECT=janusly-e2e-selftest-3 JANUSLY_E2E_PORT=43118 JANUSLY_E2E_POSTGRES_PORT=45118 \
+  bash "$script" selftest | jq -r '.ports.internal')
+[[ $internal == 43119 ]] || { echo "internal port did not follow the application port: $internal" >&2; exit 1; }
+if JANUSLY_E2E_PROJECT=janusly-e2e-selftest-4 JANUSLY_E2E_PORT=33001 JANUSLY_E2E_POSTGRES_PORT=35432 \
+  JANUSLY_E2E_INTERNAL_PORT=35432 bash "$script" selftest >/dev/null 2>&1; then
+  echo "internal port overlapping PostgreSQL was accepted" >&2
   exit 1
 fi
 if JANUSLY_E2E_PROJECT=other-project bash "$script" selftest >/dev/null 2>&1; then
