@@ -294,7 +294,7 @@ type WorkflowStore = {
   setRunId: (id: string | null) => void
   setRunDetail: (run: RunSummary | null) => void
   patchRunDetail: (runId: string, patch: Partial<RunSummary>) => void
-  setRunNodes: (nodes: RunNode[]) => void
+  setRunNodes: (nodes: RunNode[], basis?: readonly RunNode[]) => void
   mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
   setEvents: (events: RunEvent[]) => void
@@ -834,20 +834,24 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ? { runDetail: { ...state.runDetail, ...patch, id: runId } }
       : state
   )),
-  setRunNodes: (nodes) => set((state) => {
-    // A /status snapshot describes the run at the instant the server built
-    // it, which can predate an SSE event already applied here. Replacing
-    // wholesale would rewind a node the operator just watched finish, and
-    // with SSE connected polling stops, so the stale pill would stick.
-    // Terminal states never regress; everything else takes the snapshot.
+  setRunNodes: (nodes, basis) => set((state) => {
+    // A snapshot describes the run when the server built it, which can predate
+    // an SSE event applied while the request was in flight; with SSE connected
+    // polling stops, so a rewound node would stick. A node that changed since
+    // `basis` (the nodes the request was sent against) keeps its live status,
+    // state and error but takes the snapshot's timing and attempts. Terminal
+    // states never regress.
     if (nodes.length === 0) return { runNodes: nodes }
     const previous = new Map(state.runNodes.map((node) => [node.nodeId, node]))
+    const requested = basis ? new Map(basis.map((node) => [node.nodeId, node])) : null
     const runNodes = nodes.map((node) => {
       const existing = previous.get(node.nodeId)
-      if (!existing || !isTerminalNodeStatus(existing.status) || isTerminalNodeStatus(node.status)) {
-        return node
+      if (!existing) return node
+      if (requested && requested.get(node.nodeId) !== existing) {
+        return { ...node, status: existing.status, stateJson: existing.stateJson, errorJson: existing.errorJson }
       }
-      return existing
+      if (isTerminalNodeStatus(existing.status) && !isTerminalNodeStatus(node.status)) return existing
+      return node
     })
     // Identical content keeps the previous array: the poll loop calls this
     // every 1.5s, and a fresh reference here re-renders the whole shell.

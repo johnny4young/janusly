@@ -67,10 +67,8 @@ export function useRunPolling(
   const loadStatus = useCallback(async (id: string): Promise<RunStatusLoadResult> => {
     const requestId = ++requestSequence.current
     const commitRunSummary = beginRunSummaryUpdate?.(id)
-    const context = {
-      runId: id,
-      generation: useWorkflowStore.getState().runTransitionGeneration,
-    }
+    const { runTransitionGeneration, runNodes: basis } = useWorkflowStore.getState()
+    const context = { runId: id, generation: runTransitionGeneration }
     const isCurrentRequest = () => (
       requestId === requestSequence.current
       && isRunRequestCurrent(context, useWorkflowStore.getState())
@@ -89,7 +87,7 @@ export function useRunPolling(
     const status = parseRunStatusSnapshot(payload, id)
     if (!status) throw new Error(t('api.error.malformedResponse'))
     commitRunSummary?.(status.run)
-    setRunNodes(status.nodes)
+    setRunNodes(status.nodes, basis)
     const statusEvents = status.events
     addEvents(statusEvents)
     // /status always describes the latest page. Once the user has loaded older

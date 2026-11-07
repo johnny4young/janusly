@@ -190,6 +190,59 @@ describe('useRunPolling request ownership', () => {
     expect(useWorkflowStore.getState().runNodes).toMatchObject([{ nodeId: 'node-a', status: 'succeeded' }])
   })
 
+  it('keeps a node the stream advanced while the snapshot was in flight', async () => {
+    let resolveStatus!: (value: unknown) => void
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
+    useWorkflowStore.setState({ runId: 'run-a' })
+
+    render(<Harness runId="run-a" />)
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1))
+
+    // SSE delivers the wait before the snapshot, built while the step still ran, lands.
+    const waiting = { waiting: { kind: 'human_form', resumeToken: 'token' } }
+    act(() => {
+      useWorkflowStore.getState().mergeRunNode({ nodeId: 'collect', status: 'waiting', stateJson: waiting })
+    })
+    await act(async () => {
+      resolveStatus({
+        run: { id: 'run-a', status: 'running' },
+        nodes: [{ nodeId: 'collect', status: 'running' }, { nodeId: 'normalize', status: 'pending' }],
+      })
+    })
+
+    expect(useWorkflowStore.getState().runNodes).toMatchObject([
+      { nodeId: 'collect', status: 'waiting', stateJson: waiting },
+      { nodeId: 'normalize', status: 'pending' },
+    ])
+  })
+
+  it('keeps timing and attempts from the snapshot for a node the stream advanced', async () => {
+    let resolveStatus!: (value: unknown) => void
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
+    useWorkflowStore.setState({ runId: 'run-a' })
+
+    render(<Harness runId="run-a" />)
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      useWorkflowStore.getState().mergeRunNode({ nodeId: 'fetch', status: 'failed', errorJson: { message: 'boom' } })
+    })
+    await act(async () => {
+      resolveStatus({
+        run: { id: 'run-a', status: 'running' },
+        nodes: [{
+          nodeId: 'fetch', status: 'running', attempts: 2,
+          startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null,
+        }],
+      })
+    })
+
+    expect(useWorkflowStore.getState().runNodes).toEqual([expect.objectContaining({
+      nodeId: 'fetch', status: 'failed', errorJson: { message: 'boom' },
+      attempts: 2, startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null,
+    })])
+  })
+
   it('reserves summary ownership before awaiting the status response', async () => {
     let resolveStatus!: (value: unknown) => void
     vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))

@@ -193,7 +193,7 @@ func (e *Engine) insertRuntimeFailureDrill(ctx context.Context, input RecoveryDr
 	}
 	startedPayload := safePersist(map[string]any{"workflowVersionId": runID, "source": input.Source}, 0)
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run.started.sandbox",
+		ID: newEventID(), RunID: runID, Type: "run.started.sandbox",
 		Payload: startedPayload, CreatedAt: &now,
 	}); err != nil {
 		return "", fmt.Errorf("insert runtime recovery drill start event: %w", err)
@@ -206,7 +206,7 @@ func (e *Engine) insertRuntimeFailureDrill(ctx context.Context, input RecoveryDr
 		eventOffset++
 		eventAt := now.Add(time.Duration(eventOffset) * time.Millisecond)
 		if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-			ID: e.newID(), RunID: runID,
+			ID: newEventID(), RunID: runID,
 			NodeID: pgtype.Text{String: node.ID, Valid: true},
 			Type:   "node.completed", Payload: json.RawMessage(`{"runtimeDrillSeeded":true}`),
 			CreatedAt: &eventAt,
@@ -329,7 +329,7 @@ func (e *Engine) RunStalledNodeDrill(ctx context.Context, input RecoveryDrillInp
 	}
 	startedPayload := safePersist(map[string]any{"workflowVersionId": runID, "drill": input.Source}, 0)
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID, Type: "run.started",
+		ID: newEventID(), RunID: runID, Type: "run.started",
 		Payload: startedPayload, CreatedAt: &stalledAt,
 	}); err != nil {
 		return StalledNodeDrillResult{}, fmt.Errorf("insert stalled-node recovery drill event: %w", err)

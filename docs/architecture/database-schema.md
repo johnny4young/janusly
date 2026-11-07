@@ -75,6 +75,13 @@ variants that scope by the row's own `org_id`: a run id alone, however it was
 obtained, never returns another organization's rows. Engine-internal reads
 stay run-scoped because the claim already carries the tenant.
 
+Run events are ordered by `(created_at, id)`, and `created_at` has
+millisecond precision. Event ids are UUIDv7, which ascend in generation
+order within one process, so a step's events written within one millisecond
+keep their order in history pages and in the stream's catch-up cursor. Across
+HA instances the ids carry each host's sub-millisecond clock, so cross-instance
+order within a millisecond depends on clock synchronization.
+
 ## Tenant-scoped substring search
 
 Active workflow name/id and non-validation recovery node id/run id/error-message

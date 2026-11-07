@@ -80,7 +80,7 @@ func (e *Engine) ReplayRunAsValidation(
 		"workflowVersionId": runID, "sourceRunId": sourceRunID, "hasPatch": hasPatch,
 	})
 	if err := txq.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID,
+		ID: newEventID(), RunID: runID,
 		Type: "run.started.replay-lab", Payload: payload, CreatedAt: &startedAt,
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started.replay-lab: %w", err)
@@ -218,7 +218,7 @@ func (e *Engine) ReplayRunAsValidationFork(
 		"predecessorCount": len(predecessors), "hasOverride": inputOverride != nil,
 	})
 	if err := txq.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID,
+		ID: newEventID(), RunID: runID,
 		Type: "run.started.replay-lab-fork", Payload: payload, CreatedAt: &startedAt,
 	}); err != nil {
 		return ReplayLabForkResult{}, fmt.Errorf("insert run.started.replay-lab-fork: %w", err)

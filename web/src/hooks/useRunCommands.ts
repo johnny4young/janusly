@@ -170,6 +170,7 @@ export function useRunCommands(
     const requestId = runTransitionGuard.begin()
     setActivityRecoveryId(null)
     setActiveTab(targetTab ?? 'runs')
+    const basis = useWorkflowStore.getState().runNodes
     try {
       const payload = await contractApi('GET /run', `/run?runId=${encodeURIComponent(id)}`, undefined, { guard: isGetRunResponse })
       if (!runTransitionGuard.isCurrent(requestId)) return
@@ -178,7 +179,7 @@ export function useRunCommands(
       setRunId(id)
       setRunDetail(data.run)
       projectRunSummary(id, data.run)
-      setRunNodes(data.nodes)
+      setRunNodes(data.nodes, basis)
       setEvents(data.events)
       setEventsPagination(data.eventsCursor, data.eventsHasMore)
     } catch (error) {

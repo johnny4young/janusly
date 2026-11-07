@@ -127,7 +127,10 @@ the invariants the store depends on: every row echoes the run, node and event
 ids are unique, and the event cursor is present exactly when more pages exist.
 Malformed snapshots leave the previous projection intact; stale requests are
 discarded before validation. A later valid poll can recover normally, and
-refreshing the latest event page never rewinds already-loaded history.
+refreshing the latest event page never rewinds already-loaded history. A
+snapshot can predate a live stream event applied while it was in flight, and
+polling stops once the stream is live, so a node that changed after the request
+was sent keeps its live state, and terminal node states never regress.
 
 Recovery AI patch and explicit playbook-use responses cross the generated
 guards and then `web/src/lib/recovery-patch-contract.ts` before entering dialog

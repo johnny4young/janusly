@@ -148,7 +148,7 @@ func (e *Engine) CompleteRouterNode(ctx context.Context, claim ClaimedNode, plan
 		// redundant node.succeeded event carrying the same decision.
 		skipSuccessEvent: true,
 		beforeSuccess: func(_ *store.Queries, events *runEventBuffer, finishedAt time.Time) error {
-			events.add(e.newID(), claim.RunID, claim.NodeID, "decision.made", decisionPayload, finishedAt)
+			events.add(newEventID(), claim.RunID, claim.NodeID, "decision.made", decisionPayload, finishedAt)
 			return nil
 		},
 		beforeDownstream: func(q *store.Queries, events *runEventBuffer, finishedAt time.Time) error {
@@ -173,7 +173,7 @@ func (e *Engine) CompleteRouterNode(ctx context.Context, claim ClaimedNode, plan
 				if skipped == 0 {
 					continue
 				}
-				events.add(e.newID(), claim.RunID, candidate.NodeID, "node.skipped", payloadJSON, finishedAt)
+				events.add(newEventID(), claim.RunID, candidate.NodeID, "node.skipped", payloadJSON, finishedAt)
 				metricNodeCompletions.WithLabelValues("skipped").Inc()
 			}
 			return nil
@@ -238,7 +238,7 @@ func (e *Engine) completeNode(ctx context.Context, claim ClaimedNode, output any
 			}
 		}
 		if !opts.skipSuccessEvent {
-			events.add(e.newID(), claim.RunID, claim.NodeID, "node.succeeded", eventJSON, finishedAt)
+			events.add(newEventID(), claim.RunID, claim.NodeID, "node.succeeded", eventJSON, finishedAt)
 		}
 		metricNodeCompletions.WithLabelValues("succeeded").Inc()
 		if err := e.recordRecoveryImpact(ctx, q, claim, finishedAt); err != nil {
@@ -446,7 +446,7 @@ func (e *Engine) persistSemanticViolations(
 			"action": violation.Action, "message": violation.Message,
 			"details": details,
 		}, e.persistence.MaxBytes())
-		events.add(e.newID(), claim.RunID, claim.NodeID, "recovery.semantic_violation", payload, finishedAt)
+		events.add(newEventID(), claim.RunID, claim.NodeID, "recovery.semantic_violation", payload, finishedAt)
 	}
 
 	counts, err := q.CountRunSemanticCases(ctx, store.CountRunSemanticCasesParams{

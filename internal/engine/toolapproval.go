@@ -324,7 +324,7 @@ func (e *Engine) requeueToolApproval(ctx context.Context, q *store.Queries, even
 		return fmt.Errorf("clear tool approval wakeup: %w", err)
 	}
 	events.scope(row.OrgID)
-	events.add(e.newID(), row.RunID, row.NodeID, eventType,
+	events.add(newEventID(), row.RunID, row.NodeID, eventType,
 		safePersist(map[string]any{"approvalId": row.ID, "tool": row.Tool}, e.persistence.MaxBytes()), e.eventNow())
 	if err := q.NotifyWake(ctx, store.NotifyWakeParams{RunID: row.RunID, Ready: 1}); err != nil {
 		return fmt.Errorf("notify tool approval wake: %w", err)

@@ -66,6 +66,11 @@ func WithDBPools(pools *tools.DBPools) Option {
 	return func(e *Engine) { e.dbPools = pools }
 }
 
+// newEventID returns UUIDv7 ids, which ascend in generation order. Run events
+// sort by (created_at, id) at millisecond precision, so a random id could put
+// a step's same-millisecond events out of sequence.
+func newEventID() string { return uuid.Must(uuid.NewV7()).String() }
+
 // New builds an Engine over the given pool.
 func New(pool *pgxpool.Pool, options ...Option) *Engine {
 	e := &Engine{
@@ -383,7 +388,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 	// run.started or shuffling roots between reads. All of it lands in one
 	// COPY, like the completion path's event buffer.
 	eventRows := []store.InsertRunEventsParams{{
-		ID: e.newID(), RunID: runID, Type: "run.started", Payload: startedPayload,
+		ID: newEventID(), RunID: runID, Type: "run.started", Payload: startedPayload,
 		CreatedAt: &startedAt,
 	}}
 	rootIndex := 0
@@ -394,7 +399,7 @@ func (e *Engine) StartRun(ctx context.Context, in StartInput) (string, error) {
 		rootIndex++
 		queuedAt := startedAt.Add(time.Duration(rootIndex) * time.Millisecond)
 		eventRows = append(eventRows, store.InsertRunEventsParams{
-			ID: e.newID(), RunID: runID,
+			ID: newEventID(), RunID: runID,
 			NodeID: pgtype.Text{String: node.ID, Valid: true},
 			Type:   "node.queued", Payload: json.RawMessage(`{}`),
 			CreatedAt: &queuedAt,

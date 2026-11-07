@@ -269,7 +269,7 @@ func (e *Engine) commitParentCheckpoint(
 		"depth":                checkpoint.Depth,
 	}, e.persistence.MaxBytes())
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: checkpoint.RunID,
+		ID: newEventID(), RunID: checkpoint.RunID,
 		NodeID: pgtype.Text{String: checkpoint.NodeID, Valid: true},
 		Type:   "subworkflow.started", Payload: startedPayload, CreatedAt: &checkpointAt,
 	}); err != nil {
@@ -280,7 +280,7 @@ func (e *Engine) commitParentCheckpoint(
 	}, e.persistence.MaxBytes())
 	waitingAt := checkpointAt.Add(time.Millisecond)
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: checkpoint.RunID,
+		ID: newEventID(), RunID: checkpoint.RunID,
 		NodeID: pgtype.Text{String: checkpoint.NodeID, Valid: true},
 		Type:   "node.waiting", Payload: waitingPayload, CreatedAt: &waitingAt,
 	}); err != nil {
@@ -379,7 +379,7 @@ func (e *Engine) settleParentOnChildSuccess(
 			return errSkipCommit
 		}
 		payload := safePersist(map[string]any{"childRunId": childRunID}, e.persistence.MaxBytes())
-		events.add(e.newID(), parentRunID, parentNodeID, "subworkflow.completed", payload, finishedAt)
+		events.add(newEventID(), parentRunID, parentNodeID, "subworkflow.completed", payload, finishedAt)
 		settled = true
 		// A failed parent SETTLES the wait without reopening: no downstream
 		// scheduling — a replay may later reopen the parent explicitly.
@@ -460,7 +460,7 @@ func (e *Engine) settleParentOnChildFailure(
 			return errSkipCommit
 		}
 		payload := safePersist(map[string]any{"error": serr}, e.persistence.MaxBytes())
-		events.add(e.newID(), parentRunID, parentNodeID, "node.failed", payload, failedAt)
+		events.add(newEventID(), parentRunID, parentNodeID, "node.failed", payload, failedAt)
 		settled = true
 		// A sibling may have flipped the parent already — the node settle
 		// above is all this generation owes then.

@@ -9,6 +9,7 @@ import type { AppCommandsOptions } from './app-command-types'
 import { usePlatformMutation } from './usePlatformMutation'
 import { consumeRecoveryAllClear } from '../components/recovery-all-clear-bus'
 import { useRunCommands } from './useRunCommands'
+import { runView } from '../test/run-view-fixture'
 
 vi.mock('../api', () => {
   const module = ({ api: vi.fn() })
@@ -137,6 +138,21 @@ describe('useRunCommands status projection boundary', () => {
     expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'work', status: 'running' }])
     expect(opts.projectRunSummary).not.toHaveBeenCalled()
     expect(useWorkflowStore.getState().toasts).toHaveLength(1)
+  })
+
+  it('keeps a node the stream advanced while the active run was reopening', async () => {
+    useWorkflowStore.setState({ runId: 'active', runNodes: [{ nodeId: 'collect', status: 'running' }] })
+    let resolveRun!: (value: unknown) => void
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveRun = resolve }))
+    const { result } = renderHook(() => useRunCommands(options(), { validateWorkflow: vi.fn(async () => true) }))
+    let opening!: Promise<void>
+    act(() => { opening = result.current.openRun('active') })
+    useWorkflowStore.getState().mergeRunNode({ nodeId: 'collect', status: 'waiting' })
+    await act(async () => {
+      resolveRun(runView({ run: { id: 'active' }, nodes: [{ nodeId: 'collect', status: 'running' }] }))
+      await opening
+    })
+    expect(useWorkflowStore.getState().runNodes).toEqual([{ nodeId: 'collect', status: 'waiting' }])
   })
 
   it('does not consume the older-events cursor after an invalid page', async () => {

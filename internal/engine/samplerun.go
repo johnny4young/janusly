@@ -106,7 +106,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 		"workflowVersionId": runID,
 		"source":            in.Source,
 	}, e.persistence.MaxBytes())
-	events.add(e.newID(), runID, "", "run.started.sandbox", startedPayload, startedAt)
+	events.add(newEventID(), runID, "", "run.started.sandbox", startedPayload, startedAt)
 
 	rootIndex := 0
 	for _, node := range in.Workflow.Nodes {
@@ -138,7 +138,7 @@ func (e *Engine) StartSandboxRun(ctx context.Context, in SandboxRunInput) (strin
 			payload := safePersist(map[string]any{
 				"output": input, "sandboxTrigger": true,
 			}, e.persistence.MaxBytes())
-			events.add(e.newID(), runID, node.ID, "node.completed", payload, completedAt)
+			events.add(newEventID(), runID, node.ID, "node.completed", payload, completedAt)
 		}
 	}
 

@@ -155,7 +155,7 @@ func (e *Engine) ReplayDeadLetterAsValidationWithPlaybook(
 		"validationEffectMode": "skip",
 	})
 	if err := txq.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID,
+		ID: newEventID(), RunID: runID,
 		Type: "run.started.validation", Payload: payload, CreatedAt: &startedAt,
 	}); err != nil {
 		return "", fmt.Errorf("insert run.started.validation: %w", err)

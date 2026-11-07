@@ -101,7 +101,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 					return false, fmt.Errorf("skip node %s: %w", node.ID, err)
 				}
 				if rows > 0 {
-					events.add(e.newID(), runID, node.ID, "node.skipped", payload, skippedAt)
+					events.add(newEventID(), runID, node.ID, "node.skipped", payload, skippedAt)
 				}
 				metricNodeCompletions.WithLabelValues("skipped").Inc()
 				statuses[node.ID] = "skipped"
@@ -126,7 +126,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 			changed = true
 			statuses[node.ID] = "queued"
 			queuedAt := e.eventNow()
-			events.add(e.newID(), runID, node.ID, "node.queued", json.RawMessage(`{}`), queuedAt)
+			events.add(newEventID(), runID, node.ID, "node.queued", json.RawMessage(`{}`), queuedAt)
 		}
 	}
 
@@ -188,7 +188,7 @@ func (e *Engine) scheduleDownstream(ctx context.Context, q *store.Queries, event
 // (which sits at cause+1ms).
 func (e *Engine) appendStatusChecked(events *runEventBuffer, runID string, causeAt time.Time) {
 	checkedAt := causeAt.Add(2 * time.Millisecond)
-	events.add(e.newID(), runID, "", "run.status_checked", json.RawMessage(`{}`), checkedAt)
+	events.add(newEventID(), runID, "", "run.status_checked", json.RawMessage(`{}`), checkedAt)
 }
 
 // edgeAllowsRun decides whether a ready pending node should run: roots are
@@ -251,7 +251,7 @@ func (e *Engine) flipRunTerminal(ctx context.Context, q *store.Queries, events *
 		return fmt.Errorf("marshal run event payload: %w", err)
 	}
 	eventAt := causeAt.Add(time.Millisecond)
-	terminalEventID := e.newID()
+	terminalEventID := newEventID()
 	events.add(terminalEventID, runID, "", "run."+status, payloadJSON, eventAt)
 	if err := e.finalizeSemanticRecoveryMonitoring(
 		ctx, q, runID, status, terminalEventID, eventAt,
