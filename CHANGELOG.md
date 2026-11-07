@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- While development auth headers are accepted (no identity provider outside
+  production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
+  `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless
+  `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true`. Those headers let any caller act as
+  any user, and before this change an unset `JANUSLY_HTTP_HOST` exposed them on
+  every interface. Docker Compose sets both values for its container, whose
+  port is published on the host's loopback only.
 - Cancelling a run while an operator applies a semantic recovery decision to
   it no longer fails one of the two with a database deadlock error. The
   decision and the cancellation now take turns: whichever starts first

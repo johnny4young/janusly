@@ -92,12 +92,13 @@ func TestLoadRejectsOutOfRangeWithRangeInMessage(t *testing.T) {
 }
 
 func TestHTTPHostDefaultsToEveryInterfaceAndAcceptsOnlyBindLiterals(t *testing.T) {
-	cfg, err := Load(env(map[string]string{}))
+	withIdentity := map[string]string{"SUPABASE_URL": "https://auth.example.test"}
+	cfg, err := Load(env(withIdentity))
 	if err != nil || cfg.HTTPHost != "" {
 		t.Fatalf("default public bind must stay every interface: %q %v", cfg.HTTPHost, err)
 	}
 	for _, host := range []string{"127.0.0.1", "0.0.0.0", "::1", "::"} {
-		if cfg, err := Load(env(map[string]string{"JANUSLY_HTTP_HOST": host})); err != nil || cfg.HTTPHost != host {
+		if cfg, err := Load(env(map[string]string{"JANUSLY_HTTP_HOST": host, "SUPABASE_URL": "https://auth.example.test"})); err != nil || cfg.HTTPHost != host {
 			t.Fatalf("JANUSLY_HTTP_HOST=%s rejected: %v", host, err)
 		}
 	}
@@ -232,6 +233,39 @@ func TestAuthoringExperienceModeIsExplicitStrictAndDefaultOff(t *testing.T) {
 		_, err := Load(env(map[string]string{"JANUSLY_AUTHORING_EXPERIENCE_MODE": input}))
 		if err == nil || !strings.Contains(err.Error(), "JANUSLY_AUTHORING_EXPERIENCE_MODE") || strings.Contains(err.Error(), input) {
 			t.Fatalf("unsafe invalid mode response: %v", err)
+		}
+	}
+}
+
+// Development auth headers let any caller act as any user, so while they are
+// accepted the API listens on loopback unless a wildcard bind is acknowledged.
+func TestDevAuthHeadersKeepTheListenerOnLoopback(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     map[string]string
+		host    string
+		refused bool
+	}{
+		{"local defaults", map[string]string{}, "127.0.0.1", false},
+		{"explicit dev headers in production", map[string]string{"JANUSLY_ENV": "production", "ALLOW_DEV_AUTH_HEADERS": "true"}, "127.0.0.1", false},
+		{"identity provider", map[string]string{"SUPABASE_URL": "https://auth.example.test"}, "", false},
+		{"production with identity provider", map[string]string{"JANUSLY_ENV": "production", "SUPABASE_URL": "https://auth.example.test"}, "", false},
+		{"loopback kept", map[string]string{"JANUSLY_HTTP_HOST": "::1"}, "::1", false},
+		{"wildcard refused", map[string]string{"JANUSLY_HTTP_HOST": "0.0.0.0"}, "", true},
+		{"IPv6 wildcard refused", map[string]string{"JANUSLY_HTTP_HOST": "::"}, "", true},
+		{"wildcard acknowledged", map[string]string{"JANUSLY_HTTP_HOST": "0.0.0.0", "ALLOW_DEV_AUTH_HEADERS_ON_NETWORK": "true"}, "0.0.0.0", false},
+		{"wildcard with identity provider", map[string]string{"JANUSLY_HTTP_HOST": "0.0.0.0", "SUPABASE_URL": "https://auth.example.test"}, "0.0.0.0", false},
+	}
+	for _, tc := range cases {
+		cfg, err := Load(env(tc.env))
+		if tc.refused {
+			if err == nil || !strings.Contains(err.Error(), "ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true") {
+				t.Fatalf("%s: want a refusal naming the flag, got %v", tc.name, err)
+			}
+			continue
+		}
+		if err != nil || cfg.HTTPHost != tc.host {
+			t.Fatalf("%s: host %q err %v, want %q", tc.name, cfg.HTTPHost, err, tc.host)
 		}
 	}
 }

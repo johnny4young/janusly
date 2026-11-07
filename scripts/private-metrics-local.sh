@@ -142,6 +142,8 @@ docker run -d --name "$app" --network "$network" --network-alias janusly \
   --env JANUSLY_ENV=production \
   --env JANUSLY_DATABASE_URL="$database_url" \
   --env JANUSLY_PORT=3001 \
+  --env JANUSLY_HTTP_HOST=0.0.0.0 \
+  --env ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true \
   --env JANUSLY_INTERNAL_HOST=0.0.0.0 \
   --env JANUSLY_INTERNAL_PORT=9464 \
   --env JANUSLY_RESUME_TOKEN_SECRET=qualification-resume-token-secret-not-for-production \
