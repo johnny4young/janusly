@@ -44,10 +44,48 @@ Consent never grants a permission missing from the service-account ceiling.
 Long-running operations return durable run IDs that clients poll; the server
 does not maintain another task store.
 
+## Agent clients
+
+An agent client is an organization's credential for one external agent,
+created by a member through `POST /agent-clients` (`agents.write`) and listed
+with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
+once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
+is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator or an
+admin may rotate or revoke, and service tokens can manage none.
+
+A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,
+`operate`, `report`; `read` is always included), an optional scope of workflow
+ids and tags, an expiry of at most 90 days and a per-minute call limit of at
+most 600. A person can grant only capabilities whose permissions they hold.
+
+`cmd/mcp` with `JANUSLY_AGENT_TOKEN` resolves the token on every call, so
+revocation, expiry and the creator's removal take effect on the next request.
+Each call then runs with:
+
+- the client's organization; nothing in a request can name another;
+- the tools its capabilities reach; `tools/list` shows only those, and
+  `workflows.save` and `workflows.propose` are in none of them;
+- the ceiling's permissions intersected with the creator's current ones, so a
+  demoted creator's client loses the matching tools;
+- for a scoped client, only workflows it lists or that carry one of its tags,
+  and their runs, dead letters and recovery cases. Lists filter in SQL, and
+  anything outside the scope answers with the same text as a missing id.
+  `operations.brief` is organization-wide, so a scoped client is refused it;
+  `catalog.describe` lists only its subworkflows;
+- the per-client limit, before the per-organization tool limits.
+
+Every call writes one `mcp.tool.invoked` row as `agent:<clientId>` with the
+client, the creator (`onBehalfOf`) and the transport; rows written by the work
+it causes carry the same actor with mode `agent`. A run an agent starts records
+the creator as an `agent` run actor, so they count as a requester of its tool
+approvals. `agent.info` describes the client, its tools, its effective and
+missing permissions, scope, expiry and limit, and needs no business permission.
+
 ## Catalog
 
-The stable catalog contains 23 tools:
+The stable catalog contains 24 tools:
 
+- agent: `agent.info`;
 - authoring: `catalog.describe`, `workflows.validate`;
 - workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
   `workflows.propose`, `workflows.save`, `workflows.rollback`,

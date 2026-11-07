@@ -3,8 +3,9 @@
 // and inspect runs, and drive the dead-letter redrive loop. The process
 // also runs the worker pool so runs progress with no other service up.
 //
-// Org scope comes from JANUSLY_ORG (default "default") — the local
-// dev-auth analogue for a stdio transport.
+// With JANUSLY_AGENT_TOKEN set, every call acts as that agent client and its
+// organization; otherwise JANUSLY_ORG (default "default") and the operator
+// ceiling in JANUSLY_MCP_PERMISSIONS apply.
 package main
 
 import (
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/johnny4young/janusly/internal/agentclient"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/boot"
 	"github.com/johnny4young/janusly/internal/config"
@@ -101,13 +103,30 @@ func run() error {
 	limiter := ratelimit.New(pool, ratelimit.Hooks{
 		OnError: tracker.RecordError, OnSuccess: tracker.RecordRecovery,
 	})
-	server := mcpserver.NewServer(mcpserver.Deps{
+	deps := mcpserver.Deps{
 		Audit:  auditWriter,
 		Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
 		Permissions: permissions, CatalogSource: mcpclient.New(pool, limiter), Limiter: limiter,
-	})
-	logger.Info("mcp server ready", "org", org,
-		"permissions", mcpserver.PermissionKeys(permissions),
-		"startup", time.Now().UTC().Format(time.RFC3339))
+		Transport: "stdio",
+	}
+	if token := os.Getenv("JANUSLY_AGENT_TOKEN"); token != "" {
+		resolver := agentclient.Resolver{Pool: pool}
+		principal, err := resolver.Resolve(ctx, token)
+		if err != nil {
+			return err
+		}
+		// Re-resolved on every call so revocation and expiry apply mid-session.
+		deps.ResolveActor = func(ctx context.Context, _ mcp.Request) (*agentclient.Principal, error) {
+			return resolver.Resolve(ctx, token)
+		}
+		logger.Info("mcp server ready", "org", principal.OrgID, "agentClient", principal.ClientID,
+			"capabilities", agentclient.Strings(principal.Capabilities),
+			"startup", time.Now().UTC().Format(time.RFC3339))
+	} else {
+		logger.Info("mcp server ready", "org", org,
+			"permissions", mcpserver.PermissionKeys(permissions),
+			"startup", time.Now().UTC().Format(time.RFC3339))
+	}
+	server := mcpserver.NewServer(deps)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

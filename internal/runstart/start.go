@@ -55,7 +55,10 @@ type Service struct {
 type Request struct {
 	OrgID, CreatedBy string
 	// ServicePrincipal is set when a service token started the run.
-	ServicePrincipal   string
+	ServicePrincipal string
+	// OnBehalfOf is the person an agent client acts for; they count as a
+	// requester of the run's tool approvals.
+	OnBehalfOf         string
 	Workflow           *domain.Workflow
 	RequestedVersionID string
 	Input              any
@@ -188,7 +191,8 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 
 	startInput := engine.StartInput{
 		OrgID: request.OrgID, Workflow: wf, Input: request.Input,
-		CreatedBy: request.CreatedBy, ServicePrincipal: request.ServicePrincipal, IdempotencyKey: request.IdempotencyKey,
+		CreatedBy: request.CreatedBy, ServicePrincipal: request.ServicePrincipal, OnBehalfOf: request.OnBehalfOf,
+		IdempotencyKey:    request.IdempotencyKey,
 		WorkflowVersionID: binding.VersionID, Rerun: request.Rerun,
 	}
 	if request.DraftTest != nil {

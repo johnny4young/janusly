@@ -195,3 +195,22 @@ func TestBootGate(t *testing.T) {
 		t.Fatalf("dev must boot: %v", err)
 	}
 }
+
+// An agent token is never sent to the identity provider and never falls
+// through to development headers, even when it happens to equal the
+// service token.
+func TestAgentTokenIsRefusedBeforeEveryProvider(t *testing.T) {
+	agentToken := AgentTokenPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	rv := makeResolver(Config{
+		SupabaseURL: "https://sb.example", SupabaseKey: "k", ServiceToken: agentToken, AllowDevHeaders: true,
+	})
+	rv.verifySupabase = func(context.Context, string) (string, string, bool) {
+		t.Fatal("agent token reached the identity provider")
+		return "", "", false
+	}
+	if p := principalFor(t, rv, map[string]string{
+		"Authorization": "Bearer " + agentToken, "x-org-id": "org-a", "x-user-id": "u1",
+	}); p != nil {
+		t.Fatalf("agent token authenticated a general route: %+v", p)
+	}
+}

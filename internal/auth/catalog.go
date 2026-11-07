@@ -1,5 +1,5 @@
 // The closed permission catalog, extracted from the contract
-// (the API contract). 41 keys across 20 active
+// (the API contract). 43 keys across 21 active
 // categories; a consistency test pins the exact key set so a catalog change
 // upstream is a loud failure here, never silent drift. Adding a key means
 // one entry plus its default roles — same contract as the contract.
@@ -58,6 +58,8 @@ var PermissionCatalog = []PermissionEntry{
 	{Key: "packs.read", Category: "packs", Description: "View the solution-pack catalog + per-org dependency hints", DefaultRoles: map[Role]bool{RoleViewer: true, RoleEditor: true, RoleAdmin: true}},
 	{Key: "packs.install", Category: "packs", Description: "Install a pack as a draft workflow, run a sandbox sample, or start a recovery drill", DefaultRoles: map[Role]bool{RoleEditor: true, RoleAdmin: true}},
 	{Key: "onboarding.read", Category: "onboarding", Description: "View own onboarding checklist progress", DefaultRoles: map[Role]bool{RoleViewer: true, RoleEditor: true, RoleAdmin: true}},
+	{Key: "agents.read", Category: "agents", Description: "View external agent clients (never their tokens)", DefaultRoles: map[Role]bool{RoleViewer: true, RoleEditor: true, RoleAdmin: true}},
+	{Key: "agents.write", Category: "agents", Description: "Create, rotate and revoke agent clients within your own permissions", DefaultRoles: map[Role]bool{RoleEditor: true, RoleAdmin: true}},
 	{Key: "onboarding.write", Category: "onboarding", Description: "Skip or resume own onboarding checklist", DefaultRoles: map[Role]bool{RoleViewer: true, RoleEditor: true, RoleAdmin: true}},
 }
 

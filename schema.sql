@@ -147,6 +147,37 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: agent_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_clients (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    name text NOT NULL,
+    capabilities text[] NOT NULL,
+    scope_workflow_ids text[] DEFAULT '{}'::text[] NOT NULL,
+    scope_tags text[] DEFAULT '{}'::text[] NOT NULL,
+    token_digest bytea NOT NULL,
+    token_last4 text NOT NULL,
+    rate_limit_per_minute integer DEFAULT 120 NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    token_issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revoked_by text,
+    last_used_at timestamp with time zone,
+    CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
+    CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
+    CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '90 days'::interval)))),
+    CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
+    CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
+    CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
+    CONSTRAINT agent_clients_scope_check CHECK (((cardinality(scope_workflow_ids) <= 100) AND (cardinality(scope_tags) <= 20)))
+);
+
+
+--
 -- Name: alert_dispatches; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1138,7 +1169,7 @@ CREATE TABLE public.run_actors (
     role text NOT NULL,
     actor text NOT NULL,
     acted_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT run_actors_role_check CHECK ((role = ANY (ARRAY['redrive'::text, 'fix'::text, 'resume'::text, 'output'::text, 'service'::text])))
+    CONSTRAINT run_actors_role_check CHECK ((role = ANY (ARRAY['redrive'::text, 'fix'::text, 'resume'::text, 'output'::text, 'service'::text, 'agent'::text])))
 );
 
 
@@ -1779,6 +1810,14 @@ CREATE TABLE public.workflows (
     created_at timestamp with time zone DEFAULT now(),
     deleted_at timestamp with time zone
 );
+
+
+--
+-- Name: agent_clients agent_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_clients
+    ADD CONSTRAINT agent_clients_pkey PRIMARY KEY (id);
 
 
 --
@@ -2483,6 +2522,20 @@ ALTER TABLE ONLY public.workflows
 
 ALTER TABLE ONLY public.workflows
     ADD CONSTRAINT workflows_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent_clients_org_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_clients_org_created_idx ON public.agent_clients USING btree (org_id, created_at DESC, id DESC);
+
+
+--
+-- Name: agent_clients_token_digest_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients USING btree (token_digest);
 
 
 --
