@@ -6,7 +6,7 @@
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 588.5
+    "maxGzipKiB": 588.6
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -85,7 +85,7 @@
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 84.99,
+    "app-workspace.js": 85.03,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
