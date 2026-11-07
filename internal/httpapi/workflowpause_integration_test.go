@@ -4,8 +4,10 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,5 +217,143 @@ func TestWorkflowPausePrecedenceAndTenancy(t *testing.T) {
 	}
 	if status, _ := workflowStatus(t, foreignOrg, foreignID); status != "active" {
 		t.Fatalf("a foreign pause changed the workflow: %s", status)
+	}
+}
+
+// Resuming a manual pause while a subscribed upstream is degraded hands the
+// workflow to the upstream pause instead of starting it.
+func TestWorkflowResumeHandsOverToADegradedUpstream(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	ctx := context.Background()
+	workflowID := fmt.Sprintf("pause-upstream-%d", time.Now().UnixNano())
+	source := "vendor-" + workflowID
+	if _, err := pool.Exec(ctx, `INSERT INTO upstream_health_sources (id, org_id, name, kind, url, last_status, last_degraded)
+		VALUES ($1, $2, $3, 'statuspage', 'https://status.example.test', 'major_outage', true)`, source, h.org, source); err != nil {
+		t.Fatal(err)
+	}
+	doc := webhookWorkflow(workflowID, "pause-upstream")
+	doc["upstreamHealthSources"] = []any{source}
+	if res := h.call("POST", "/v1/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("pause: %d %+v", res.status, res.body)
+	}
+	resumed := h.call("POST", "/v1/workflows/"+workflowID+"/resume", nil, "")
+	if resumed.status != http.StatusConflict || resumed.body["error"].(map[string]any)["code"] != "upstream_degraded" {
+		t.Fatalf("resume over a degraded upstream: %d %+v", resumed.status, resumed.body)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "paused_upstream_degraded" {
+		t.Fatalf("after hand-over: %s", status)
+	}
+	if _, err := store.New(pool).ResumeWorkflowsForUpstream(ctx, store.ResumeWorkflowsForUpstreamParams{
+		OrgID: h.org, Column2: []string{workflowID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "active" {
+		t.Fatalf("upstream recovery must resume it: %s", status)
+	}
+}
+
+// Draft tests keep the start gates, and an overlong reason is refused rather
+// than cut.
+func TestPausedWorkflowRefusesDraftTestsAndBoundsTheReason(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := fmt.Sprintf("pause-draft-%d", time.Now().UnixNano())
+	doc := map[string]any{"id": workflowID, "name": "Draft while paused", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
+	if res := h.call("POST", "/v1/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	long := h.call("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{"reason": strings.Repeat("x", 501)}, "")
+	if long.status != http.StatusBadRequest {
+		t.Fatalf("overlong reason: %d %+v", long.status, long.body)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{"reason": "line one\nline two"}, ""); res.status != 200 {
+		t.Fatalf("pause: %d %+v", res.status, res.body)
+	}
+	var reason string
+	if err := testPool(t).QueryRow(context.Background(), `SELECT paused_reason FROM workflows WHERE org_id = $1 AND id = $2`,
+		h.org, workflowID).Scan(&reason); err != nil || reason != "line one line two" {
+		t.Fatalf("stored reason %q: %v", reason, err)
+	}
+	if res := h.call("POST", "/runs/draft-test", map[string]any{"workflow": doc}, ""); res.status != http.StatusConflict || res.body["code"] != "workflow_paused" {
+		t.Fatalf("draft test while paused: %d %+v", res.status, res.body)
+	}
+}
+
+// A production subworkflow call refuses a paused child, and the parent's step
+// fails instead of starting it.
+func TestSubworkflowCallRefusesAPausedChild(t *testing.T) {
+	h := newAPIHarness(t)
+	ctx := context.Background()
+	q := store.New(testPool(t))
+	childID := fmt.Sprintf("pause-child-%d", time.Now().UnixNano())
+	if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{ID: childID, OrgID: h.org, Name: childID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.InsertWorkflowVersion(ctx, store.InsertWorkflowVersionParams{
+		ID: childID + "-v1", OrgID: h.org, WorkflowID: childID, Version: 1,
+		DagJson: json.RawMessage(`{"id":"` + childID + `","name":"child","dslVersion":"1.0","nodes":[{"id":"n","type":"noop","config":{}}],"edges":[]}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.call("POST", "/v1/workflows/"+childID+"/pause", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("pause child: %d %+v", res.status, res.body)
+	}
+	runID := extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": map[string]any{
+		"id": "parent-" + childID, "name": "parent", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "subworkflow", "config": map[string]any{"workflowId": childID}}},
+		"edges": []any{},
+	}}, ""))
+	h.waitRun(runID, "failed")
+	var children int
+	if err := testPool(t).QueryRow(ctx, `SELECT count(*) FROM runs WHERE parent_run_id = $1`, runID).Scan(&children); err != nil || children != 0 {
+		t.Fatalf("a paused child started %d runs: %v", children, err)
+	}
+}
+
+// A replay campaign waits while its dead letters' workflow is paused and
+// finishes after the workflow resumes.
+func TestReplayCampaignWaitsForAPausedWorkflow(t *testing.T) {
+	h := newAPIHarness(t)
+	workflowID := "pause-campaign-" + h.org
+	doc := map[string]any{"id": workflowID, "name": "Campaign Flow", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "call", "type": "http",
+			"config": map[string]any{"url": "http://127.0.0.1:1", "timeoutMs": float64(200)}}},
+		"edges": []any{}}
+	if res := h.call("POST", "/v1/workflows/save", doc, ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	for range 2 {
+		h.waitRun(extractRunID(t, h.call("POST", "/v1/start", map[string]any{"workflow": doc}, "")), "failed")
+	}
+	ids := deadLetterIDs(t, h)
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{}, ""); res.status != 200 {
+		t.Fatalf("pause: %d %+v", res.status, res.body)
+	}
+	created := h.call("POST", "/recovery/campaigns", map[string]any{"deadLetterIds": ids, "name": "held", "pacingMs": float64(1000)}, "")
+	if created.status != 202 {
+		t.Fatalf("create: %d %+v", created.status, created.body)
+	}
+	campaignID := created.body["campaign"].(map[string]any)["id"].(string)
+	counters := func() map[string]any {
+		return h.call("GET", "/recovery/campaigns/"+campaignID, nil, "").body["campaign"].(map[string]any)
+	}
+	time.Sleep(3 * time.Second)
+	if held := counters(); held["replayedCount"] != float64(0) || held["failedCount"] != float64(0) || held["status"] != "running" {
+		t.Fatalf("a paused workflow's campaign moved: %+v", held)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/resume", nil, ""); res.status != 200 {
+		t.Fatalf("resume: %d %+v", res.status, res.body)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for counters()["status"] != "completed" {
+		if time.Now().After(deadline) {
+			t.Fatalf("campaign never finished after resume: %+v", counters())
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

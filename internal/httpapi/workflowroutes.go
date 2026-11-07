@@ -447,6 +447,10 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 		switch {
 		case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		case errors.As(err, &notResumable) && notResumable.Status == "paused_upstream_degraded":
+			return opError(http.StatusConflict, "upstream_degraded",
+				"An upstream this workflow depends on is degraded; it resumes when the upstream recovers",
+				map[string]any{"status": notResumable.Status})
 		case errors.As(err, &notResumable):
 			return opError(http.StatusConflict, "workflow_not_circuit_breaker_paused",
 				"Workflow pause clears on its own (status: "+notResumable.Status+")",
@@ -488,7 +492,9 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 			return opError(http.StatusBadRequest, "workflows_pause_reason_invalid", "reason must be a string", nil)
 		}
 	}
-	reason = strings.TrimSpace(reason)
+	if len([]rune(reason)) > engine.MaxPauseReasonRunes {
+		return opError(http.StatusBadRequest, "workflows_pause_reason_invalid", "reason must be at most 500 characters", nil)
+	}
 	previous, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
 	switch {
 	case err == nil:

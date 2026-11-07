@@ -3,11 +3,14 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -213,9 +216,7 @@ func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason st
 	if status == WorkflowStatusPausedManual {
 		return status, nil
 	}
-	if runes := []rune(reason); len(runes) > MaxPauseReasonRunes {
-		reason = string(runes[:MaxPauseReasonRunes])
-	}
+	reason = sanitizePauseReason(reason)
 	if err := q.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
 		OrgID: orgID, ID: workflowID, Status: WorkflowStatusPausedManual,
 		PausedReason: pgtype.Text{String: reason, Valid: reason != ""},
@@ -223,4 +224,20 @@ func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason st
 		return "", err
 	}
 	return status, tx.Commit(ctx)
+}
+
+// sanitizePauseReason keeps the reason one bounded line without secret-shaped
+// literals; every viewer of the workflow list sees it.
+func sanitizePauseReason(reason string) string {
+	reason = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, signature.ScrubSecretShapes(reason))
+	reason = strings.Join(strings.Fields(reason), " ")
+	if runes := []rune(reason); len(runes) > MaxPauseReasonRunes {
+		reason = string(runes[:MaxPauseReasonRunes])
+	}
+	return reason
 }

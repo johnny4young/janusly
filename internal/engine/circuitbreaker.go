@@ -151,6 +151,35 @@ func (e *ErrWorkflowNotResumable) Error() string {
 	return "workflow pause clears on its own (status: " + e.Status + ")"
 }
 
+// handOverToUpstreamPause replaces a manual pause with the upstream pause it
+// was hiding, so the poller resumes the workflow when the upstream recovers.
+func (e *Engine) handOverToUpstreamPause(ctx context.Context, tx pgx.Tx, txq *store.Queries,
+	orgID, workflowID, userID string, degraded store.GetDegradedUpstreamForWorkflowRow) error {
+	if err := txq.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
+		OrgID: orgID, ID: workflowID, Status: upstreamPausedStatus,
+		PausedReason: pgtype.Text{String: "Upstream \"" + degraded.Name + "\" degraded (" + degraded.LastStatus + ")", Valid: true},
+	}); err != nil {
+		return fmt.Errorf("upstream hand-over: %w", err)
+	}
+	metadata, _ := json.Marshal(map[string]any{"via": "operator_resume", "sourceName": degraded.Name, "status": degraded.LastStatus})
+	if err := txq.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+		ID: e.newID(), OrgID: orgID,
+		UserID:     pgtype.Text{String: userID, Valid: userID != ""},
+		Action:     "workflow.paused.upstream",
+		TargetType: pgtype.Text{String: "workflow", Valid: true},
+		TargetID:   pgtype.Text{String: workflowID, Valid: true},
+		Metadata:   metadata,
+	}); err != nil {
+		return fmt.Errorf("audit upstream hand-over: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit upstream hand-over: %w", err)
+	}
+	return &ErrWorkflowNotResumable{Status: upstreamPausedStatus}
+}
+
+const upstreamPausedStatus = "paused_upstream_degraded"
+
 // ErrWorkflowNotFoundForResume covers absent/tombstoned workflows.
 var ErrWorkflowNotFoundForResume = errors.New("workflow not found")
 
@@ -190,6 +219,17 @@ func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID, userID s
 	case "active":
 		// A previous resume may have left a capped buffered window.
 	case WorkflowStatusPausedManual, recovery.WorkflowStatusPausedCircuitBreaker:
+		if status == WorkflowStatusPausedManual {
+			degraded, err := txq.GetDegradedUpstreamForWorkflow(ctx, store.GetDegradedUpstreamForWorkflowParams{
+				OrgID: orgID, WorkflowID: workflowID,
+			})
+			switch {
+			case err == nil:
+				return outcome, "", e.handOverToUpstreamPause(ctx, tx, txq, orgID, workflowID, userID, degraded)
+			case !errors.Is(err, pgx.ErrNoRows):
+				return outcome, "", fmt.Errorf("read upstream state: %w", err)
+			}
+		}
 		if err := txq.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
 			OrgID: orgID, ID: workflowID, Status: "active",
 		}); err != nil {

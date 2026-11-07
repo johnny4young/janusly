@@ -172,6 +172,11 @@ WHERE replay_campaign_items.id = (
   FOR UPDATE SKIP LOCKED)
 RETURNING *;
 
+-- name: ReleaseReplayCampaignItem :exec
+UPDATE replay_campaign_items
+SET status = 'pending', claim_token = NULL, claimed_at = NULL, attempt_count = attempt_count - 1
+WHERE id = $1 AND claim_token = $2;
+
 -- name: ClaimStartIdempotencyKey :execrows
 INSERT INTO run_start_idempotency (org_id, idempotency_key, run_id)
 VALUES ($1, $2, $3)
@@ -212,6 +217,8 @@ WHERE trigger_events.id IN (
   SELECT te.id FROM trigger_events te
   WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
     AND te.backfill_claim_token IS NULL
+    AND EXISTS (SELECT 1 FROM workflows w WHERE w.org_id = te.org_id AND w.id = te.workflow_id
+                AND w.status = 'active' AND w.deleted_at IS NULL)
   ORDER BY te.created_at ASC
   LIMIT sqlc.arg(page_limit)
   FOR UPDATE SKIP LOCKED

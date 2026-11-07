@@ -70,15 +70,20 @@ environment.
 - `paused_upstream_degraded`: set and cleared by the upstream status poller.
 
 While paused, starts are refused with a 409 (`workflow_paused`,
-`workflow_circuit_breaker_paused` or `upstream_degraded`). Schedule ticks are
-dropped and audited, inbound trigger events are buffered, and runs already in
-progress continue. A pause never touches versions, schedule entries or an
+`workflow_circuit_breaker_paused` or `upstream_degraded`) and a production
+subworkflow call fails its step instead of starting the child. Schedule ticks
+are dropped and audited, inbound trigger events are buffered, a replay
+campaign waits at the paused workflow's first item, and runs already in
+progress continue. Draft tests keep the start gates and are refused too. A pause never touches versions, schedule entries or an
 active rollout, which only an explicit rollout decision finishes.
 
 A manual pause replaces a system pause, and each automatic resume only
 matches its own status, so no automatic resume lifts a manual pause.
 `POST /workflows/{id}/resume` (`workflows.resume`) lifts manual and breaker
 pauses, then starts the buffered events oldest first in pages of 50. An
-upstream pause is refused with a 409 because it clears itself.
+upstream pause is refused with a 409 `upstream_degraded` because it clears
+itself; resuming a manual pause while a subscribed upstream is degraded hands
+the workflow to that upstream pause instead. Pause reasons are one line of at
+most 500 characters with secret-shaped literals removed.
 Moving a workflow to the trash (`workflows.deactivate`) is a different
 operation: it cancels the active rollout and removes the schedule entries.
