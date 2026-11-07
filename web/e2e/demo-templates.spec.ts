@@ -7,11 +7,16 @@
  * since it depends on an operator-set MCP connection — the test
  * validates template structure only.
  *
+ * Write-side tool steps default to `require_ok`, and the lane has no mailer
+ * or reachable integration credentials, so a demo whose write cannot be
+ * delivered must fail on that step and land in the DLQ instead of passing an
+ * `ok: false` envelope downstream.
+ *
  * Driven via API requests, not UI, so the spec stays under the 30s
  * Playwright default timeout per test even at 7 demos.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 import {
   ALL_DEMO_TEMPLATE_IDS,
@@ -24,7 +29,33 @@ import {
   resumeWebhook,
   seedCredential,
   startRun,
+  type RunSnapshot,
 } from "./_helpers/demo-helpers";
+
+/** The write step failed with the tool's own reason, nothing after it ran, and the DLQ holds that step. */
+async function expectUndeliveredWriteStopsRun(
+  request: APIRequestContext,
+  runId: string,
+  snapshot: RunSnapshot,
+  write: { nodeId: string; reason: string; notReached: string[] },
+): Promise<void> {
+  expect(snapshot.status, `${write.nodeId} could not deliver its write, so the run must fail`).toBe("failed");
+  const node = snapshot.nodes.find((n) => n.nodeId === write.nodeId);
+  expect(node?.status).toBe("failed");
+  expect(node?.errorJson).toMatchObject({ code: "TOOL_RESULT_NOT_OK", writeSide: true });
+  expect((node?.errorJson as { message?: string } | undefined)?.message).toContain(write.reason);
+  for (const nodeId of write.notReached) {
+    expect(snapshot.nodes.find((n) => n.nodeId === nodeId)?.status, `${nodeId} must not run after a failed write`).toBe("pending");
+  }
+  const dlq = await findDeadLetterForRun(request, runId);
+  expect(dlq?.nodeId, "the failed write must reach the DLQ").toBe(write.nodeId);
+}
+
+function nodeStatus(snapshot: RunSnapshot, nodeId: string): string | undefined {
+  return snapshot.nodes.find((n) => n.nodeId === nodeId)?.status;
+}
+
+const NO_MAILER = "Mailer not configured";
 
 test.describe.configure({ mode: "serial" });
 
@@ -47,7 +78,7 @@ test.describe("Demo templates", () => {
     }
   });
 
-  test("F1 incident-triage runs to succeeded with seeded credentials", async ({ request }) => {
+  test("F1 incident-triage summarizes, then stops at the GitHub write its credential cannot authorize", async ({ request }) => {
     await seedCredential(request, { name: "bot-github", kind: "github_token", secretRef: "JANUSLY_CRED_DEMO_GITHUB_TOKEN" });
     await seedCredential(request, { name: "incidents-slack", kind: "slack_webhook", secretRef: "JANUSLY_CRED_DEMO_SLACK_WEBHOOK" });
 
@@ -63,13 +94,15 @@ test.describe("Demo templates", () => {
     await resumeWebhook(request, runId, "trigger", payload);
 
     const snapshot = await pollUntilTerminal(request, runId);
-    expect(snapshot.status, "integration tools return ok:false envelopes; this template should not fail the run").toBe("succeeded");
-
-    const dlq = await findDeadLetterForRun(request, runId);
-    expect(dlq, "incident-triage should not throw to DLQ; tool envelopes carry ok:false instead").toBeNull();
+    expect(nodeStatus(snapshot, "summarize"), "the AI fallback contract keeps the summary step succeeded").toBe("succeeded");
+    await expectUndeliveredWriteStopsRun(request, runId, snapshot, {
+      nodeId: "github_issue",
+      reason: "credential secret missing for bot-github",
+      notReached: ["slack_notify"],
+    });
   });
 
-  test("F2 refund-triage-approval pauses on approval, resumes, and reaches succeeded", async ({ request }) => {
+  test("F2 refund-triage-approval pauses on approval, resumes, and stops at the undeliverable refund", async ({ request }) => {
     await seedCredential(request, { name: "partner-webhook", kind: "webhook_secret", secretRef: "JANUSLY_CRED_DEMO_WEBHOOK_SECRET" });
 
     const workflow = await loadTemplate(request, "refund-triage-approval");
@@ -88,9 +121,13 @@ test.describe("Demo templates", () => {
     await resumeApproval(request, runId, "human_review");
 
     const final = await pollUntilTerminal(request, runId);
-    expect(final.status, "webhook.send returns ok:false envelopes for placeholder billing endpoints; approval flow should still complete").toBe("succeeded");
-    const dlq = await findDeadLetterForRun(request, runId);
-    expect(dlq, "refund-triage-approval should not throw to DLQ").toBeNull();
+    expect(nodeStatus(final, "analyze")).toBe("succeeded");
+    expect(nodeStatus(final, "human_review"), "the approval resumes before the refund write").toBe("succeeded");
+    await expectUndeliveredWriteStopsRun(request, runId, final, {
+      nodeId: "process_refund",
+      reason: "credential secret missing for partner-webhook",
+      notReached: ["confirm_email"],
+    });
   });
 
   test("F3 failed-workflow-recovery fails on the http node and lands in DLQ", async ({ request }) => {
@@ -138,7 +175,7 @@ test.describe("Demo templates", () => {
     }
   });
 
-  test("S2 multi-agent-decision reaches succeeded via the fallback contract", async ({ request }) => {
+  test("S2 multi-agent-decision debates via the fallback contract, then stops at the unsent email", async ({ request }) => {
     const workflow = await loadTemplate(request, "multi-agent-decision");
     const payload = {
       proposal: "Replace our self-hosted Postgres with a managed RDS instance for the analytics database.",
@@ -149,10 +186,12 @@ test.describe("Demo templates", () => {
     await resumeWebhook(request, runId, "trigger", payload);
 
     const snapshot = await pollUntilTerminal(request, runId, 45_000);
-    expect(snapshot.status, "AI fallback contract should keep multi-agent-decision succeeded").toBe("succeeded");
-
-    const dlq = await findDeadLetterForRun(request, runId);
-    expect(dlq, "AI fallback contract should keep multi-agent off the DLQ").toBeNull();
+    expect(nodeStatus(snapshot, "debate"), "the AI fallback contract keeps the debate step succeeded").toBe("succeeded");
+    await expectUndeliveredWriteStopsRun(request, runId, snapshot, {
+      nodeId: "send_decision",
+      reason: NO_MAILER,
+      notReached: [],
+    });
   });
 
   test("S3 mcp-notion-summary template parses with the expected mcp_tool shape (runtime skipped)", async ({ request }) => {
@@ -163,7 +202,7 @@ test.describe("Demo templates", () => {
     expect(mcpNode?.config.toolName).toBe("pages.read");
   });
 
-  test("S4 bulk-classify-loop runs end-to-end with a 3-customer batch", async ({ request }) => {
+  test("S4 bulk-classify-loop classifies a 3-customer batch, then stops at the unsent digest", async ({ request }) => {
     const workflow = await loadTemplate(request, "bulk-classify-loop");
     const payload = {
       customers: [
@@ -178,14 +217,16 @@ test.describe("Demo templates", () => {
     await resumeWebhook(request, runId, "trigger", payload);
 
     const snapshot = await pollUntilTerminal(request, runId, 45_000);
-    expect(snapshot.status, "loop + AI fallback + noop email should complete the bulk demo").toBe("succeeded");
-
     const loopNode = snapshot.nodes.find((n) => n.nodeId === "normalize");
     expect(loopNode?.status).toBe("succeeded");
     const loopOutput = (loopNode?.stateJson?.output ?? {}) as { count?: number };
     expect(loopOutput.count, "loop should have iterated 3 times").toBe(3);
+    expect(nodeStatus(snapshot, "classify"), "the AI fallback contract keeps classification succeeded").toBe("succeeded");
 
-    const dlq = await findDeadLetterForRun(request, runId);
-    expect(dlq).toBeNull();
+    await expectUndeliveredWriteStopsRun(request, runId, snapshot, {
+      nodeId: "send_digest",
+      reason: NO_MAILER,
+      notReached: [],
+    });
   });
 });

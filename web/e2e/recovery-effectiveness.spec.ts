@@ -33,11 +33,15 @@ async function seedEffectiveness(orgId: string): Promise<{ recurrentSignature: s
     { key: 'recurring-later', createdAt: recurringOccurredAt, status: 'open', error: recurringError },
     { key: 'held-base', createdAt: new Date(heldRecoveredAt.getTime() - 60_000), status: 'replayed', error: heldError },
   ]
+  // Like a started run, input_json carries the workflow: clusters read the failing node's type from it.
+  const nodeJson = (key: string) => ({ id: `effectiveness-node-${key}`, type: 'http', config: {} })
+  const workflowJson = (key: string) => ({ id: 'effectiveness-workflow', name: 'Effectiveness proof', nodes: [nodeJson(key)], edges: [] })
   const runValues = records.map((record) => `(
     ${sqlLiteral(`effectiveness-run-${suffix}-${record.key}`)},
     ${sqlLiteral(orgId)},
     ${sqlLiteral(`effectiveness-version-${suffix}-${record.key}`)},
     ${sqlLiteral(record.status === 'open' ? 'failed' : 'succeeded')},
+    ${sqlLiteral(JSON.stringify({ workflow: workflowJson(record.key), input: {} }))}::jsonb,
     'dev-user',
     ${sqlLiteral(record.createdAt.toISOString())}::timestamptz
   )`).join(',')
@@ -54,8 +58,8 @@ async function seedEffectiveness(orgId: string): Promise<{ recurrentSignature: s
       ${sqlLiteral(`effectiveness-run-${suffix}-${record.key}`)},
       ${sqlLiteral(`effectiveness-node-${record.key}`)},
       1,
-      '{"id":"effectiveness-workflow","name":"Effectiveness proof","nodes":[],"edges":[]}'::jsonb,
-      '{"id":"step-1","type":"http","config":{}}'::jsonb,
+      ${sqlLiteral(JSON.stringify(workflowJson(record.key)))}::jsonb,
+      ${sqlLiteral(JSON.stringify(nodeJson(record.key)))}::jsonb,
       ${sqlLiteral(JSON.stringify(record.error))}::jsonb,
       ${sqlLiteral(record.status)},
       ${replayClaimedAt ? `${sqlLiteral(replayClaimedAt.toISOString())}::timestamptz` : 'NULL'},
@@ -65,7 +69,7 @@ async function seedEffectiveness(orgId: string): Promise<{ recurrentSignature: s
   }).join(',')
 
   await execPostgresSql(`
-      INSERT INTO runs (id, org_id, workflow_version_id, status, created_by, created_at)
+      INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by, created_at)
       VALUES ${runValues};
       INSERT INTO dead_letters (
         id, org_id, run_id, node_id, attempt, workflow_json, node_json,

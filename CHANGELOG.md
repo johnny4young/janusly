@@ -4,6 +4,10 @@
 
 - The success rate, open failures and longest downtime links beside the Home
   health score are at least 24 px tall, so each one is an easier touch target.
+- The Monthly report PDF recipe starts again. Its PDF step carried a `title`
+  field that the PDF tool does not accept, so every run was refused before it
+  began. Recipe checks now validate tool inputs the same way saving and
+  starting a workflow does.
 - In Spanish, the Recover queue toolbar fits on one row with the detail pane
   open, for every menu choice, from a 1280 px window on macOS and from 1310 px
   on Linux, where text renders slightly wider. Sort options read "Más
