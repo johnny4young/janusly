@@ -47,6 +47,7 @@ export const V1_WRITE_PATHS = {
   resumeRun: "/resume",
   cancelRun: "/run/cancel",
   resumeWorkflow: "/workflows/{workflowId}/resume",
+  pauseWorkflow: "/workflows/{workflowId}/pause",
   replayDeadLetter: "/dlq/replay",
   resolveDeadLetter: "/dlq/resolve",
   diagnoseRecoveryCase: "/recovery/cases/{caseId}/diagnose",

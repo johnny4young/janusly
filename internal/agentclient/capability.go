@@ -41,6 +41,7 @@ var capabilityTools = map[Capability][]string{
 	CapabilityOperate: {
 		"runs.start", "runs.cancel", "dlq.redrive",
 		"workflows.rollback", "workflows.deactivate", "workflows.reactivate",
+		"workflows.pause", "workflows.resume",
 		"recovery.cases.diagnose", "recovery.cases.validate", "recovery.cases.apply",
 	},
 	CapabilityReport: {},

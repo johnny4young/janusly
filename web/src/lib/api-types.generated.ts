@@ -1659,7 +1659,11 @@ export interface ApiRequests {
     "payload"?: RelayPayload
     "receivedAt"?: string
   }
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": {
+    "reason"?: string
+  }
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": undefined
   /** Start a bounded canary rollout */
   "POST /workflows/{workflowId}/rollout": {
@@ -1985,7 +1989,14 @@ export interface ApiResponses {
   }
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": TriggerIngestResponse
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": {
+    "changed": boolean
+    "ok": true
+    "status": "paused_manual"
+    "workflowId": string
+  }
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": {
     "backfilled": number
     "failed": number
@@ -2127,7 +2138,9 @@ export interface ApiSuccessStatuses {
   "POST /validate": 200
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": 200
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": 200
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": 200
   /** Start a bounded canary rollout */
   "POST /workflows/{workflowId}/rollout": 200

@@ -304,6 +304,12 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /v1/workflows/{id}/resume", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
 		writeVersioned(w, rc.id, s.resumeWorkflowCore(r, rc, r.PathValue("id")))
 	})
+	s.route(mux, "POST /workflows/{id}/pause", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeUnversioned(w, s.pauseWorkflowCore(r, rc, r.PathValue("id")))
+	})
+	s.route(mux, "POST /v1/workflows/{id}/pause", routeGate{auth.RoleEditor, "workflows.write"}, func(w http.ResponseWriter, r *http.Request, rc v1Request) {
+		writeVersioned(w, rc.id, s.pauseWorkflowCore(r, rc, r.PathValue("id")))
+	})
 	s.route(mux, "GET /v1/workflows", routeGate{auth.RoleViewer, "workflows.read"}, s.listWorkflows)
 	s.route(mux, "GET /v1/workflows/latest", routeGate{auth.RoleViewer, "workflows.read"}, s.latestWorkflowVersion)
 	s.route(mux, "GET /v1/workflows/versions", routeGate{auth.RoleViewer, "workflows.read"}, s.listWorkflowVersions)

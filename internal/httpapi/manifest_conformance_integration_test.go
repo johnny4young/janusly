@@ -290,6 +290,9 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 		"endpointKey": "conf-hook", "eventId": "evt-2",
 	}, ""), http.StatusAccepted)
 	rec.record("POST /v1/workflows/{id}/resume", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/resume", nil, ""), http.StatusOK)
+	rec.record("POST /v1/workflows/{id}/pause", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/pause",
+		map[string]any{"reason": "conformance"}, ""), http.StatusOK)
+	rec.record("POST /v1/workflows/{id}/resume", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/resume", nil, ""), http.StatusOK)
 
 	alias := "conf-mail-" + suffix
 	rec.record("POST /v1/workflows/save", h.call("POST", "/v1/workflows/save", emailWorkflow("conformance-email-"+suffix, alias, nil), ""), http.StatusOK)

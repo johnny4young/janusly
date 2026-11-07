@@ -66,7 +66,7 @@ implied by every other capability.
 | `propose` | `drafts.save`, `credentials.request` | `workflows.write` |
 | `test` | `workflows.test`, `workflows.qualify` | `runs.start` |
 | `publish` | `workflows.publish` | `workflows.write` |
-| `operate` | `runs.start`, `runs.cancel`, `dlq.redrive`, `workflows.rollback`, `workflows.deactivate`, `workflows.reactivate`, `recovery.cases.diagnose`, `recovery.cases.validate`, `recovery.cases.apply` | `runs.start`, `runs.cancel`, `dlq.replay`, `workflows.write`, `recovery.write` |
+| `operate` | `runs.start`, `runs.cancel`, `dlq.redrive`, `workflows.rollback`, `workflows.pause`, `workflows.resume`, `workflows.deactivate`, `workflows.reactivate`, `recovery.cases.diagnose`, `recovery.cases.validate`, `recovery.cases.apply` | `runs.start`, `runs.cancel`, `dlq.replay`, `workflows.write`, `recovery.write` |
 | `report` | Hook bridge ingest only (section 5) | none beyond the client itself |
 
 `workflows.save` is not in any capability: an agent's saves go through drafts

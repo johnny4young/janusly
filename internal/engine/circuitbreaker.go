@@ -143,13 +143,42 @@ func parseBreakerKnob(raw []byte) (int, bool, string) {
 	return domain.ParseCircuitBreakerThreshold(raw)
 }
 
-// ErrWorkflowNotBreakerPaused reports a resume against a workflow whose
-// pause (if any) belongs to another source.
-type ErrWorkflowNotBreakerPaused struct{ Status string }
+// ErrWorkflowNotResumable reports a resume against a pause that clears on
+// its own, such as an upstream outage.
+type ErrWorkflowNotResumable struct{ Status string }
 
-func (e *ErrWorkflowNotBreakerPaused) Error() string {
-	return "workflow is not paused by its circuit breaker (status: " + e.Status + ")"
+func (e *ErrWorkflowNotResumable) Error() string {
+	return "workflow pause clears on its own (status: " + e.Status + ")"
 }
+
+// handOverToUpstreamPause replaces a manual pause with the upstream pause it
+// was hiding, so the poller resumes the workflow when the upstream recovers.
+func (e *Engine) handOverToUpstreamPause(ctx context.Context, tx pgx.Tx, txq *store.Queries,
+	orgID, workflowID, userID string, degraded store.GetDegradedUpstreamForWorkflowRow) error {
+	if err := txq.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
+		OrgID: orgID, ID: workflowID, Status: upstreamPausedStatus,
+		PausedReason: pgtype.Text{String: "Upstream \"" + degraded.Name + "\" degraded (" + degraded.LastStatus + ")", Valid: true},
+	}); err != nil {
+		return fmt.Errorf("upstream hand-over: %w", err)
+	}
+	metadata, _ := json.Marshal(map[string]any{"via": "operator_resume", "sourceName": degraded.Name, "status": degraded.LastStatus})
+	if err := txq.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+		ID: e.newID(), OrgID: orgID,
+		UserID:     pgtype.Text{String: userID, Valid: userID != ""},
+		Action:     "workflow.paused.upstream",
+		TargetType: pgtype.Text{String: "workflow", Valid: true},
+		TargetID:   pgtype.Text{String: workflowID, Valid: true},
+		Metadata:   metadata,
+	}); err != nil {
+		return fmt.Errorf("audit upstream hand-over: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit upstream hand-over: %w", err)
+	}
+	return &ErrWorkflowNotResumable{Status: upstreamPausedStatus}
+}
+
+const upstreamPausedStatus = "paused_upstream_degraded"
 
 // ErrWorkflowNotFoundForResume covers absent/tombstoned workflows.
 var ErrWorkflowNotFoundForResume = errors.New("workflow not found")
@@ -165,60 +194,69 @@ type BackfillOutcome struct {
 // the next page (the contract's capped-window posture).
 const backfillPageLimit = 50
 
-// ResumeWorkflowCircuitBreaker flips paused_circuit_breaker → active
-// (audited in the same tx) and then drains the buffered trigger events
-// OLDEST-FIRST via backfill claims. The backfill runs AFTER the flip and
-// never fails the resume — the workflow IS active now.
-func (e *Engine) ResumeWorkflowCircuitBreaker(ctx context.Context, orgID, workflowID, userID string) (BackfillOutcome, bool, error) {
+// ResumeWorkflow lifts a manual or circuit-breaker pause and then drains the
+// buffered trigger events oldest-first. It returns the status it lifted, or
+// "" when the workflow was already active. A breaker resume is audited in the
+// same transaction; the caller audits a manual resume. The backfill never
+// fails the resume: the workflow is active by then.
+func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID, userID string) (BackfillOutcome, string, error) {
 	outcome := BackfillOutcome{}
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
-		return outcome, false, fmt.Errorf("begin: %w", err)
+		return outcome, "", fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	txq := store.New(tx)
-	flipped, err := txq.ResumeWorkflowCircuitBreaker(ctx, store.ResumeWorkflowCircuitBreakerParams{
-		OrgID: orgID, ID: workflowID,
-	})
+	status, err := txq.LockWorkflowPauseState(ctx, store.LockWorkflowPauseStateParams{OrgID: orgID, ID: workflowID})
 	if err != nil {
-		return outcome, false, fmt.Errorf("resume flip: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return outcome, "", ErrWorkflowNotFoundForResume
+		}
+		return outcome, "", fmt.Errorf("lock status: %w", err)
 	}
-	resumed := flipped > 0
-	if resumed {
-		metadata, _ := json.Marshal(map[string]any{"via": "operator_resume"})
-		if err := txq.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
-			ID: e.newID(), OrgID: orgID,
-			UserID:     pgtype.Text{String: userID, Valid: userID != ""},
-			Action:     "workflow.circuit_breaker.resumed",
-			TargetType: pgtype.Text{String: "workflow", Valid: true},
-			TargetID:   pgtype.Text{String: workflowID, Valid: true},
-			Metadata:   metadata,
-		}); err != nil {
-			return outcome, false, fmt.Errorf("audit resume: %w", err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return outcome, false, fmt.Errorf("commit resume: %w", err)
-		}
-	} else {
-		_ = tx.Rollback(ctx)
-		status, err := store.New(e.pool).GetWorkflowBreakerStatus(ctx, store.GetWorkflowBreakerStatusParams{
-			OrgID: orgID, ID: workflowID,
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return outcome, false, ErrWorkflowNotFoundForResume
+	lifted := ""
+	switch status {
+	case "active":
+		// A previous resume may have left a capped buffered window.
+	case WorkflowStatusPausedManual, recovery.WorkflowStatusPausedCircuitBreaker:
+		if status == WorkflowStatusPausedManual {
+			degraded, err := txq.GetDegradedUpstreamForWorkflow(ctx, store.GetDegradedUpstreamForWorkflowParams{
+				OrgID: orgID, WorkflowID: workflowID,
+			})
+			switch {
+			case err == nil:
+				return outcome, "", e.handOverToUpstreamPause(ctx, tx, txq, orgID, workflowID, userID, degraded)
+			case !errors.Is(err, pgx.ErrNoRows):
+				return outcome, "", fmt.Errorf("read upstream state: %w", err)
 			}
-			return outcome, false, fmt.Errorf("read status: %w", err)
 		}
-		if status != "active" {
-			return outcome, false, &ErrWorkflowNotBreakerPaused{Status: status}
+		if err := txq.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
+			OrgID: orgID, ID: workflowID, Status: "active",
+		}); err != nil {
+			return outcome, "", fmt.Errorf("resume flip: %w", err)
 		}
-		// Already active: a previous resume may have left a capped buffered
-		// window — repeated calls drain the next page.
+		if status == recovery.WorkflowStatusPausedCircuitBreaker {
+			metadata, _ := json.Marshal(map[string]any{"via": "operator_resume"})
+			if err := txq.InsertAuditLogRow(ctx, store.InsertAuditLogRowParams{
+				ID: e.newID(), OrgID: orgID,
+				UserID:     pgtype.Text{String: userID, Valid: userID != ""},
+				Action:     "workflow.circuit_breaker.resumed",
+				TargetType: pgtype.Text{String: "workflow", Valid: true},
+				TargetID:   pgtype.Text{String: workflowID, Valid: true},
+				Metadata:   metadata,
+			}); err != nil {
+				return outcome, "", fmt.Errorf("audit resume: %w", err)
+			}
+		}
+		lifted = status
+	default:
+		return outcome, "", &ErrWorkflowNotResumable{Status: status}
 	}
-
+	if err := tx.Commit(ctx); err != nil {
+		return outcome, "", fmt.Errorf("commit resume: %w", err)
+	}
 	outcome = e.backfillBufferedTriggerEvents(ctx, orgID, workflowID, userID)
-	return outcome, resumed, nil
+	return outcome, lifted, nil
 }
 
 // backfillBufferedTriggerEvents claims a bounded oldest-first page of

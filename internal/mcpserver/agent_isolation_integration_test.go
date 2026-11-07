@@ -175,6 +175,8 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 		"workflows.assure":     byID(map[string]any{"workflowId": foreign.workflowID}, map[string]any{"workflowId": missing}),
 		"workflows.deactivate": byID(map[string]any{"workflowId": foreign.workflowID}, map[string]any{"workflowId": missing}),
 		"workflows.reactivate": byID(map[string]any{"workflowId": foreign.workflowID}, map[string]any{"workflowId": missing}),
+		"workflows.pause":      byID(map[string]any{"workflowId": foreign.workflowID}, map[string]any{"workflowId": missing}),
+		"workflows.resume":     byID(map[string]any{"workflowId": foreign.workflowID}, map[string]any{"workflowId": missing}),
 		"workflows.rollback": byID(
 			map[string]any{"workflowId": foreign.workflowID, "sourceVersionId": foreign.versionID},
 			map[string]any{"workflowId": missing, "sourceVersionId": missing}),
@@ -492,5 +494,54 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 	}
 	if res, _ := callTool(t, limitedSession, "agent.info", map[string]any{}); !res.IsError || !strings.Contains(resultText(res), "Rate limit exceeded for mcp.agent") {
 		t.Fatalf("per-client rate limit not applied: %q", resultText(res))
+	}
+}
+
+// An operating agent pauses and resumes a workflow in its scope without
+// trashing it; a read-only agent cannot, and nothing outside its scope moves.
+func TestAgentClientPausesAndResumesWithinScope(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	tenant := seedAgentTenant(t, pool, eng, "pause")
+	status := func(workflowID string) string {
+		t.Helper()
+		var value string
+		if err := pool.QueryRow(t.Context(), `SELECT status FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL`,
+			tenant.org, workflowID).Scan(&value); err != nil {
+			t.Fatalf("status %s: %v", workflowID, err)
+		}
+		return value
+	}
+
+	reader := agentSession(t, pool, eng, issueAgentClient(t, pool, tenant, agentclient.IssueInput{Capabilities: []string{"read"}}).Token)
+	if res, _ := callTool(t, reader, "workflows.pause", map[string]any{"workflowId": tenant.workflowID}); !res.IsError {
+		t.Fatal("a read-only agent paused a workflow")
+	}
+
+	operator := issueAgentClient(t, pool, tenant, agentclient.IssueInput{Capabilities: []string{"operate"}, ScopeTags: []string{"billing"}})
+	session := agentSession(t, pool, eng, operator.Token)
+	if res, _ := callTool(t, session, "workflows.pause", map[string]any{"workflowId": tenant.otherWorkflowID}); !res.IsError {
+		t.Fatal("an agent paused a workflow outside its scope")
+	}
+	res, paused := callTool(t, session, "workflows.pause", map[string]any{"workflowId": tenant.workflowID, "reason": "nightly maintenance"})
+	if res.IsError || paused["status"] != "paused_manual" || paused["changed"] != true {
+		t.Fatalf("pause: %q %v", resultText(res), paused)
+	}
+	if got := status(tenant.workflowID); got != "paused_manual" {
+		t.Fatalf("after pause: %s", got)
+	}
+	res, resumed := callTool(t, session, "workflows.resume", map[string]any{"workflowId": tenant.workflowID})
+	if res.IsError || resumed["status"] != "active" || resumed["changed"] != true {
+		t.Fatalf("resume: %q %v", resultText(res), resumed)
+	}
+	if got, other := status(tenant.workflowID), status(tenant.otherWorkflowID); got != "active" || other != "active" {
+		t.Fatalf("after resume: %s, other %s", got, other)
+	}
+	var actions string
+	if err := pool.QueryRow(t.Context(), `SELECT string_agg(action, ',' ORDER BY created_at, id) FROM audit_logs
+		WHERE org_id = $1 AND target_id = $2 AND user_id = $3`, tenant.org, tenant.workflowID, "agent:"+operator.Client.ID).Scan(&actions); err != nil {
+		t.Fatal(err)
+	}
+	if actions != "workflow.paused,workflow.resumed" {
+		t.Fatalf("agent audit trail: %q", actions)
 	}
 }

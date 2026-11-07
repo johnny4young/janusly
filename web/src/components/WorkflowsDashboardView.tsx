@@ -59,6 +59,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
     newFolderHover,
     onCreate,
     onOpen,
+    pauseWorkflow,
     query,
     searchHint,
     searchInvalid,
@@ -134,6 +135,7 @@ export function WorkflowsDashboardView({ model }: { model: WorkflowsDashboardCon
       moveToFolder={moveToFolder}
       deleteWorkflow={deleteWorkflow}
       resumeWorkflow={resumeWorkflow}
+      pauseWorkflow={pauseWorkflow}
       recoveryBusy={recoveryBusyIds.has(workflow.id)}
       onHealthScore={reportHealthScore}
       t={t}
