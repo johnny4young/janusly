@@ -29,6 +29,7 @@ import (
 	"github.com/johnny4young/janusly/internal/httpapi/agentclients"
 	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
 	"github.com/johnny4young/janusly/internal/httpapi/publishrequests"
+	"github.com/johnny4young/janusly/internal/httpapi/runmap"
 	"github.com/johnny4young/janusly/internal/httpapi/scim"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -380,6 +381,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	agentclients.Mount(mux, agentclients.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	publishrequests.Mount(mux, publishrequests.Deps{Pool: s.pool, Audit: s.audit, Engine: s.engine, Routes: s})
+	runmap.Mount(mux, runmap.Deps{Pool: s.pool, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)
