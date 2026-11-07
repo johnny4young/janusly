@@ -38,7 +38,7 @@ key to the host `.env` does not automatically forward it into a container.
 | --- | --- | --- | --- |
 | `JANUSLY_ENV` | Process | string; `development`; trimmed case-insensitive `production` enables production posture | `internal/config/config.go`; boot validation |
 | `JANUSLY_PORT` | Process | integer; `3001`; 1–65535; must differ from internal port | `internal/config/config.go`; boot validation |
-| `JANUSLY_HTTP_HOST` | Process | string; empty (every interface); only `127.0.0.1`, `::1`, `0.0.0.0`, `::` | `internal/config/config.go`; boot validation |
+| `JANUSLY_HTTP_HOST` | Process | string; empty (every interface, or `127.0.0.1` while development auth headers are accepted); only `127.0.0.1`, `::1`, `0.0.0.0`, `::` | `internal/config/config.go`; boot validation |
 | `JANUSLY_INTERNAL_PORT` | Process | integer; `9464`; 1–65535; must differ from public port | `internal/config/config.go`; boot validation |
 | `JANUSLY_INTERNAL_HOST` | Process | string; `127.0.0.1`; only `127.0.0.1`, `::1`, `0.0.0.0`, `::` | `internal/config/config.go`; boot validation |
 | `JANUSLY_WORKER_CONCURRENCY` | Process | integer; `8`; 1–64 | `internal/config/config.go`; boot validation |
@@ -63,6 +63,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | Process | comma-separated origins; empty; only explicit loopback HTTP origins extend browser CSP; others ignored | `httpapi/cors.go` |
 | `JANUSLY_TRUSTED_PROXY` | Process | exact `true` enables first X-Forwarded-For hop; default false; only behind a header-overwriting proxy | `httpapi/cors.go` |
 | `ALLOW_PRIVATE_HTTP_TARGETS` | Process | exact `true` permits private outbound targets; default false; does not disable other SSRF/redirect/DNS/byte guards | `executors/http.go` |
+| `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK` | Process | exact `true` lets a process that accepts development auth headers listen on `0.0.0.0` or `::`; otherwise boot refuses that bind | `internal/config/config.go`; boot validation |
 | `ALLOW_DEV_AUTH_HEADERS` | Process | exact `true` enables dev headers; unset/false still auto-allows them outside production when Supabase is absent; production with configured Supabase refuses true; without Supabase production requires explicit true | `auth/auth.go` |
 | `ALLOW_DEV_SSO_BYPASS` | Process | exact `true`; default false; refused in production, including evaluator defense in depth | `authpolicy/policy.go; cmd/api/main.go` |
 | `JANUSLY_REQUIRE_EVAL_COVERAGE` | Process | exact `true`; default false; adds readiness coverage checks | `workflowreadiness/readiness.go` |

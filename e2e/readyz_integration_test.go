@@ -43,6 +43,34 @@ func TestPublicListenerHonorsLoopbackBind(t *testing.T) {
 	if out, err := probe.CombinedOutput(); err != nil {
 		t.Fatalf("readyz against a loopback bind must exit 0: %v\n%s", err, out)
 	}
+	assertLoopbackOnly(t, port)
+}
+
+// While development auth headers are accepted, the API defaults to loopback
+// and refuses a wildcard bind that nobody acknowledged.
+func TestDevAuthHeadersKeepThePublicListenerOnLoopback(t *testing.T) {
+	t.Setenv("SUPABASE_URL", "")
+	t.Setenv("JANUSLY_HTTP_HOST", "")
+	api := bootBinary(t)
+	assertLoopbackOnly(t, strings.TrimPrefix(api.base, "http://127.0.0.1:"))
+
+	refused := exec.Command(buildBinary(t))
+	refused.Env = append(os.Environ(), "JANUSLY_HTTP_HOST=0.0.0.0", fmt.Sprintf("JANUSLY_PORT=%d", freePort(t)))
+	done := make(chan []byte, 1)
+	go func() { out, _ := refused.CombinedOutput(); done <- out }()
+	select {
+	case out := <-done:
+		if refused.ProcessState.Success() || !strings.Contains(string(out), "ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true") {
+			t.Fatalf("a wildcard bind with development headers must refuse to boot:\n%s", out)
+		}
+	case <-time.After(15 * time.Second):
+		_ = refused.Process.Kill()
+		t.Fatal("a wildcard bind with development headers kept running")
+	}
+}
+
+func assertLoopbackOnly(t *testing.T, port string) {
+	t.Helper()
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
 		t.Fatal(err)
