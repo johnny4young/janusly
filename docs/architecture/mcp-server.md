@@ -85,6 +85,47 @@ call's tool approval, so the person accountable for an agent cannot approve its
 writes alone. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
 
+## Remote transport
+
+With `JANUSLY_MCP_HTTP_ENABLED=true` the `janusly` executable serves the same
+catalog at `/mcp` on the public port, over Streamable HTTP in stateless JSON
+mode: no session is kept, so any instance answers any request, and `GET` and
+`DELETE` answer 405. It is off by default; production also requires an
+`https` `JANUSLY_WEB_BASE_URL`.
+
+- Only `Authorization: Bearer jly_agent_…` authenticates. Browser sessions,
+  identity provider tokens, the service token and development headers are
+  refused; every failure is a 401 with `WWW-Authenticate: Bearer`. The token
+  is resolved on every request, so revocation applies to the next one.
+- A token-like query parameter (`access_token`, `token`, `api_key`, `key`,
+  `auth`, `authorization`, or any value starting `jly_agent_`) is refused with
+  400 before authentication, and only its name is logged. In production behind
+  `JANUSLY_TRUSTED_PROXY`, a request the proxy marks `X-Forwarded-Proto: http`
+  is refused, so a token never travels in clear.
+- A `Host` other than loopback, the `JANUSLY_WEB_BASE_URL` host or one in
+  `JANUSLY_MCP_ALLOWED_HOSTS` is refused, which defeats DNS rebinding. This
+  allowlist replaces the SDK's localhost check, which would refuse a reverse
+  proxy on the same host. Browsers are not supported callers: any request
+  carrying an `Origin` is refused, and `http.CrossOriginProtection` wraps the
+  handler.
+- Request bodies are capped at 256000 bytes (413 beyond), the same as the
+  per-call request guard. JSON-RPC batches are refused with 400, because one
+  request would otherwise fan out into thousands of concurrent, audited calls.
+- A tool's internal error is logged and answered with fixed text; database
+  and connection details never reach the client.
+- Audit rows record `transport: http`.
+
+Failed authentications are not rate limited per address: tokens carry 256
+random bits, a malformed one never reaches the database, an unknown one costs
+one index lookup, and behind a proxy a shared limit would let one client lock
+out every other.
+
+Connect a client with:
+
+```bash
+claude mcp add --transport http janusly https://janusly.example.com/mcp --header "Authorization: Bearer $JANUSLY_AGENT_TOKEN"
+```
+
 ## Catalog
 
 The stable catalog contains 24 tools:

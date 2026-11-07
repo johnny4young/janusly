@@ -75,6 +75,8 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_AUTO_HEALING_ENABLED` | Process | exact `true`; default false; also needs tenant auto-healing consent; proposals remain operator-applied | `engine/autohealing.go` |
 | `JANUSLY_CIRCUIT_BREAKER_ENABLED` | Process | enabled unless exact `false`; workflow opt-out and workflow/tenant thresholds remain independent | `recovery/circuitbreaker.go` |
 | `JANUSLY_MCP_PERMISSIONS` | Process | comma/whitespace-separated permission names; omitted → built-in read-only set; unknown entries reject MCP startup before database access/workers, without echoing input | `mcpserver/guard.go` |
+| `JANUSLY_MCP_HTTP_ENABLED` | Process | exact `true`/`false`; default false; serves remote MCP at `/mcp` for agent tokens only; production also needs an `https` `JANUSLY_WEB_BASE_URL` | `config/mcphttp.go` |
+| `JANUSLY_MCP_ALLOWED_HOSTS` | Process | comma/whitespace-separated bare host names; empty; `Host` values `/mcp` answers besides loopback and the host of `JANUSLY_WEB_BASE_URL` | `config/mcphttp.go` |
 | `JANUSLY_ORG` | Process | string; `default`; organization bound to the stdio MCP server | `cmd/mcp/main.go` |
 | `JANUSLY_AGENT_TOKEN` | Secret | `jly_agent_` token; unset; makes the stdio MCP server act as that agent client and its organization, re-checked on every call, instead of `JANUSLY_ORG` and `JANUSLY_MCP_PERMISSIONS` | `cmd/mcp/main.go` |
 | `JANUSLY_SSO_CALLBACK_URL` | Process | URL string; empty; required by WorkOS SSO flows; must match provider registration | `httpapi/sso.go` |

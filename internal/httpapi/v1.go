@@ -123,6 +123,9 @@ type V1ServerOptions struct {
 	// StartRateLimitPerMinute bounds POST /v1/start per organization; 0
 	// resolves JANUSLY_START_RATE_LIMIT_PER_MIN or the default.
 	StartRateLimitPerMinute int
+	// MCPHandler, when set, serves remote MCP at /mcp. It authenticates agent
+	// tokens itself, so it bypasses the API's resolver chain.
+	MCPHandler http.Handler
 	// rateLimitNow is the package-local fixed-window clock seam for tests.
 	rateLimitNow func() time.Time
 }
@@ -219,6 +222,12 @@ func newV1HandlerWithWorkOS(
 	server.startRunLimit = startRateLimit(options.StartRateLimitPerMinute)
 	mux := http.NewServeMux()
 	server.mountAPIRoutes(mux)
+	if options.MCPHandler != nil {
+		// One pattern per method: a method-less "/mcp" conflicts with "GET /".
+		for _, method := range []string{"POST", "GET", "DELETE"} {
+			mux.Handle(method+" /mcp", options.MCPHandler)
+		}
+	}
 
 	// The embedded Vite bundle rides the mux's own catch-all: every unmatched
 	// GET serves a static asset or the SPA shell. API patterns above always win
