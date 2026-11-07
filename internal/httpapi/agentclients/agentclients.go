@@ -141,7 +141,7 @@ type rotateBody struct {
 }
 
 func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
-	existing, refused := s.managed(r, rc)
+	existing, refused := s.managed(r, rc, false)
 	if refused != nil {
 		return *refused
 	}
@@ -167,7 +167,7 @@ func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
 }
 
 func (s *service) revoke(r *http.Request, rc httpkit.Request) httpkit.Result {
-	existing, refused := s.managed(r, rc)
+	existing, refused := s.managed(r, rc, true)
 	if refused != nil {
 		return *refused
 	}
@@ -186,9 +186,10 @@ func (s *service) revoke(r *http.Request, rc httpkit.Request) httpkit.Result {
 	return httpkit.OK(map[string]any{"client": view(row, s.now())})
 }
 
-// managed loads a client the caller may change: their own, or any client
-// when they hold an admin-ranked role.
-func (s *service) managed(r *http.Request, rc httpkit.Request) (store.AgentClient, *httpkit.Result) {
+// managed loads a client the caller may change: their own, or, for revoke,
+// any client when they hold an admin-ranked role. Rotation stays with the
+// creator, because the new token acts with the creator's authority.
+func (s *service) managed(r *http.Request, rc httpkit.Request, adminMay bool) (store.AgentClient, *httpkit.Result) {
 	if refused := requirePerson(rc); refused != nil {
 		return store.AgentClient{}, refused
 	}
@@ -204,6 +205,11 @@ func (s *service) managed(r *http.Request, rc httpkit.Request) (store.AgentClien
 	}
 	if row.CreatedBy == rc.UserID {
 		return row, nil
+	}
+	if !adminMay {
+		result := httpkit.Error(http.StatusForbidden, "agent_client_not_owned",
+			"only the creator can rotate this agent client; an admin can revoke it", nil)
+		return store.AgentClient{}, &result
 	}
 	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
 	if err != nil {

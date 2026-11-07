@@ -343,6 +343,12 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 	if res, _ := callTool(t, session, "operations.brief", map[string]any{}); !res.IsError {
 		t.Fatal("a scoped client read the organization-wide brief")
 	}
+	adhoc := map[string]any{"id": tenant.workflowID, "name": "unsaved", "dslVersion": "1.0",
+		"nodes": []any{map[string]any{"id": "only", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
+	if res, _ := callTool(t, session, "runs.start", map[string]any{"workflow": adhoc}); !res.IsError ||
+		!strings.Contains(resultText(res), "cannot run an unsaved document") {
+		t.Fatalf("an agent ran an unsaved document in production: %q", resultText(res))
+	}
 
 	started, payload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID})
 	if started.IsError {

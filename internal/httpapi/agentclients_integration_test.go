@@ -61,8 +61,10 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 		t.Fatalf("list leaked the token or lost the client: %d %s", listed.status, raw)
 	}
 
-	if res := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/rotate", nil, "", as("peer")); res.status != 403 || res.body["code"] != "agent_client_not_owned" {
-		t.Fatalf("a peer rotated someone else's client: %d %v", res.status, res.body)
+	for _, other := range []string{"peer", "admin"} {
+		if res := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/rotate", nil, "", as(other)); res.status != 403 || res.body["code"] != "agent_client_not_owned" {
+			t.Fatalf("%s rotated someone else's client and would hold its token: %d %v", other, res.status, res.body)
+		}
 	}
 	rotated := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/rotate", map[string]any{"expiresInDays": 3}, "", as("editor"))
 	if rotated.status != 200 || rotated.body["token"] == token || !strings.HasPrefix(fmt.Sprint(rotated.body["token"]), "jly_agent_") {

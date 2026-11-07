@@ -281,6 +281,10 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	if (workflowID == "") == (document == nil) {
 		return expected("pass exactly one of workflowId or workflow; workflows.list shows saved ids")
 	}
+	if d.agent() != nil && document != nil {
+		// An unsaved document would reach production without publication.
+		return expected("an agent client starts saved workflows by workflowId; it cannot run an unsaved document")
+	}
 	if workflowID != "" {
 		if requestedVersionID != "" {
 			return expected("workflowVersionId only applies to a workflow document; workflowId runs the latest version")
