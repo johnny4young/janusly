@@ -80,6 +80,7 @@ specs=(
   e2e/workflow-language.spec.ts
   e2e/workflow-tags.spec.ts
   e2e/workflow-trash.spec.ts
+  e2e/compressed-assets.spec.ts
 )
 
 usage() {

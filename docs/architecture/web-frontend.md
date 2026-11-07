@@ -8,6 +8,22 @@ bundle with SPA fallback, one-year immutable caching for hashed `/assets/`, and
 `no-cache` for the HTML shell and top-level files. Vite proxies API paths to
 `127.0.0.1:3001` during development.
 
+The production build writes a `.br` and a `.gz` sibling next to every text file
+in `dist` (`web/scripts/precompress-plugin.mjs`), skipping any sibling that is
+not smaller than its source. The executable embeds them and serves the encoding
+the browser accepts, brotli first, with `Content-Encoding`,
+`Vary: Accept-Encoding`, the original `Content-Type` and a strong ETag for each
+representation. Nothing is compressed per request. Fonts and images are served
+as they are, and range requests get the uncompressed bytes. The extension list
+lives in the plugin and in `internal/webdist`; a Go test fails when they differ.
+A first Home load moves about 210 KiB of static assets instead of about 800 KiB.
+
+API responses are not compressed. They are dynamic, cookie-authenticated and
+often put tenant-controlled input next to tokens or credentials, which is the
+pattern BREACH exploits, and SSE streams must flush frame by frame. The one
+exception is `GET /v1/openapi.json`: it is public and static, so the process
+gzips it once and serves it the same way.
+
 The operator-visible build stamp is injected into the no-cache HTML root and
 read by the browser from that document. It is not compiled into hashed JS:
 building unchanged frontend source for a new commit must not invalidate every
