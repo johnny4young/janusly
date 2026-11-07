@@ -66,6 +66,18 @@ type Config struct {
 	FeedbackMemoryQueueCapacity int
 	// FeedbackMemoryTaskTimeout bounds one feedback-derived memory task.
 	FeedbackMemoryTaskTimeout time.Duration
+	// MCPHTTP serves remote MCP at /mcp on the public listener when enabled.
+	MCPHTTP MCPHTTP
+}
+
+// MCPHTTP is the remote MCP endpoint's configuration. It is off by default so
+// an upgrade never opens a new surface by itself.
+type MCPHTTP struct {
+	Enabled bool
+	// AllowedHosts are Host values answered besides loopback: the host of
+	// JANUSLY_WEB_BASE_URL plus JANUSLY_MCP_ALLOWED_HOSTS.
+	AllowedHosts   []string
+	AllowedOrigins []string
 }
 
 // IsProduction is the single process-environment gate for production-only
@@ -185,6 +197,7 @@ func Load(getenv func(string) string) (Config, error) {
 	default:
 		problems = append(problems, "JANUSLY_INTERNAL_HOST must be 127.0.0.1, 0.0.0.0, ::1, or ::")
 	}
+	cfg.MCPHTTP, problems = loadMCPHTTP(getenv, production, problems)
 	problems = append(problems, orgconfig.ValidateHTTPEnvironment(getenv)...)
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %s", strings.Join(problems, "; "))

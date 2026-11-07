@@ -1,0 +1,177 @@
+//go:build integration
+
+package mcpserver
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/johnny4young/janusly/internal/agentclient"
+	"github.com/johnny4young/janusly/internal/store"
+)
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+type bearerTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+b.token)
+	return b.base.RoundTrip(r)
+}
+
+func remoteSession(t *testing.T, endpoint, token string) (*mcp.ClientSession, error) {
+	t.Helper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "remote-agent", Version: "1"}, nil)
+	return client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:   endpoint,
+		HTTPClient: &http.Client{Transport: bearerTransport{token: token, base: http.DefaultTransport}},
+	}, nil)
+}
+
+func rawPost(t *testing.T, endpoint string, headers map[string]string, body string) (int, string, http.Header) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	for name, value := range headers {
+		if name == "Host" {
+			req.Host = value
+			continue
+		}
+		req.Header.Set(name, value)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	raw, _ := io.ReadAll(res.Body)
+	return res.StatusCode, string(raw), res.Header
+}
+
+const initializeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"raw","version":"1"}}}`
+
+func TestRemoteMCPServesAgentClientsOverStreamableHTTP(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	tenant := seedAgentTenant(t, pool, eng, "remote")
+	issued := issueAgentClient(t, pool, tenant, agentclient.IssueInput{Capabilities: []string{"operate"}})
+	logs := &syncBuffer{}
+	server := httptest.NewServer(NewHTTPHandler(Deps{Engine: eng, Pool: pool, NewID: uuid.NewString},
+		HTTPOptions{AllowedHosts: []string{"janusly.example.com"}, Logger: slog.New(slog.NewTextHandler(logs, nil))}))
+	t.Cleanup(server.Close)
+	endpoint := server.URL + "/mcp"
+
+	session, err := remoteSession(t, endpoint, issued.Token)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name == "workflows.save" {
+			t.Fatal("remote client lists workflows.save")
+		}
+	}
+	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "runs.start", Arguments: map[string]any{"workflowId": tenant.workflowID}})
+	if err != nil || res.IsError {
+		t.Fatalf("remote runs.start: %v %q", err, resultText(res))
+	}
+	var transport string
+	if err := pool.QueryRow(t.Context(), `SELECT metadata->>'transport' FROM audit_logs
+		WHERE org_id = $1 AND user_id = $2 AND action = 'mcp.tool.invoked' AND target_id = 'runs.start'`,
+		tenant.org, "agent:"+issued.Client.ID).Scan(&transport); err != nil || transport != "http" {
+		t.Fatalf("remote call audit transport: %q %v", transport, err)
+	}
+
+	// Every credential failure reads the same, with the bearer challenge.
+	for label, headers := range map[string]map[string]string{
+		"missing":       {},
+		"malformed":     {"Authorization": "Bearer jly_agent_short"},
+		"unknown":       {"Authorization": "Bearer " + strings.Repeat("A", 10)},
+		"service token": {"Authorization": "Bearer svc", "x-org-id": tenant.org, "x-user-id": tenant.creator},
+		"dev headers":   {"x-org-id": tenant.org, "x-user-id": tenant.creator},
+	} {
+		status, _, header := rawPost(t, endpoint, headers, initializeBody)
+		if status != http.StatusUnauthorized || !strings.HasPrefix(header.Get("WWW-Authenticate"), "Bearer") {
+			t.Fatalf("%s credential: status %d challenge %q", label, status, header.Get("WWW-Authenticate"))
+		}
+	}
+
+	auth := map[string]string{"Authorization": "Bearer " + issued.Token}
+	if status, body, _ := rawPost(t, endpoint+"?access_token="+issued.Token, auth, initializeBody); status != http.StatusBadRequest || strings.Contains(body, issued.Token) {
+		t.Fatalf("token in the URL: %d %q", status, body)
+	}
+	if strings.Contains(logs.String(), issued.Token) {
+		t.Fatal("the token reached the logs")
+	}
+	withHost := map[string]string{"Authorization": "Bearer " + issued.Token, "Host": "attacker.example"}
+	if status, _, _ := rawPost(t, endpoint, withHost, initializeBody); status != http.StatusForbidden {
+		t.Fatalf("rebinding host accepted: %d", status)
+	}
+	allowedHost := map[string]string{"Authorization": "Bearer " + issued.Token, "Host": "janusly.example.com"}
+	if status, _, _ := rawPost(t, endpoint, allowedHost, initializeBody); status != http.StatusOK {
+		t.Fatalf("configured host refused: %d", status)
+	}
+	withOrigin := map[string]string{"Authorization": "Bearer " + issued.Token, "Origin": "https://attacker.example"}
+	if status, _, _ := rawPost(t, endpoint, withOrigin, initializeBody); status != http.StatusForbidden {
+		t.Fatalf("browser origin accepted: %d", status)
+	}
+	big := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workflows.validate","arguments":{"workflow":{"name":"` +
+		strings.Repeat("x", 300_000) + `"}}}}`
+	if status, _, _ := rawPost(t, endpoint, auth, big); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body: %d", status)
+	}
+
+	getReq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, endpoint, nil)
+	getReq.Header.Set("Authorization", "Bearer "+issued.Token)
+	getReq.Header.Set("Accept", "text/event-stream")
+	if res, err := http.DefaultClient.Do(getReq); err != nil || res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("stateless GET: %v %v", err, res)
+	} else {
+		_ = res.Body.Close()
+	}
+
+	if _, err := store.New(pool).RevokeAgentClient(context.Background(), store.RevokeAgentClientParams{
+		OrgID: tenant.org, ID: issued.Client.ID, RevokedBy: tenant.creator,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := rawPost(t, endpoint, auth, initializeBody); status != http.StatusUnauthorized {
+		t.Fatalf("revoked token still answered: %d", status)
+	}
+}

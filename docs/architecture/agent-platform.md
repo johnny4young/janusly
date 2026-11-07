@@ -251,8 +251,11 @@ public listener, before `webdist`:
   `JANUSLY_MCP_ALLOWED_ORIGINS` (empty by default; native clients send none),
   and `http.CrossOriginProtection` wraps the handler.
 - **Bounds.** 256 KB request bodies (the SDK limit and the existing request
-  guard), the existing 256000-byte response gate, a per-IP limit on failed
-  authentications, and the per-client limit after authentication.
+  guard), the existing 256000-byte response gate, and the per-client limit
+  after authentication. Failed authentications are not limited per address:
+  a malformed token never reaches the database, an unknown one costs one index
+  lookup, and behind a proxy a shared limit would let one client lock out the
+  rest.
 - **No token forwarding.** The general resolver rejects any `jly_agent_`
   bearer without sending it to Supabase, so a misdirected agent token never
   reaches a third party.
