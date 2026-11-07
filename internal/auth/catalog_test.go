@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// The catalog is CLOSED: exactly 41 keys, every default role a built-in,
+// The catalog is CLOSED: exactly 43 keys, every default role a built-in,
 // and the anchor cases from the contract's own matrix hold.
 func TestPermissionCatalogPinned(t *testing.T) {
-	if len(PermissionCatalog) != 41 {
-		t.Fatalf("catalog must hold exactly 41 keys, got %d", len(PermissionCatalog))
+	if len(PermissionCatalog) != 43 {
+		t.Fatalf("catalog must hold exactly 43 keys, got %d", len(PermissionCatalog))
 	}
 	categories := map[string]bool{}
 	for _, entry := range PermissionCatalog {
@@ -23,8 +23,8 @@ func TestPermissionCatalogPinned(t *testing.T) {
 		}
 		categories[entry.Category] = true
 	}
-	if len(categories) != 20 {
-		t.Fatalf("20 active categories expected, got %d", len(categories))
+	if len(categories) != 21 {
+		t.Fatalf("21 active categories expected, got %d", len(categories))
 	}
 
 	// Anchor rows against the contract matrix.

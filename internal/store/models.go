@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AgentClient struct {
+	ID                 string
+	OrgID              string
+	Name               string
+	Capabilities       []string
+	ScopeWorkflowIds   []string
+	ScopeTags          []string
+	TokenDigest        []byte
+	TokenLast4         string
+	RateLimitPerMinute int32
+	CreatedBy          string
+	CreatedAt          time.Time
+	TokenIssuedAt      time.Time
+	ExpiresAt          time.Time
+	RevokedAt          *time.Time
+	RevokedBy          pgtype.Text
+	LastUsedAt         *time.Time
+}
+
 type AlertDispatch struct {
 	ID             string
 	OrgID          string

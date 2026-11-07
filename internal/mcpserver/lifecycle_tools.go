@@ -51,37 +51,37 @@ func registerLifecycleTools(server *mcp.Server, deps Deps) {
 		"workflows.get", "Get workflow",
 		"Read one active workflow: its document with secret-shaped literals removed, recent versions, and schedules with their next fire time.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowGetArgs) (*mcp.CallToolResult, any, error) {
-		return deps.getWorkflow(ctx, args)
+		return deps.at(ctx).getWorkflow(ctx, args)
 	})
 	mcp.AddTool(server, writeTool(
 		"workflows.rollback", "Roll back workflow",
 		"Append an older version as the new latest immutable version and reconcile its schedules.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowRollbackArgs) (*mcp.CallToolResult, any, error) {
-		return deps.rollbackWorkflow(ctx, args)
+		return deps.at(ctx).rollbackWorkflow(ctx, args)
 	})
 	mcp.AddTool(server, writeTool(
 		"workflows.deactivate", "Deactivate workflow",
 		"Move a workflow to the trash: its schedules stop, its active rollout is cancelled and new runs are refused. workflows.reactivate undoes it until retention purges it.", true,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowLifecycleArgs) (*mcp.CallToolResult, any, error) {
-		return deps.setWorkflowActive(ctx, args.WorkflowID, false)
+		return deps.at(ctx).setWorkflowActive(ctx, args.WorkflowID, false)
 	})
 	mcp.AddTool(server, writeTool(
 		"workflows.reactivate", "Reactivate workflow",
 		"Restore a deactivated workflow and rebuild its schedules from the latest version.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowLifecycleArgs) (*mcp.CallToolResult, any, error) {
-		return deps.setWorkflowActive(ctx, args.WorkflowID, true)
+		return deps.at(ctx).setWorkflowActive(ctx, args.WorkflowID, true)
 	})
 	mcp.AddTool(server, readTool(
 		"runs.output", "Read run output",
 		"Read a run's declared output and its steps' outputs, with secret-shaped literals removed and each value bounded to 32000 bytes.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args runOutputArgs) (*mcp.CallToolResult, any, error) {
-		return deps.runOutput(ctx, args)
+		return deps.at(ctx).runOutput(ctx, args)
 	})
 	mcp.AddTool(server, writeTool(
 		"runs.cancel", "Cancel run",
 		"Cancel a run that has not finished. Effects already applied are not undone.", true,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args runCancelArgs) (*mcp.CallToolResult, any, error) {
-		return deps.cancelRun(ctx, args)
+		return deps.at(ctx).cancelRun(ctx, args)
 	})
 }
 
@@ -94,6 +94,9 @@ func (d Deps) getWorkflow(ctx context.Context, args workflowGetArgs) (*mcp.CallT
 	}
 	if args.Version < 0 {
 		return expected("version must be a positive version number")
+	}
+	if visible, err := d.workflowVisible(ctx, args.WorkflowID); err != nil || !visible {
+		return hiddenResult(err, "workflow not found or deactivated; workflows.list shows active workflows")
 	}
 	q := store.New(d.Pool)
 	parent, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: args.WorkflowID, OrgID: d.OrgID})
@@ -167,6 +170,9 @@ func (d Deps) rollbackWorkflow(ctx context.Context, args workflowRollbackArgs) (
 	if !validMCPIdentifier(args.WorkflowID) || !validMCPIdentifier(args.SourceVersionID) {
 		return expected("workflowId and sourceVersionId are required and must be at most 256 characters")
 	}
+	if visible, err := d.workflowVisible(ctx, args.WorkflowID); err != nil || !visible {
+		return hiddenResult(err, "workflow not found")
+	}
 	committed, err := d.Engine.RollbackWorkflowVersion(ctx, engine.RollbackWorkflowInput{
 		OrgID: d.OrgID, UserID: d.UserID, WorkflowID: args.WorkflowID,
 		SourceVersionID: args.SourceVersionID, NewID: d.NewID,
@@ -210,6 +216,12 @@ func (d Deps) setWorkflowActive(ctx context.Context, workflowID string, active b
 	if !validMCPIdentifier(workflowID) {
 		return expected("workflowId is required and must be at most 256 characters")
 	}
+	if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
+		if active {
+			return hiddenResult(err, "workflow not found or already active")
+		}
+		return hiddenResult(err, "workflow not found or already deactivated")
+	}
 	var err error
 	if active {
 		err = d.Engine.ReactivateWorkflow(ctx, d.OrgID, workflowID, d.UserID)
@@ -241,6 +253,9 @@ func (d Deps) runOutput(ctx context.Context, args runOutputArgs) (*mcp.CallToolR
 	}
 	if !validMCPIdentifier(args.RunID) || !validOptionalMCPIdentifier(args.NodeID) {
 		return expected("runId is required; runId and nodeId must be at most 256 characters")
+	}
+	if visible, err := d.runVisible(ctx, args.RunID); err != nil || !visible {
+		return hiddenResult(err, "run not found")
 	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: args.RunID, OrgID: d.OrgID})
@@ -297,6 +312,9 @@ func (d Deps) cancelRun(ctx context.Context, args runCancelArgs) (*mcp.CallToolR
 	}
 	if !validMCPIdentifier(args.RunID) {
 		return expected("runId is required and must be at most 256 characters")
+	}
+	if visible, err := d.runVisible(ctx, args.RunID); err != nil || !visible {
+		return hiddenResult(err, "run not found")
 	}
 	if _, err := store.New(d.Pool).GetRun(ctx, store.GetRunParams{ID: args.RunID, OrgID: d.OrgID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

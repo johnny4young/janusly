@@ -29,6 +29,19 @@ func TestRecoveryApprovalRejectsServiceAndMCPPrincipalsBeforePersistence(t *test
 	}
 }
 
+func TestRecoveryApprovalRejectsAgentClients(t *testing.T) {
+	_, err := (&Engine{}).ApproveRecoveryCandidate(context.Background(), ApproveRecoveryCandidateInput{
+		Auth: &auth.Context{
+			OrgID: "org-1", UserID: "agent:client-1", Mode: auth.ModeAgent, Source: auth.SourceMcp, AgentClientID: "client-1",
+		},
+		CaseID: "case-1", ExpectedRevision: 3,
+		CandidateArtifactID: "candidate-1", ValidationArtifactID: "validation-1",
+	})
+	if !errors.Is(err, ErrRecoveryHumanApprovalRequired) {
+		t.Fatalf("an agent client created a human approval grant: %v", err)
+	}
+}
+
 func TestRecoveryActorKindPreservesHumanAndAgentProvenance(t *testing.T) {
 	for _, test := range []struct {
 		name   string

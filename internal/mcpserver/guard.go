@@ -84,8 +84,12 @@ func (d Deps) guardToolAny(
 		allowed = false
 		reason = "MCP actor scope is unavailable."
 	}
+	if principal := d.agent(); allowed && principal != nil && !principal.Tools[toolName] {
+		allowed = false
+		reason = "agent client lacks a capability that includes " + toolName + "; agent.info lists the tools it can call."
+	}
 	if allowed {
-		hasPermission := false
+		hasPermission := len(required) == 0
 		for _, permission := range required {
 			if permission != "" && d.Permissions != nil && d.Permissions[permission] {
 				hasPermission = true
@@ -117,6 +121,13 @@ func (d Deps) guardToolAny(
 	maxCalls := 120
 	if write {
 		maxCalls = 60
+	}
+	if principal := d.agent(); principal != nil && d.Limiter != nil {
+		if err := d.Limiter.Enforce(ctx, principal.ClientID, ratelimit.Options{
+			Name: "mcp.agent", Max: principal.RateLimitPerMinute, Window: time.Minute,
+		}); err != nil {
+			allowed, reason = false, err.Error()
+		}
 	}
 	if d.Limiter != nil && d.OrgID != "" && d.UserID != "" {
 		bucket := "mcp." + toolName
@@ -216,11 +227,18 @@ func (d Deps) auditToolDecision(
 	if d.Pool == nil {
 		return
 	}
+	metadata := map[string]any{
+		"permissions": permissions, "write": write, "allowed": allowed,
+		"denial": reason, "phase": phase,
+	}
+	if d.Transport != "" {
+		metadata["transport"] = d.Transport
+	}
+	if principal := d.agent(); principal != nil {
+		metadata["agentClient"] = map[string]any{"id": principal.ClientID, "name": principal.Name}
+		metadata["onBehalfOf"] = principal.CreatedBy
+	}
 	d.Audit.Write(ctx, d.Pool, d.auditContext(), "mcp.tool.invoked", audit.Options{
-		TargetType: "mcp_tool", TargetID: toolName,
-		Metadata: map[string]any{
-			"permissions": permissions, "write": write, "allowed": allowed,
-			"denial": reason, "phase": phase,
-		},
+		TargetType: "mcp_tool", TargetID: toolName, Metadata: metadata,
 	})
 }

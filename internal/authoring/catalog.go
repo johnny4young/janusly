@@ -176,6 +176,13 @@ func boundedCatalogRows[T any](rows []T, warning string, warnings *[]string) []T
 	return rows[:maxDynamicCatalogEntries]
 }
 
+// Redigest recomputes the version after a caller narrows the catalog, so the
+// version reveals nothing about entries it removed.
+func Redigest(catalog Catalog) Catalog {
+	catalog.Version = catalogDigest(catalog)
+	return catalog
+}
+
 func catalogDigest(catalog Catalog) string {
 	catalog.Version = ""
 	raw, err := json.Marshal(catalog)

@@ -73,42 +73,42 @@ func registerOperatorTools(server *mcp.Server, deps Deps) {
 		"operations.brief", "Operator brief",
 		"Return Janusly's deterministic top-three tenant priorities. This is the exact read model used by Home; AI cannot rerank it.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-		return deps.operationsBrief(ctx)
+		return deps.at(ctx).operationsBrief(ctx)
 	})
 
 	mcp.AddTool(server, readTool(
 		"workflows.propose", "Propose workflow",
 		"Compile an intent brief and bind a provider-free or caller-supplied workflow draft to exact tenant capabilities. Returns a bounded summary, plus the draft document when includeDocument is true.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpWorkflowProposalArgs) (*mcp.CallToolResult, any, error) {
-		return deps.proposeWorkflow(ctx, args)
+		return deps.at(ctx).proposeWorkflow(ctx, args)
 	})
 
 	mcp.AddTool(server, readTool(
 		"recovery.cases.inspect", "Inspect recovery case",
 		"Inspect bounded recovery state, transition and artifact metadata without raw evidence, outputs, workflow DAGs, or approval grants.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryInspectArgs) (*mcp.CallToolResult, any, error) {
-		return deps.inspectRecoveryCase(ctx, args.CaseID)
+		return deps.at(ctx).inspectRecoveryCase(ctx, args.CaseID)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.diagnose", "Diagnose recovery case",
 		"Persist a deterministic or bounded AI-enriched diagnosis and one to three engine-owned immutable typed recovery candidates. Provider absence never blocks this operation.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryDiagnoseArgs) (*mcp.CallToolResult, any, error) {
-		return deps.diagnoseRecoveryCase(ctx, args)
+		return deps.at(ctx).diagnoseRecoveryCase(ctx, args)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.validate", "Validate recovery candidate",
 		"Validate one immutable candidate against the exact workflow snapshot and persist a content-bound validation artifact.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryValidateArgs) (*mcp.CallToolResult, any, error) {
-		return deps.validateRecoveryCase(ctx, args)
+		return deps.at(ctx).validateRecoveryCase(ctx, args)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"recovery.cases.apply", "Apply recovery candidate",
 		"Apply an immutable validated candidate only after an independent active human approval. MCP never creates approvals.", true,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args mcpRecoveryApplyArgs) (*mcp.CallToolResult, any, error) {
-		return deps.applyRecoveryCase(ctx, args)
+		return deps.at(ctx).applyRecoveryCase(ctx, args)
 	})
 }
 
@@ -117,6 +117,9 @@ func (d Deps) operationsBrief(ctx context.Context) (*mcp.CallToolResult, any, er
 		"recovery.read", "runs.read", "dlq.read",
 	}, false); !allowed {
 		return expected(message)
+	}
+	if d.scoped() {
+		return expected("operations.brief covers the whole organization; a scoped agent client reads runs.list and dlq.list instead")
 	}
 	brief := operations.Builder{
 		Pool: d.Pool, Surface: operations.ActionSurfaceMCP,
@@ -340,6 +343,9 @@ func (d Deps) inspectRecoveryCase(ctx context.Context, caseID string) (*mcp.Call
 	if !validMCPCaseID(caseID) {
 		return expected("caseId is required and must be at most 256 characters")
 	}
+	if visible, err := d.recoveryCaseVisible(ctx, caseID); err != nil || !visible {
+		return hiddenResult(err, "recovery case not found")
+	}
 	detail, err := d.Engine.GetRecoveryCaseDetail(ctx, d.OrgID, caseID)
 	if err != nil {
 		return mcpRecoveryError(err)
@@ -398,6 +404,9 @@ func (d Deps) diagnoseRecoveryCase(ctx context.Context, args mcpRecoveryDiagnose
 	}
 	if raw, err := json.Marshal(args); err != nil || len(raw) > maxMCPWorkflowDocumentBytes {
 		return expected("recovery request is invalid or exceeds 128000 bytes")
+	}
+	if visible, err := d.recoveryCaseVisible(ctx, args.CaseID); err != nil || !visible {
+		return hiddenResult(err, "recovery case not found")
 	}
 	caseRow, err := store.New(d.Pool).GetRecoveryCase(ctx, store.GetRecoveryCaseParams{OrgID: d.OrgID, ID: args.CaseID})
 	if err != nil {
@@ -464,6 +473,9 @@ func (d Deps) validateRecoveryCase(ctx context.Context, args mcpRecoveryValidate
 	if !validMCPCaseID(args.CaseID) || args.ExpectedRevision < 1 || !validMCPArtifactID(args.CandidateArtifactID) {
 		return expected("caseId, candidateArtifactId and a positive expectedRevision are required")
 	}
+	if visible, err := d.recoveryCaseVisible(ctx, args.CaseID); err != nil || !visible {
+		return hiddenResult(err, "recovery case not found")
+	}
 	result, err := d.Engine.ValidateRecoveryCaseCandidate(ctx, engine.ValidateRecoveryCaseCandidateInput{
 		Auth: d.auditContext(), CaseID: args.CaseID, ExpectedRevision: args.ExpectedRevision,
 		CandidateArtifactID: args.CandidateArtifactID,
@@ -485,6 +497,9 @@ func (d Deps) applyRecoveryCase(ctx context.Context, args mcpRecoveryApplyArgs) 
 	if !validMCPCaseID(args.CaseID) || args.ExpectedRevision < 1 ||
 		!validMCPArtifactID(args.CandidateArtifactID) || !validMCPArtifactID(args.ValidationArtifactID) {
 		return expected("caseId, candidateArtifactId, validationArtifactId and a positive expectedRevision are required")
+	}
+	if visible, err := d.recoveryCaseVisible(ctx, args.CaseID); err != nil || !visible {
+		return hiddenResult(err, "recovery case not found")
 	}
 	artifact, err := store.New(d.Pool).GetRecoveryCaseArtifact(ctx, store.GetRecoveryCaseArtifactParams{
 		OrgID: d.OrgID, CaseID: args.CaseID, ID: args.CandidateArtifactID,

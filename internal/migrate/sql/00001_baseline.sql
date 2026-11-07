@@ -3627,4 +3627,38 @@ CREATE TABLE public.run_actors (
     CONSTRAINT run_actors_role_check CHECK (role IN ('redrive', 'fix', 'resume', 'output', 'service'))
 );
 
+-- An external agent's credential. Only the SHA-256 digest of the token is
+-- stored; authority is the capability ceiling intersected with the creator's
+-- live permissions, re-read on every call.
+CREATE TABLE public.agent_clients (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    name text NOT NULL,
+    capabilities text[] NOT NULL,
+    scope_workflow_ids text[] DEFAULT '{}' NOT NULL,
+    scope_tags text[] DEFAULT '{}' NOT NULL,
+    token_digest bytea NOT NULL,
+    token_last4 text NOT NULL,
+    rate_limit_per_minute integer DEFAULT 120 NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    token_issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revoked_by text,
+    last_used_at timestamp with time zone,
+    CONSTRAINT agent_clients_name_check CHECK (char_length(name) BETWEEN 1 AND 120),
+    CONSTRAINT agent_clients_capabilities_check CHECK (
+        cardinality(capabilities) BETWEEN 1 AND 6
+        AND capabilities <@ ARRAY['read', 'propose', 'test', 'publish', 'operate', 'report']::text[]),
+    CONSTRAINT agent_clients_scope_check CHECK (cardinality(scope_workflow_ids) <= 100 AND cardinality(scope_tags) <= 20),
+    CONSTRAINT agent_clients_digest_check CHECK (octet_length(token_digest) = 32),
+    CONSTRAINT agent_clients_rate_check CHECK (rate_limit_per_minute BETWEEN 1 AND 600),
+    CONSTRAINT agent_clients_expiry_check CHECK (
+        expires_at > token_issued_at AND expires_at <= token_issued_at + interval '90 days'),
+    CONSTRAINT agent_clients_revocation_check CHECK ((revoked_at IS NULL) = (revoked_by IS NULL))
+);
+CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
+CREATE INDEX agent_clients_org_created_idx ON public.agent_clients (org_id, created_at DESC, id DESC);
+
 -- +goose StatementEnd

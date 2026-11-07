@@ -57,5 +57,11 @@ after membership checks pass; an already-pending row remains a bounded `409`.
 The current-row record is replaced on reactivation while immutable audit events
 preserve the lifecycle history.
 
+Agent client tokens (`jly_agent_…`) authenticate only the MCP surface. The
+general resolver refuses them before any provider, so an agent token sent to
+an API route is never forwarded to the identity provider. An agent acts for
+the member who created it: its permissions are its capability ceiling
+intersected with that member's current grant (`mcp-server.md`).
+
 WorkOS SSO and SCIM webhook handling are signed, idempotent, and audited.
 Production behavior is selected only by `JANUSLY_ENV=production`.
