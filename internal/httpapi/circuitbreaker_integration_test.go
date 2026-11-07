@@ -58,9 +58,9 @@ func TestCircuitBreakerLoop(t *testing.T) {
 		}
 		h.waitRun(extractRunID(t, res), "failed")
 	}
+	// The trip commits after the run's terminal status, so wait for it.
 	var status, reason string
-	deadline := 50
-	for ; deadline > 0; deadline-- {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		_ = pool.QueryRow(ctx, `SELECT status, COALESCE(paused_reason,'') FROM workflows
 			WHERE org_id = $1 AND id = $2`, h.org, wfID).Scan(&status, &reason)
 		if status == "paused_circuit_breaker" {
