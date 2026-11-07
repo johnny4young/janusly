@@ -36,6 +36,7 @@ import { useVirtualList } from '../hooks/useVirtualList'
 import { EmptyView } from './panel-primitives'
 import { Button } from '@/components/ui/Button'
 import { isRecord } from '../lib/guards'
+import { MalformedResponseError } from '../lib/malformed-response'
 import './ReasoningPanel.css'
 
 const RUN_EVENT_ROW_HEIGHT = 172
@@ -274,7 +275,7 @@ export function ReasoningPanel({
       },
       error => {
         if (controller.signal.aborted || usageRequestRef.current?.generation !== generation) return
-        setRunUsageState({ status: 'error', runId, error, invalidResponse: false })
+        setRunUsageState({ status: 'error', runId, error, invalidResponse: error instanceof MalformedResponseError })
       },
     )
     return () => controller.abort()

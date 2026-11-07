@@ -7,6 +7,8 @@ import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
+const UPSTREAM_HOST = process.env.E2E_UPSTREAM_HOST ?? '127.0.0.1'
+const UPSTREAM_BIND = process.env.E2E_UPSTREAM_BIND ?? '127.0.0.1'
 
 type Json = Record<string, unknown>
 type RunNode = {
@@ -235,10 +237,10 @@ async function createHttpFixture(): Promise<{
     response.writeHead(204)
     response.end()
   })
-  server.listen(0, '127.0.0.1')
+  server.listen(0, UPSTREAM_BIND)
   await once(server, 'listening')
   return {
-    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    baseUrl: `http://${UPSTREAM_HOST}:${(server.address() as AddressInfo).port}`,
     hits,
     close: async () => {
       server.close()
@@ -401,7 +403,7 @@ test('HTTP JSON and unresolved templates stay explicit from runtime through the 
 
     await page.locator('.react-flow__node[data-id="fetch_customer"] .workflow-node').click()
     const englishHttp = page.getByTestId('inspector-node-fetch_customer').getByTestId('http-json-contract-helper')
-    await expect(englishHttp).toContainText('Declared JSON responses up to 64 KiB')
+    await expect(englishHttp).toContainText('JSON responses up to 64 KiB appear in output.json')
     await expect(englishHttp).toContainText('output.jsonParseSkipped')
     await capture(englishHttp, 'web-en-http-json-contract-default')
     await captureUnresolvedEvent(page, english, lenientRunId, english.unresolvedLenient, 'web-en-template-unresolved-lenient-warning')
@@ -432,7 +434,7 @@ test('HTTP JSON and unresolved templates stay explicit from runtime through the 
 
     await page.locator('.react-flow__node[data-id="fetch_customer"] .workflow-node').click()
     const spanishHttp = page.getByTestId('inspector-node-fetch_customer').getByTestId('http-json-contract-helper')
-    await expect(spanishHttp).toContainText('Las respuestas declaradas como JSON de hasta 64 KiB')
+    await expect(spanishHttp).toContainText('JSON de hasta 64 KiB aparece en output.json')
     await expect(spanishHttp).toContainText('output.jsonParseSkipped')
     await capture(spanishHttp, 'web-es-http-json-contract-default')
     await captureUnresolvedEvent(page, spanish, lenientRunId, spanish.unresolvedLenient, 'web-es-template-unresolved-lenient-warning')

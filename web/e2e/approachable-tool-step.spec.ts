@@ -97,8 +97,8 @@ async function seedWorkflow(
       id: 'normalize',
       type: 'tool',
       config: {
-        tool: 'text.lowercase',
-        input: { value: 'STALE INPUT' },
+        tool: 'json.parse',
+        input: { value: '"STALE INPUT"' },
       },
     }],
     edges: [],

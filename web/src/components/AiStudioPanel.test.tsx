@@ -229,7 +229,7 @@ describe('<AiStudioPanel />', () => {
     renderPanel()
     await screen.findByTestId('capability-catalog-summary')
     expect(screen.getByLabelText('Business intent')).toHaveValue(
-      'Starting now for one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+      'Starting now for one week, acknowledge PagerDuty incidents assigned to user PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
     )
   })
 
@@ -240,7 +240,7 @@ describe('<AiStudioPanel />', () => {
     await act(async () => { await changeAppLanguage('es') })
     const intent = screen.getByLabelText('Intención de negocio')
     expect(intent).toHaveValue(
-      'Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
+      'Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados al usuario PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
     )
 
     fireEvent.change(intent, { target: { value: 'Mi intención PagerDuty exacta' } })
@@ -532,7 +532,7 @@ describe('<AiStudioPanel />', () => {
     expect(screen.queryByTestId('workflow-proposal')).not.toBeInTheDocument()
     expect(screen.getByText(/Loading the exact workspace capability catalog/)).toBeInTheDocument()
     expect(screen.getByLabelText('Business intent')).toHaveValue(
-      'Starting now for one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+      'Starting now for one week, acknowledge PagerDuty incidents assigned to user PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
     )
 
     await act(async () => {
@@ -646,7 +646,7 @@ describe('<AiStudioPanel />', () => {
     renderPanel()
     await screen.findByTestId('capability-catalog-summary')
     expect(screen.getByLabelText('Business intent')).toHaveValue(
-      'Starting now for one week, acknowledge PagerDuty incidents assigned to PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
+      'Starting now for one week, acknowledge PagerDuty incidents assigned to user PUSER1 outside 09:00–17:00 America/Bogota and snooze them for 12 hours as operator@example.com.',
     )
     expect(screen.getByText(/Set ANTHROPIC_API_KEY for the Janusly process/i)).toBeInTheDocument()
     expect(screen.getByText('Anthropic key configured')).toBeInTheDocument()
@@ -663,7 +663,7 @@ describe('<AiStudioPanel />', () => {
     expect(screen.queryByText(/Reinicia ambos procesos/)).not.toBeInTheDocument()
     expect(screen.getAllByText('Brief de intención')).not.toHaveLength(0)
     expect(screen.getByLabelText('Intención de negocio')).toHaveValue(
-      'Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados a PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
+      'Desde ahora y durante una semana, reconoce incidentes de PagerDuty asignados al usuario PUSER1 fuera de 09:00–17:00 America/Bogota y aplázalos 12 horas como operator@example.com.',
     )
     expect(screen.queryByText('Anthropic key configured')).not.toBeInTheDocument()
   })

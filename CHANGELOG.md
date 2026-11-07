@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The PagerDuty example that opens AI Studio compiles into a complete intent
+  brief. It named the user in a form the brief compiler did not read, so Build
+  proposal stayed disabled until the author added the user ID by hand.
+- When a run's resource usage response fails validation, the run panel says so
+  in its own words again instead of showing the generic unreadable-response
+  error.
 - The Monthly report PDF recipe starts again. Its PDF step carried a `title`
   field that the PDF tool does not accept, so every run was refused before it
   began. Recipe checks now validate tool inputs the same way saving and

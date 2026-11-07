@@ -24,6 +24,7 @@ const copy = {
     invalid: "The server returned usage data Janusly couldn't validate.",
     draft: 'Draft flow',
     backoff: 'evaluated 1 of 4 candidates',
+    cacheShare: '30.8%',
     cacheTokens: '8,000',
     createdTokens: '2,000',
     knownCost: '0.0425',
@@ -40,6 +41,7 @@ const copy = {
     invalid: 'El servidor devolvió datos de uso que Janusly no pudo validar.',
     draft: 'Armar flujo',
     backoff: 'evaluó 1 de 4 candidatos',
+    cacheShare: '30,8%',
     cacheTokens: '8000',
     createdTokens: '2000',
     knownCost: '0,0425',
@@ -280,7 +282,8 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
     const costTable = page.getByTestId('settings-usage-cost-table')
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
-    await expect(cacheSummary).toContainText('50%')
+    // Cache reads over all disjoint input counters: 8,000 / (16,000 + 8,000 + 2,000).
+    await expect(cacheSummary).toContainText(copy[locale].cacheShare)
     await expect(cacheSummary).toContainText(copy[locale].cacheTokens)
     await expect(costCard).toContainText(copy[locale].createdTokens)
     await expect(costTable).toHaveAccessibleName(copy[locale].costTable)
@@ -310,8 +313,8 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
 
     await openWorkflowAiAction(page, locale === 'en' ? 'Workflows' : 'Flujos')
     await page.locator('.ai-studio-prompt').fill(locale === 'en'
-      ? 'Draft a budget-aware approval flow.'
-      : 'Arma un flujo de aprobación ajustado al presupuesto.')
+      ? 'Draft a budget-aware approval flow that only prepares information for a person to approve.'
+      : 'Arma un flujo de aprobación ajustado al presupuesto que solo prepara información para que una persona la apruebe.')
     await buildWorkflowProposal(page, locale)
     const backoff = page.getByTestId('ai-candidate-backoff')
     await expect(backoff).toContainText(copy[locale].backoff)
