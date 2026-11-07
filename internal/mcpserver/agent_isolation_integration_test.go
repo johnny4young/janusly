@@ -430,6 +430,16 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 	}
 
 	// The catalog version does not move when an out-of-scope workflow changes.
+	// A key claimed under the agent's namespace by someone else never replays to it.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO run_start_idempotency (org_id, idempotency_key, run_id) VALUES ($1, $2, $3)`,
+		tenant.org, actorID+":squatted", tenant.otherRunID); err != nil {
+		t.Fatal(err)
+	}
+	if res, payload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "idempotencyKey": "squatted"}); !res.IsError ||
+		strings.Contains(resultText(res), tenant.otherRunID) {
+		t.Fatalf("a squatted key replayed someone else's run: %v %q", payload, resultText(res))
+	}
+
 	_, before := callTool(t, session, "catalog.describe", map[string]any{})
 	if _, err := eng.SaveWorkflowVersion(t.Context(), engine.SaveWorkflowVersionInput{
 		OrgID: tenant.org, UserID: tenant.creator, NewID: uuid.NewString,

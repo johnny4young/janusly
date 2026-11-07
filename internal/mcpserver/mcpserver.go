@@ -351,6 +351,11 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		return nil, nil, err
 	}
 	if started.Replayed {
+		if d.agent() != nil && !d.startedBySelf(ctx, started.RunID) {
+			// Someone else claimed this key in the agent's namespace; never
+			// hand their run to the agent.
+			return expected("idempotencyKey was already used by another caller; choose a new key")
+		}
 		return ok(map[string]any{"runId": started.RunID, "replayed": true})
 	}
 	startAction := audit.Action("run.started")
@@ -365,6 +370,11 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		},
 	})
 	return ok(map[string]any{"runId": started.RunID})
+}
+
+func (d Deps) startedBySelf(ctx context.Context, runID string) bool {
+	run, err := store.New(d.Pool).GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
+	return err == nil && run.CreatedBy.Valid && run.CreatedBy.String == d.UserID
 }
 
 type latestWorkflow struct {
