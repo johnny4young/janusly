@@ -1435,3 +1435,27 @@ func TestRedriveReportsWhenTheRunKeepsAnOlderVersion(t *testing.T) {
 		t.Fatalf("redrive on the latest version needs no hint: %+v", current)
 	}
 }
+
+// runs.list names a run after its own organization's workflow, never after a
+// workflow another organization saved under the same id.
+func TestMcpRunsListNeverShowsAnotherOrganizationsWorkflowName(t *testing.T) {
+	session, org := newMCPSession(t)
+	sharedID := fmt.Sprintf("mcp-shared-%d", time.Now().UnixNano())
+	if _, err := poolForTest(t).Exec(t.Context(), `INSERT INTO workflows (id, org_id, name) VALUES ($1, $2, 'Foreign Payroll')`,
+		sharedID, org+"-foreign"); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"id": sharedID, "name": "Mine", "nodes": []any{map[string]any{"id": "a", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
+	res, started := callTool(t, session, "runs.start", map[string]any{"workflow": doc})
+	if res.IsError {
+		t.Fatalf("start: %+v", res.Content)
+	}
+	_, page := callTool(t, session, "runs.list", map[string]any{"workflowId": sharedID})
+	runs, _ := page["runs"].([]any)
+	if len(runs) != 1 {
+		t.Fatalf("runs.list lost the run %v: %+v", started["runId"], page)
+	}
+	if name := runs[0].(map[string]any)["workflowName"]; name != "Mine" {
+		t.Fatalf("runs.list workflowName = %v, want the run's own document name", name)
+	}
+}
