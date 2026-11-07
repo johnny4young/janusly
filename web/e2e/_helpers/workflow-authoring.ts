@@ -61,7 +61,7 @@ export async function mockWorkflowProposal(
     }
     const nodes = Array.isArray(workflow.nodes) ? workflow.nodes as JsonObject[] : []
     const edges = Array.isArray(workflow.edges) ? workflow.edges : []
-    // Apply refuses qualification flags that the copied workflow does not carry.
+    // Mirror the server: Apply refuses contracts or qualification flags that do not describe the workflow.
     const outputs = (workflow.outputs as JsonObject | undefined) ?? {}
     const recoveryContract = (workflow.recovery as JsonObject | undefined)?.contract as JsonObject | undefined
     await route.fulfill({

@@ -5,6 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 project=${JANUSLY_E2E_PROJECT:-janusly-e2e-${UID:-0}-$$}
 app_port=${JANUSLY_E2E_PORT:-33001}
 postgres_port=${JANUSLY_E2E_POSTGRES_PORT:-35432}
+internal_port=${JANUSLY_E2E_INTERNAL_PORT:-}
 pnpm_command=${PNPM:-pnpm --ignore-workspace}
 docker_bin=${JANUSLY_E2E_DOCKER_BIN:-docker}
 attempted=0
@@ -32,13 +33,17 @@ specs=(
   e2e/activity-workspace.spec.ts
   e2e/run-observability.spec.ts
   e2e/accessibility.spec.ts
+  e2e/ai-efficiency-observability.spec.ts
   e2e/ai-studio-provider.spec.ts
   e2e/api-contract-v1.spec.ts
+  e2e/approachable-ai-step.spec.ts
   e2e/approachable-authoring.spec.ts
   e2e/approachable-branch-rule.spec.ts
   e2e/approachable-human-form.spec.ts
   e2e/approachable-run-inputs.spec.ts
+  e2e/approachable-tool-step.spec.ts
   e2e/auth-policy.spec.ts
+  e2e/authoring-guidance.spec.ts
   e2e/bounded-waiting.spec.ts
   e2e/budget.spec.ts
   e2e/confirm-dialog-focus.spec.ts
@@ -48,6 +53,8 @@ specs=(
   e2e/docs-capability.spec.ts
   e2e/external-runtime-shadow.spec.ts
   e2e/inbound-webhook-trigger.spec.ts
+  e2e/loop-for-each.spec.ts
+  e2e/prompt-drafting.spec.ts
   e2e/recovery-center.spec.ts
   e2e/recovery-drill-outcomes.spec.ts
   e2e/recovery-effectiveness.spec.ts
@@ -68,6 +75,7 @@ specs=(
   e2e/views.spec.ts
   e2e/web-control-plane-contract.spec.ts
   e2e/workflow.spec.ts
+  e2e/workflow-data-contracts.spec.ts
   e2e/workflow-folders.spec.ts
   e2e/workflow-language.spec.ts
   e2e/workflow-tags.spec.ts
@@ -102,6 +110,11 @@ validate_configuration() {
   validate_port JANUSLY_E2E_PORT "$app_port"
   validate_port JANUSLY_E2E_POSTGRES_PORT "$postgres_port"
   [[ "$app_port" != "$postgres_port" ]] || die "application and PostgreSQL ports must differ"
+  # Follow the application port so parallel lanes never share the metrics port.
+  [[ -n "$internal_port" ]] || internal_port=$((app_port < 65535 ? app_port + 1 : app_port - 1))
+  validate_port JANUSLY_E2E_INTERNAL_PORT "$internal_port"
+  [[ "$internal_port" != "$app_port" && "$internal_port" != "$postgres_port" ]] ||
+    die "internal metrics port must differ from the application and PostgreSQL ports"
 }
 
 resolve_build_identity() {
@@ -127,6 +140,7 @@ compose() {
   COMPOSE_PROJECT_NAME="$project" \
   JANUSLY_HOST_PORT="$app_port" \
   JANUSLY_POSTGRES_HOST_PORT="$postgres_port" \
+  JANUSLY_INTERNAL_HOST_PORT="$internal_port" \
   ALLOW_PRIVATE_HTTP_TARGETS=true \
   JANUSLY_CREDENTIAL_MASTER_KEY="$e2e_master_key" \
   ANTHROPIC_API_KEY='' \
@@ -165,11 +179,12 @@ resolve_build_identity
 if [[ ${1:-} == selftest ]]; then
   [[ $# == 1 ]] || { usage >&2; die "unexpected arguments"; }
   jq -n --arg project "$project" --argjson appPort "$app_port" --argjson postgresPort "$postgres_port" \
+    --argjson internalPort "$internal_port" \
     --arg commit "$build_commit" --arg tree "$build_tree" --arg id "$build_id" \
     --arg experienceSpec "$experience_spec" \
     --argjson profiles "$(jq -n --args '$ARGS.positional' "${experience_profiles[@]}")" \
     --argjson enabled "$experience_enabled" --arg mode "$experience_mode" --argjson memoryEnabled "$memory_enabled" \
-    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort},build:{commit:$commit,tree:$tree,id:$id},specs:$ARGS.positional,experience:{specs:[$experienceSpec],profiles:$profiles,baseline:{enabled:$enabled,mode:$mode,memoryEnabled:$memoryEnabled}}}' "${specs[@]}"
+    --args '{project:$project,ports:{application:$appPort,postgres:$postgresPort,internal:$internalPort},build:{commit:$commit,tree:$tree,id:$id},specs:$ARGS.positional,experience:{specs:[$experienceSpec],profiles:$profiles,baseline:{enabled:$enabled,mode:$mode,memoryEnabled:$memoryEnabled}}}' "${specs[@]}"
   exit 0
 fi
 [[ $# == 0 ]] || { usage >&2; die "unexpected arguments"; }
