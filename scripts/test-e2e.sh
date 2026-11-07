@@ -47,14 +47,19 @@ specs=(
   e2e/confirm-dialog-focus.spec.ts
   e2e/credential-rotation-focus.spec.ts
   e2e/css-system-contract.spec.ts
+  e2e/demo-templates.spec.ts
   e2e/docs-capability.spec.ts
   e2e/external-runtime-shadow.spec.ts
   e2e/inbound-webhook-trigger.spec.ts
   e2e/loop-for-each.spec.ts
   e2e/prompt-drafting.spec.ts
+  e2e/recovery-center.spec.ts
   e2e/recovery-drill-outcomes.spec.ts
+  e2e/recovery-effectiveness.spec.ts
   e2e/recovery-exploration.spec.ts
   e2e/recovery-impact.spec.ts
+  e2e/recovery-loop.spec.ts
+  e2e/recovery-momentum.spec.ts
   e2e/replay-campaigns.spec.ts
   e2e/report-delivery.spec.ts
   e2e/run-explainability.spec.ts
