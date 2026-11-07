@@ -119,10 +119,11 @@ mode and an `AgentClientID` field. The client lifecycle writes
 `agent_client.created`, `.updated`, `.rotated` and `.revoked`. Token values,
 digests and request bodies never enter audit or logs.
 
-In run lineage, an agent start records `run_actors` role `agent`. For tool
-approvals, the creator counts as a requester of calls their agent caused, so
-the person accountable for an agent cannot approve its writes alone (see
-owner decision D4 for publish approvals).
+For tool approvals, the creator counts as a requester of every call their
+agent caused (a start, a redrive, a fix), so the person accountable for an
+agent cannot approve its writes alone (see owner decision D4 for publish
+approvals). Approval and grant decisions accept only modes that prove a
+person.
 
 ### Isolation tests
 
