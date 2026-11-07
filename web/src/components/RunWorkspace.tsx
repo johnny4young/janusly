@@ -5,8 +5,8 @@
  * - `ActivityWorkspace.tsx` for the run detail and the detailed run history.
  *
  * Invariants:
- * - Every tab reuses the loaded run projections; this component introduces no
- *   second data fetch or run authority path.
+ * - Every tab reuses the loaded run projections, except Agents, which reads
+ *   the run map feed the canvas shares; there is no second authority path.
  * - The legacy Reasoning and Multi-agent tabs remain directly reachable from
  *   the command palette and the explicit "full view" action.
  * - Changing the active run resets to Overview so controls for a prior run
@@ -32,7 +32,7 @@ import './RunWorkspace.css'
 import { Button } from './ui/Button'
 
 const ReasoningPanel = lazy(() => import('./ReasoningPanel').then(module => ({ default: module.ReasoningPanel })))
-const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then(module => ({ default: module.MultiAgentTimeline })))
+const RunAgentLanes = lazy(() => import('./RunAgentLanes').then(module => ({ default: module.RunAgentLanes })))
 const RunStepTimeline = lazy(() => import('./RunStepTimeline').then(module => ({ default: module.RunStepTimeline })))
 
 export type RunWorkspaceView = 'overview' | 'timeline' | 'events' | 'agents' | 'ask'
@@ -56,7 +56,7 @@ const VIEW_ORDER: readonly RunWorkspaceView[] = ['overview', 'timeline', 'events
 const EMPTY_RUN_EVENTS: RunEvent[] = []
 
 function countAgentEvents(events: RunEvent[]): number {
-  return events.filter(event => event.type.startsWith('multi_agent.')).length
+  return events.filter(event => event.type.startsWith('agent.') || event.type.startsWith('multi_agent.')).length
 }
 
 export type RunWorkspaceNavigationProps = {
@@ -256,18 +256,13 @@ export function RunWorkspace({
         )}
       </section>
       <section {...panelProps('agents')}>
-        {effectiveView === 'agents' && (
+        {effectiveView === 'agents' && activeRunId && (
           <Suspense fallback={fallback}>
             <PanelChrome
               title={t('rightPanel.multiAgent.title')}
               description={t('rightPanel.multiAgent.description')}
             >
-              <MultiAgentTimeline
-                events={events}
-                eventsHasMore={eventsHasMore}
-                onLoadOlderEvents={onLoadOlderEvents}
-                showHeader={false}
-              />
+              <RunAgentLanes runId={activeRunId} />
             </PanelChrome>
           </Suspense>
         )}

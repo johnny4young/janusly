@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The run canvas is a live run map. Each step shows its attempts, elapsed
+  time and AI cost; a step running far longer than usual gets a dashed border
+  and a clock, and a step waiting on you is outlined. The header shows the
+  run's AI cost and tokens. From the step itself you can approve or deny a
+  tool call, approve an approval step, fill in a form, rerun a finished step
+  through the rerun preview, or open a subworkflow's child run. The editor
+  shows the same facts for the open run of the workflow on screen. The Agents
+  tab now draws a lane for every agent and agent-team step, with its steps and
+  tool calls, instead of only agent teams. Both read models are part of the
+  versioned API: `GET /v1/runs/{runId}/map` and `GET /v1/needs-you`.
 - Workflows can be paused and resumed. Pause (in the workflow list, `POST
   /workflows/{id}/pause` or the MCP `workflows.pause` tool) stops new runs,
   skips schedule ticks and holds trigger events. Versions, schedules and any

@@ -56,6 +56,6 @@ describe('<RunWorkspaceNavigation /> (browser smoke)', () => {
     render(<NavigationFixture activeRun={false} />)
 
     expect(screen.getByRole('tab', { name: 'Timeline, 3 steps' })).toBeDisabled()
-    expect(screen.getByRole('tab', { name: 'Agents, 4 multi-agent events' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'Agents, 4 agent events' })).toBeDisabled()
   })
 })

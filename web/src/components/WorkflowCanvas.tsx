@@ -8,7 +8,7 @@
  * Used by `App.tsx` (the workspace's main pane).
  */
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow } from '@xyflow/react'
 import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { AiReviewIssue, ReadinessResult, ValidationIssue, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
@@ -55,6 +55,8 @@ type WorkflowCanvasProps = {
   validationIssues?: ValidationIssue[]
   readiness?: ReadinessResult | null
   aiReviewIssues?: AiReviewIssue[]
+  /** Run totals for the toolbar while observing a run. */
+  summary?: ReactNode
 }
 
 const NO_ISSUES: never[] = []
@@ -69,7 +71,7 @@ function acceptsCanvasDrop(target: EventTarget | null): boolean {
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, onOpenAiStudio, viewportWorkflowId, mode = 'author', readOnly = false, active = true, validationIssues = NO_ISSUES, readiness = null, aiReviewIssues = NO_ISSUES }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, onAddNode, onOpenAiStudio, viewportWorkflowId, mode = 'author', readOnly = false, active = true, validationIssues = NO_ISSUES, readiness = null, aiReviewIssues = NO_ISSUES, summary }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
@@ -154,14 +156,21 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   // `node.ariaLabel` (NodeBase) for the focusable node wrapper.
   const a11yNodes = useMemo(
     () =>
-      nodes.map((node) => ({
-        ...node,
-        data: { ...node.data, problem: nodeProblems.get(node.id) },
-        ariaLabel: t(observing ? 'canvas.runNodeAria' : 'canvas.nodeAria', {
+      nodes.map((node) => {
+        const label = t(observing ? 'canvas.runNodeAria' : 'canvas.nodeAria', {
           label: node.data.label?.trim() || getNodeLabel(node.data.type),
           status: formatStatusLabel(node.data.status ?? 'pending'),
-        }),
-      })),
+        })
+        const flags = [
+          node.data.runMap?.stuck && t('canvas.runMap.stuck'),
+          node.data.runMap?.needsYou && t('canvas.runMap.needsYou'),
+        ].filter(Boolean)
+        return {
+          ...node,
+          data: { ...node.data, problem: nodeProblems.get(node.id) },
+          ariaLabel: flags.length > 0 ? `${label}. ${flags.join('. ')}` : label,
+        }
+      }),
     [nodeProblems, nodes, observing, t],
   )
   const a11yEdges = useMemo(() => {
@@ -297,6 +306,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
                 </Button>
               </div>
             )}
+            {summary}
             <span>{t('canvas.paths', { count: edges.length })}</span>
             <CanvasProblemsChip problems={problems} />
             {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}

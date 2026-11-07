@@ -17,6 +17,7 @@ import { workflowNodeIcon } from './workflow-node-icons'
 import type { WorkflowGraphNode } from '../types'
 import { useTestDataPins } from '../lib/test-data'
 import { useWorkflowStore } from '../store'
+import { RunMapNodeFacts, RunMapNodeFlags } from './RunMapOverlay'
 
 /** Render one workflow step on the canvas with icon, label, summary, and status pill. */
 export function WorkflowStepNode({ id, data, selected }: NodeProps<WorkflowGraphNode>) {
@@ -36,9 +37,16 @@ export function WorkflowStepNode({ id, data, selected }: NodeProps<WorkflowGraph
   const problem = data.problem
   const workflowId = useWorkflowStore(state => state.currentWorkflowId)
   const standIn = useTestDataPins(workflowId)?.[id]?.kind
+  const runMap = data.runMap
 
   return (
-    <div className="workflow-node" data-status={tone} data-selected={selected ? 'true' : 'false'}>
+    <div
+      className="workflow-node"
+      data-status={tone}
+      data-selected={selected ? 'true' : 'false'}
+      data-stuck={runMap?.stuck ? 'true' : undefined}
+      data-needs-you={runMap?.needsYou ? 'true' : undefined}
+    >
       <Handle className="workflow-handle workflow-handle-target" type="target" position={Position.Top} />
       {problem && (
         <Button
@@ -59,11 +67,13 @@ export function WorkflowStepNode({ id, data, selected }: NodeProps<WorkflowGraph
         <span className="workflow-node-title">{title}</span>
         <span className="status-pill workflow-node-status" data-status={tone}>{formatStatusLabel(status)}</span>
       </div>
+      {runMap && <RunMapNodeFlags overlay={runMap} />}
       <p>{helper}</p>
       {standIn && <p><span className="we-pill" data-tone="primary" data-testid="workflow-node-stand-in">{t(`testData.badge.${standIn}`)}</span></p>}
       {data.errorSummary
         ? <div className="workflow-node-summary workflow-node-error" data-testid="workflow-node-error">{data.errorSummary}</div>
         : <div className="workflow-node-summary">{summary}</div>}
+      {runMap && <RunMapNodeFacts nodeId={id} title={title} overlay={runMap} />}
       {data.onRecover && (
         <Button
           size="sm"

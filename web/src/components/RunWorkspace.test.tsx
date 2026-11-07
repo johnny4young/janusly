@@ -32,8 +32,8 @@ vi.mock('./RunStepTimeline', () => ({
   ),
 }))
 
-vi.mock('../MultiAgentTimeline', () => ({
-  MultiAgentTimeline: () => <div data-testid="agents-projection">Agents projection</div>,
+vi.mock('./RunAgentLanes', () => ({
+  RunAgentLanes: ({ runId }: { runId: string }) => <div data-testid="agents-projection">{runId}</div>,
 }))
 
 const handlers = {
@@ -60,6 +60,7 @@ function workspaceProps(overrides: Partial<RunWorkspaceProps> = {}): RunWorkspac
       { id: 'event-1', type: 'run.started' },
       { id: 'event-2', type: 'multi_agent.planned', nodeId: 'plan' },
       { id: 'event-3', type: 'multi_agent.completed', nodeId: 'plan' },
+      { id: 'event-4', type: 'agent.tool.started', nodeId: 'think' },
     ],
     activeRunId: 'run-1',
     ...overrides,
@@ -77,9 +78,9 @@ describe('<RunWorkspace />', () => {
     expect(screen.getByTestId('sheet-header-projection')).toBeInTheDocument()
     expect(screen.getByTestId('overview-projection')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Timeline, 2 steps' })).toHaveTextContent('2')
-    expect(screen.getByRole('tab', { name: 'Events, 3 events' })).toHaveTextContent('3')
-    expect(screen.getByRole('tab', { name: 'Agents, 2 multi-agent events' })).toHaveTextContent('2')
+    expect(screen.getByRole('tab', { name: 'Timeline, 3 steps' })).toHaveTextContent('3')
+    expect(screen.getByRole('tab', { name: 'Events, 4 events' })).toHaveTextContent('4')
+    expect(screen.getByRole('tab', { name: 'Agents, 3 agent events' })).toHaveTextContent('3')
     expect(screen.getByRole('tab', { name: 'Ask' })).toBeInTheDocument()
   })
 
@@ -100,7 +101,7 @@ describe('<RunWorkspace />', () => {
     expect(screen.queryByTestId('run-workspace-full-view')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('run-workspace-tab-timeline'))
-    expect(await screen.findByTestId('timeline-projection')).toHaveTextContent('3')
+    expect(await screen.findByTestId('timeline-projection')).toHaveTextContent('4')
     expect(screen.queryByTestId('overview-projection')).not.toBeInTheDocument()
     expect(screen.getByTestId('sheet-header-projection')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Open full timeline' }))
@@ -111,7 +112,7 @@ describe('<RunWorkspace />', () => {
     expect(screen.queryByTestId('timeline-projection')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('run-workspace-tab-agents'))
-    expect(await screen.findByTestId('agents-projection')).toBeInTheDocument()
+    expect(await screen.findByTestId('agents-projection')).toHaveTextContent('run-1')
     fireEvent.click(screen.getByRole('button', { name: 'Open full agent view' }))
     expect(handlers.onOpenFullView).toHaveBeenLastCalledWith('multiAgent')
 

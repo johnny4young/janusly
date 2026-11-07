@@ -1,0 +1,130 @@
+/**
+ * Live run map: one shared feed per run, whatever number of views read it.
+ *
+ * The feed refetches the map shortly after the run projection changes (stream
+ * frames or the polling fallback), and on a slow tick so elapsed time and the
+ * stuck signal advance while nothing streams. The tick stops once the run is
+ * terminal. A failed read keeps the previous map.
+ */
+
+import { useCallback, useSyncExternalStore } from 'react'
+
+import { contractApi } from '../api'
+import { isGetRunsRunIdMapResponse } from '../lib/api-guards/operations/GetRunsRunIdMap'
+import { isTerminalRunStatus } from '../lib/status'
+import type { RunMapSnapshot } from '../run-map'
+import { useWorkflowStore } from '../store'
+
+export const RUN_MAP_SETTLE_MS = 400
+export const RUN_MAP_TICK_MS = 15_000
+
+type Feed = {
+  runId: string
+  listeners: Set<() => void>
+  snapshot: RunMapSnapshot | null
+  inFlight: boolean
+  again: boolean
+  settle?: ReturnType<typeof setTimeout>
+  tick?: ReturnType<typeof setInterval>
+  controller: AbortController
+  unwatch: () => void
+}
+
+const feeds = new Map<string, Feed>()
+let lastSnapshot: RunMapSnapshot | null = null
+
+function syncTick(feed: Feed) {
+  const finished = feed.snapshot !== null && isTerminalRunStatus(feed.snapshot.map.run.status)
+  if (finished && feed.tick !== undefined) {
+    clearInterval(feed.tick)
+    feed.tick = undefined
+  } else if (!finished && feed.tick === undefined) {
+    feed.tick = setInterval(() => load(feed), RUN_MAP_TICK_MS)
+  }
+}
+
+function load(feed: Feed) {
+  if (feed.inFlight) {
+    feed.again = true
+    return
+  }
+  feed.inFlight = true
+  feed.again = false
+  // The signal also opts out of api()'s short GET dedup, so a refetch is fresh.
+  contractApi('GET /runs/{runId}/map', `/v1/runs/${encodeURIComponent(feed.runId)}/map`, undefined, {
+    signal: feed.controller.signal,
+    guard: isGetRunsRunIdMapResponse,
+  }).then((map) => {
+    if (feeds.get(feed.runId) !== feed) return
+    feed.snapshot = { runId: feed.runId, map, receivedAt: Date.now() }
+    lastSnapshot = feed.snapshot
+    syncTick(feed)
+    for (const listener of feed.listeners) listener()
+  }, () => undefined).finally(() => {
+    feed.inFlight = false
+    if (feed.again && feeds.get(feed.runId) === feed) load(feed)
+  })
+}
+
+function settle(feed: Feed) {
+  clearTimeout(feed.settle)
+  feed.settle = setTimeout(() => load(feed), RUN_MAP_SETTLE_MS)
+}
+
+function openFeed(runId: string): Feed {
+  const feed: Feed = {
+    runId,
+    listeners: new Set(),
+    snapshot: lastSnapshot?.runId === runId ? lastSnapshot : null,
+    inFlight: false,
+    again: false,
+    controller: new AbortController(),
+    unwatch: () => undefined,
+  }
+  feed.unwatch = useWorkflowStore.subscribe((state, previous) => {
+    if (state.runId !== runId) return
+    if (state.events !== previous.events || state.runNodes !== previous.runNodes) settle(feed)
+  })
+  feeds.set(runId, feed)
+  load(feed)
+  syncTick(feed)
+  return feed
+}
+
+function closeFeed(feed: Feed) {
+  feeds.delete(feed.runId)
+  feed.unwatch()
+  feed.controller.abort()
+  clearTimeout(feed.settle)
+  clearInterval(feed.tick)
+}
+
+export function subscribeRunMap(runId: string, listener: () => void): () => void {
+  const feed = feeds.get(runId) ?? openFeed(runId)
+  feed.listeners.add(listener)
+  return () => {
+    feed.listeners.delete(listener)
+    if (feed.listeners.size === 0) closeFeed(feed)
+  }
+}
+
+export function readRunMap(runId: string): RunMapSnapshot | null {
+  return feeds.get(runId)?.snapshot ?? (lastSnapshot?.runId === runId ? lastSnapshot : null)
+}
+
+/** Refetch now, after an action changed the run. */
+export function refreshRunMap(runId: string) {
+  const feed = feeds.get(runId)
+  if (feed) load(feed)
+}
+
+const noop = () => undefined
+
+export function useRunMap(runId: string | null | undefined): RunMapSnapshot | null {
+  const subscribe = useCallback(
+    (listener: () => void) => (runId ? subscribeRunMap(runId, listener) : noop),
+    [runId],
+  )
+  const read = useCallback(() => (runId ? readRunMap(runId) : null), [runId])
+  return useSyncExternalStore(subscribe, read, read)
+}
