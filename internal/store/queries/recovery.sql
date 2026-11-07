@@ -382,8 +382,8 @@ SET revoked_at = sqlc.arg(revoked_at)
 WHERE org_id = sqlc.arg(org_id) AND case_id = sqlc.arg(case_id)
   AND consumed_at IS NULL AND revoked_at IS NULL;
 
--- Semantic resolution follows the runtime lock hierarchy: node rows first,
--- then the run, then sibling cases. These queries are deliberately explicit.
+-- Semantic resolution locks under the run's completion lock: the run, then
+-- its node rows, then sibling cases. These queries are deliberately explicit.
 -- name: LockRunNodesForSemanticResolution :many
 SELECT node.id, node.run_id, node.node_id, node.status, node.state_json,
        node.attempts, node.started_at, node.finished_at, node.error_json

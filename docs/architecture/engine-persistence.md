@@ -29,6 +29,24 @@ new immutable version. Transport-specific persistence is forbidden because it
 would create different concurrency and activation semantics for the same
 business action.
 
+## Run lock order
+
+A transaction that writes more than one kind of row for a run (the `runs` row,
+its node rows, its recovery cases) first takes the run's completion lock, a
+transaction-scoped advisory lock on the run id. Cancellation, node completion
+and failure, waits and their deadlines, the stalled-node reaper, resume,
+redrive, tool approvals, subworkflow parent settlement and semantic resolution
+all take it, so writers of one run queue on that lock instead of deadlocking on
+row locks.
+
+Paths that lock rows up front use this order: the completion lock, the `runs`
+row, the node rows (ordered by id), the recovery cases, and run events last.
+Each event insert holds the run's sequence counter row until commit, so it is
+the final write. Completion and redrive write a node before they flip the run;
+that is safe only because they already hold the completion lock. Writers that
+skip the lock touch a single table: the worker claim and parent-notification
+claims use `SKIP LOCKED`, and governed case steps lock only the case row.
+
 ## Process serialization policy
 
 `JANUSLY_PERSIST_MAX_BYTES` is a process-only integer byte limit for default

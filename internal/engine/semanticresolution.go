@@ -114,22 +114,22 @@ func (e *Engine) ResolveSemanticOutcomeCase(
 	return result, nil
 }
 
-// lockSemanticResolutionTarget takes the row locks the resolution needs and
-// verifies every precondition against them: the case is still open at the
-// expected revision, the candidate and validation artifacts belong to it
-// and agree with each other, the decision is well-formed, an unconsumed
-// approval grant covers exactly this pair, the case and run are in a
-// resolvable state, and the run carries a version-2 recovery contract.
+// lockSemanticResolutionTarget takes the run's completion lock and the row
+// locks the resolution needs, then verifies every precondition against
+// them: the case is still open at the expected revision, the candidate and
+// validation artifacts belong to it and agree with each other, the decision
+// is well-formed, an unconsumed approval grant covers exactly this pair, the
+// case and run are in a resolvable state, and the run carries a version-2
+// recovery contract.
 // Every mismatch is a conflict: the operator is looking at stale state.
 func (e *Engine) lockSemanticResolutionTarget(
 	ctx context.Context, q *store.Queries, input ResolveSemanticOutcomeInput, snapshot store.RecoveryCase,
 ) (semanticResolutionTarget, error) {
 	orgID := input.Auth.OrgID
-	lockedNodes, err := q.LockRunNodesForSemanticResolution(ctx, store.LockRunNodesForSemanticResolutionParams{
-		RunID: snapshot.RunID, OrgID: orgID,
-	})
-	if err != nil {
-		return semanticResolutionTarget{}, fmt.Errorf("lock semantic recovery nodes: %w", err)
+	// Serializes with cancel, completion and redrive of the same run; without
+	// it a concurrent cancel deadlocks on the run and node row locks.
+	if err := q.AcquireRunCompletionLock(ctx, snapshot.RunID); err != nil {
+		return semanticResolutionTarget{}, fmt.Errorf("acquire completion lock: %w", err)
 	}
 	lockedRun, err := q.LockRunForSemanticResolution(ctx, store.LockRunForSemanticResolutionParams{
 		ID: snapshot.RunID, OrgID: orgID,
@@ -139,6 +139,12 @@ func (e *Engine) lockSemanticResolutionTarget(
 			return semanticResolutionTarget{}, ErrRecoveryCaseConflict
 		}
 		return semanticResolutionTarget{}, fmt.Errorf("lock semantic recovery run: %w", err)
+	}
+	lockedNodes, err := q.LockRunNodesForSemanticResolution(ctx, store.LockRunNodesForSemanticResolutionParams{
+		RunID: snapshot.RunID, OrgID: orgID,
+	})
+	if err != nil {
+		return semanticResolutionTarget{}, fmt.Errorf("lock semantic recovery nodes: %w", err)
 	}
 	openCases, err := q.LockOpenSemanticRecoveryCases(ctx, store.LockOpenSemanticRecoveryCasesParams{
 		OrgID: orgID, RunID: snapshot.RunID, SourceNodeID: snapshot.SourceNodeID,

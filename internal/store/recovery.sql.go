@@ -2247,8 +2247,8 @@ type LockRunNodesForSemanticResolutionRow struct {
 	ErrorJson  json.RawMessage
 }
 
-// Semantic resolution follows the runtime lock hierarchy: node rows first,
-// then the run, then sibling cases. These queries are deliberately explicit.
+// Semantic resolution locks under the run's completion lock: the run, then
+// its node rows, then sibling cases. These queries are deliberately explicit.
 func (q *Queries) LockRunNodesForSemanticResolution(ctx context.Context, arg LockRunNodesForSemanticResolutionParams) ([]LockRunNodesForSemanticResolutionRow, error) {
 	rows, err := q.db.Query(ctx, lockRunNodesForSemanticResolution, arg.RunID, arg.OrgID)
 	if err != nil {

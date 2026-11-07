@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Cancelling a run while an operator applies a semantic recovery decision to
+  it no longer fails one of the two with a database deadlock error. The
+  decision and the cancellation now take turns: whichever starts first
+  finishes, then the other runs against the updated run.
 - A live run view no longer shows a step as running after it paused or
   finished. When parallel branches wrote events at nearly the same moment,
   the live stream could skip an event that was stamped earlier but saved
