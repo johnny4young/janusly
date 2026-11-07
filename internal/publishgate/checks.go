@@ -256,37 +256,44 @@ func sortedKeys[V any](values map[string]V) []string {
 	return keys
 }
 
-var secretReference = regexp.MustCompile(`\{\{\s*secret\.([A-Za-z0-9_.-]+)\s*\}\}`)
-
-// triggerTypes start runs from outside; changing one changes who can reach
-// the workflow.
-var triggerTypes = map[string]bool{
-	"schedule": true, "webhook": true, "webhook_received": true, "email_received": true,
-	"file_dropped": true, "pagerduty_incident": true, "mcp_server_event": true,
+// logicTypes compute inside the run and reach nothing outside it. Every other
+// step type is part of the outbound surface, which fails closed for new types.
+var logicTypes = map[string]bool{
+	"transform": true, "condition": true, "noop": true, "router": true,
+	"parallel_fork": true, "join": true, "wait_until": true,
 }
 
-// OutboundSurface lists what a workflow reaches outside its own logic: HTTP
-// targets, tools and their credentials, subworkflows, agents, triggers and
-// secret references. A change to it needs a person, even without writes,
-// because a read can still carry data out.
+var contextReference = regexp.MustCompile(`context\.([A-Za-z0-9_-]+)`)
+
+// OutboundSurface lists what a workflow can reach outside its own logic:
+// every non-logic step's full config, any logic step that mentions a secret,
+// and every step those depend on through templates, because a templated
+// target moves when its source does. A change to it needs a person, even
+// without writes, because a read can still carry data out.
 func OutboundSurface(wf *domain.Workflow) []string {
-	surface := map[string]bool{}
+	configs := map[string]string{}
+	types := map[string]string{}
 	for _, node := range wf.Nodes {
-		config, _ := json.Marshal(node.Config)
-		switch {
-		case node.Type == "http":
-			surface[fmt.Sprintf("http %v %v", node.Config["method"], node.Config["url"])] = true
-		case node.Type == "tool":
-			input, _ := node.Config["input"].(map[string]any)
-			surface[fmt.Sprintf("tool %v %v", node.Config["tool"], input["credential"])] = true
-		case node.Type == "subworkflow":
-			surface[fmt.Sprintf("subworkflow %v", node.Config["workflowId"])] = true
-		case node.Type == "mcp_tool", node.Type == "agent", node.Type == "multi_agent", node.Type == "ai",
-			node.Type == "agent_reflection", triggerTypes[node.Type]:
-			surface[node.Type+" "+node.ID+" "+string(config)] = true
+		raw, _ := json.Marshal(node.Config)
+		configs[node.ID], types[node.ID] = string(raw), node.Type
+	}
+	surface := map[string]bool{}
+	var include func(id string)
+	include = func(id string) {
+		entry := types[id] + " " + id + " " + configs[id]
+		if surface[entry] {
+			return
 		}
-		for _, match := range secretReference.FindAllStringSubmatch(string(config), -1) {
-			surface["secret "+match[1]] = true
+		surface[entry] = true
+		for _, match := range contextReference.FindAllStringSubmatch(configs[id], -1) {
+			if _, known := configs[match[1]]; known && match[1] != id {
+				include(match[1])
+			}
+		}
+	}
+	for _, node := range wf.Nodes {
+		if !logicTypes[node.Type] || strings.Contains(strings.ToLower(configs[node.ID]), "secret") {
+			include(node.ID)
 		}
 	}
 	return sortedKeys(surface)

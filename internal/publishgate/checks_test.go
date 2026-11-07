@@ -301,12 +301,36 @@ func TestOutboundSurfaceSeesNewTargetsNotLogic(t *testing.T) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "daily", Type: "schedule", Config: map[string]any{"cronExpression": "0 9 * * *"}})
 		},
 		"different tool": func(w *domain.Workflow) { w.Nodes[0].Config["tool"] = "json.pick" },
+		"different tool input": func(w *domain.Workflow) {
+			w.Nodes[0].Config["input"] = map[string]any{"value": "x", "url": "https://elsewhere"}
+		},
+		"templated target moved by its source": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes,
+				domain.Node{ID: "target", Type: "transform", Config: map[string]any{"mapping": map[string]any{"url": "https://a.example"}}},
+				domain.Node{ID: "call", Type: "http", Config: map[string]any{"method": "GET", "url": "{{context.target.output.url}}"}})
+		},
+		"secret in a transform": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "t", Type: "transform", Config: map[string]any{"mapping": map[string]any{"k": "{{ SECRET.Api }}"}}})
+		},
 	} {
 		changed := readWorkflow("o")
 		change(changed)
 		if slices.Equal(OutboundSurface(base), OutboundSurface(changed)) {
 			t.Fatalf("%s did not move the outbound surface", name)
 		}
+	}
+}
+
+func TestOutboundSurfaceFollowsTemplatedSources(t *testing.T) {
+	build := func(url string) *domain.Workflow {
+		w := readWorkflow("o")
+		w.Nodes = append(w.Nodes,
+			domain.Node{ID: "target", Type: "transform", Config: map[string]any{"mapping": map[string]any{"url": url}}},
+			domain.Node{ID: "call", Type: "http", Config: map[string]any{"method": "GET", "url": "{{context.target.output.url}}"}})
+		return w
+	}
+	if slices.Equal(OutboundSurface(build("https://a.example")), OutboundSurface(build("https://b.example"))) {
+		t.Fatal("changing a templated target's source did not move the outbound surface")
 	}
 }
 

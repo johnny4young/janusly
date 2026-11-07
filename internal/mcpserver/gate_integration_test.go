@@ -61,16 +61,18 @@ func waitQualification(t *testing.T, session *mcp.ClientSession, id string) map[
 	}
 }
 
-func uppercaseDraft(text string, withContract bool) map[string]any {
+// uppercaseDraft varies only the declared output, a logic change that keeps
+// the outbound surface, so a qualified revision publishes without a person.
+func uppercaseDraft(suffix string, withContract bool) map[string]any {
 	document := map[string]any{
 		"name": "Shout", "dslVersion": "1.0",
 		"nodes": []any{map[string]any{"id": "upper", "type": "tool", "config": map[string]any{
-			"tool": "text.uppercase", "input": map[string]any{"value": "{{context.input.text}}" + text},
+			"tool": "text.uppercase", "input": map[string]any{"value": "{{context.input.text}}"},
 		}}},
 		"edges": []any{},
 	}
 	if withContract {
-		document["outputs"] = map[string]any{"text": "{{context.upper.output.result.value}}"}
+		document["outputs"] = map[string]any{"text": "{{context.upper.output.result.value}}" + suffix}
 	}
 	return document
 }
