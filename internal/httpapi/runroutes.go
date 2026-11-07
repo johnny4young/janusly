@@ -148,7 +148,7 @@ func runStartFailure(err error) opResult {
 			return result
 		case runstart.CodeNotProductionReady:
 			return opError(http.StatusUnprocessableEntity, rejection.Code, rejection.Message, nil)
-		case runstart.CodeCircuitPaused, runstart.CodeUpstreamDegraded:
+		case runstart.CodeCircuitPaused, runstart.CodeUpstreamDegraded, runstart.CodeWorkflowPaused:
 			return opError(http.StatusConflict, rejection.Code, rejection.Message,
 				map[string]any{"status": rejection.WorkflowStatus})
 		case runstart.CodeVersionMismatch:

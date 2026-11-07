@@ -273,10 +273,6 @@ VALUES ($1, $2, $3, $4, $5, $6, $7);
 UPDATE workflows SET status = 'paused_circuit_breaker', paused_reason = sqlc.arg(reason)
 WHERE org_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL;
 
--- name: ResumeWorkflowCircuitBreaker :execrows
-UPDATE workflows SET status = 'active', paused_reason = NULL
-WHERE org_id = $1 AND id = $2 AND status = 'paused_circuit_breaker' AND deleted_at IS NULL;
-
 -- name: ListCalibratableApproaches :many
 SELECT DISTINCT approach_label FROM recovery_feedback
 WHERE org_id = $1 AND raw_confidence IS NOT NULL

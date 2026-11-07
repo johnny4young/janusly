@@ -2082,6 +2082,22 @@ func (q *Queries) LockWorkflowForRollout(ctx context.Context, arg LockWorkflowFo
 	return id, err
 }
 
+const lockWorkflowPauseState = `-- name: LockWorkflowPauseState :one
+SELECT status FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE
+`
+
+type LockWorkflowPauseStateParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) LockWorkflowPauseState(ctx context.Context, arg LockWorkflowPauseStateParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockWorkflowPauseState, arg.OrgID, arg.ID)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
 const queryRecentRunsAgainstWorkflowVersion = `-- name: QueryRecentRunsAgainstWorkflowVersion :one
 WITH candidate_runs AS (
   SELECT r.status,
@@ -2422,6 +2438,28 @@ func (q *Queries) SetWorkflowFolderOnly(ctx context.Context, arg SetWorkflowFold
 		&i.AiGuidanceMarkdown,
 	)
 	return i, err
+}
+
+const setWorkflowPauseState = `-- name: SetWorkflowPauseState :exec
+UPDATE workflows SET status = $3, paused_reason = $4
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL
+`
+
+type SetWorkflowPauseStateParams struct {
+	OrgID        string
+	ID           string
+	Status       string
+	PausedReason pgtype.Text
+}
+
+func (q *Queries) SetWorkflowPauseState(ctx context.Context, arg SetWorkflowPauseStateParams) error {
+	_, err := q.db.Exec(ctx, setWorkflowPauseState,
+		arg.OrgID,
+		arg.ID,
+		arg.Status,
+		arg.PausedReason,
+	)
+	return err
 }
 
 const setWorkflowTagsOnly = `-- name: SetWorkflowTagsOnly :one

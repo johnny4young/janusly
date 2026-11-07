@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Workflows can be paused and resumed. Pause (in the workflow list, `POST
+  /workflows/{id}/pause` or the MCP `workflows.pause` tool) stops new runs,
+  skips schedule ticks and holds trigger events. Versions, schedules and any
+  active rollout are left as they are. Resume, which also lifts a
+  circuit-breaker pause, starts the held events oldest first. A manual pause
+  is never lifted by an automatic resume. Previously the only way to stop a
+  workflow was to move it to the trash, which cancelled its rollout.
 - Two read models for the run map: `GET /runs/{runId}/map` gives each step's
   status, time, AI cost, a stuck signal, whether it needs the viewer, and
   agent lanes; `GET /needs-you` lists the tool approvals, approval and form

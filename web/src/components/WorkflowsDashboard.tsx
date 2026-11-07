@@ -7,7 +7,8 @@ import {
   sortFlows,
   updateCollapsedFolders,
 } from './workflows-dashboard-model'
-import { api } from '../api'
+import { api, contractApi } from '../api'
+import { isPostWorkflowsIdPauseResponse } from '../lib/api-guards/operations/PostWorkflowsIdPause'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -26,6 +27,7 @@ const WORKFLOW_MUTATION_TAGS = ['workflows'] as const
 const WORKFLOW_DASHBOARD_TAGS = [PLATFORM_TAG, 'workflows', 'org-config', 'runs'] as const
 
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
+const STATUS_PAUSED_MANUAL = 'paused_manual'
 
 const PAGE_SIZE = 100
 
@@ -477,7 +479,7 @@ function useWorkflowsDashboardController({
       if (!prior) return
       recoveryBusyRef.current.add(workflowId)
       setRecoveryBusyIds((current) => new Set(current).add(workflowId))
-      const wasPausedByBreaker = prior.status === STATUS_PAUSED_CIRCUIT_BREAKER
+      const wasPaused = prior.status === STATUS_PAUSED_CIRCUIT_BREAKER || prior.status === STATUS_PAUSED_MANUAL
       setWorkflows((prev) =>
         prev.map((w) => (w.id === workflowId ? { ...w, status: 'active', pausedReason: null } : w)),
       )
@@ -492,7 +494,7 @@ function useWorkflowsDashboardController({
           w.id === workflowId ? { ...w, bufferedTriggerCount: remaining } : w
         )))
         addToast(
-          wasPausedByBreaker
+          wasPaused
             ? remaining > 0
               ? t('workflowsDashboard.resumedWithRemaining', { count: backfilled, remaining })
               : backfilled > 0
@@ -511,6 +513,37 @@ function useWorkflowsDashboardController({
             : w)),
         )
         addToast(tApiError(err) || t('workflowsDashboard.resumeFailed'), 'error')
+      } finally {
+        recoveryBusyRef.current.delete(workflowId)
+        setRecoveryBusyIds((current) => {
+          const next = new Set(current)
+          next.delete(workflowId)
+          return next
+        })
+      }
+    },
+    [addToast, bumpPlatformVersion, t],
+  )
+  const pauseWorkflow = useCallback(
+    async (workflowId: string) => {
+      if (recoveryBusyRef.current.has(workflowId)) return
+      const prior = workflowsRef.current.find((w) => w.id === workflowId)
+      if (!prior) return
+      recoveryBusyRef.current.add(workflowId)
+      setRecoveryBusyIds((current) => new Set(current).add(workflowId))
+      setWorkflows((prev) =>
+        prev.map((w) => (w.id === workflowId ? { ...w, status: STATUS_PAUSED_MANUAL } : w)),
+      )
+      try {
+        await contractApi('POST /workflows/{id}/pause', `/workflows/${encodeURIComponent(workflowId)}/pause`, {},
+          { guard: isPostWorkflowsIdPauseResponse })
+        addToast(t('workflowsDashboard.pausedToast'), 'success')
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
+      } catch (err) {
+        setWorkflows((prev) =>
+          prev.map((w) => (w.id === workflowId ? { ...w, status: prior.status, pausedReason: prior.pausedReason } : w)),
+        )
+        addToast(tApiError(err) || t('workflowsDashboard.pauseFailed'), 'error')
       } finally {
         recoveryBusyRef.current.delete(workflowId)
         setRecoveryBusyIds((current) => {
@@ -733,7 +766,7 @@ function useWorkflowsDashboardController({
     confirmDeleteFolder, confirmDeleteTag, deleteFolder,
     deleteTag, deleteWorkflow, draggingId, dropTarget, folderFilter, folderOptions, groups,
     hasActiveFilters, hasFolders, hasMore, load, loadError, loadMore, loading, loadingMore,
-    moveToFolder, newFolderDraft, newFolderDropFor, newFolderHover, onCreate, onOpen,
+    moveToFolder, newFolderDraft, newFolderDropFor, newFolderHover, onCreate, onOpen, pauseWorkflow,
     persistCollapsedFolders, query, searchHint, searchInvalid, recoveryBusyIds, renameDraft, renameFolder, renameTag,
     renamingFolder, renamingTag, restoreWorkflow, resumeWorkflow, selectedIds,
     selectionMode, setBulkFolderDraft, setBulkTagDraft, setConfirmDeleteFolder,

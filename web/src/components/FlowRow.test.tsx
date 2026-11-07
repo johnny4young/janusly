@@ -40,6 +40,7 @@ function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRo
     moveToFolder: noop,
     deleteWorkflow: noop,
     resumeWorkflow: noop,
+    pauseWorkflow: noop,
     recoveryBusy: false,
     t,
   }
@@ -115,6 +116,27 @@ describe('<FlowRow /> paused state', () => {
     fireEvent.click(screen.getByTestId('workflows-resume-wf-1'))
 
     expect(resumeWorkflow).toHaveBeenCalledWith('wf-1')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('marks a manually paused row and offers Resume, with no Pause in its menu', () => {
+    renderRow(<FlowRow {...props({ ...base, status: 'paused_manual', pausedReason: 'vendor maintenance' })} />)
+
+    expect(screen.getByText('workflowsDashboard.paused')).toHaveAttribute('title', 'vendor maintenance')
+    expect(screen.getByTestId('workflows-resume-wf-1')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf-1'))
+    expect(screen.queryByTestId('workflows-pause-wf-1')).toBeNull()
+  })
+
+  it('pauses from the row menu by id without opening the row', () => {
+    const pauseWorkflow = vi.fn()
+    const onOpen = vi.fn()
+    renderRow(<FlowRow {...props({ ...base, status: 'active' })} pauseWorkflow={pauseWorkflow} onOpen={onOpen} />)
+
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf-1'))
+    fireEvent.click(screen.getByTestId('workflows-pause-wf-1'))
+
+    expect(pauseWorkflow).toHaveBeenCalledWith('wf-1')
     expect(onOpen).not.toHaveBeenCalled()
   })
 

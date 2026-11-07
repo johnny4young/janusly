@@ -36,6 +36,11 @@ type workflowLifecycleArgs struct {
 	WorkflowID string `json:"workflowId" jsonschema:"workflow id"`
 }
 
+type workflowPauseArgs struct {
+	WorkflowID string `json:"workflowId" jsonschema:"workflow id"`
+	Reason     string `json:"reason,omitempty" jsonschema:"short reason shown to operators, at most 500 characters"`
+}
+
 type runOutputArgs struct {
 	RunID  string `json:"runId" jsonschema:"the run to read"`
 	NodeID string `json:"nodeId,omitempty" jsonschema:"only this step's output"`
@@ -70,6 +75,18 @@ func registerLifecycleTools(server *mcp.Server, deps Deps) {
 		"Restore a deactivated workflow and rebuild its schedules from the latest version.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowLifecycleArgs) (*mcp.CallToolResult, any, error) {
 		return deps.at(ctx).setWorkflowActive(ctx, args.WorkflowID, true)
+	})
+	mcp.AddTool(server, writeTool(
+		"workflows.pause", "Pause workflow",
+		"Stop new runs of a workflow. Its versions, schedules and any active rollout stay as they are: schedule ticks are skipped, trigger events are held until workflows.resume, and runs in progress continue.", false,
+	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowPauseArgs) (*mcp.CallToolResult, any, error) {
+		return deps.at(ctx).pauseWorkflow(ctx, args)
+	})
+	mcp.AddTool(server, writeTool(
+		"workflows.resume", "Resume workflow",
+		"Lift a manual or circuit-breaker pause and start the trigger events held while it was paused, oldest first.", false,
+	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowLifecycleArgs) (*mcp.CallToolResult, any, error) {
+		return deps.at(ctx).resumeWorkflow(ctx, args.WorkflowID)
 	})
 	mcp.AddTool(server, readTool(
 		"runs.output", "Read run output",
@@ -245,6 +262,73 @@ func (d Deps) setWorkflowActive(ctx context.Context, workflowID string, active b
 	}
 	d.Audit.Write(ctx, d.Pool, d.auditContext(), action, options)
 	return ok(map[string]any{"workflowId": workflowID, "active": active})
+}
+
+func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "workflows.pause", "workflows.write", true); !allowed {
+		return expected(message)
+	}
+	if !validMCPIdentifier(args.WorkflowID) {
+		return expected("workflowId is required and must be at most 256 characters")
+	}
+	if visible, err := d.workflowVisible(ctx, args.WorkflowID); err != nil || !visible {
+		return hiddenResult(err, "workflow not found")
+	}
+	reason := boundedMCPText(args.Reason, engine.MaxPauseReasonRunes)
+	previous, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, reason)
+	switch {
+	case err == nil:
+	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
+		return expected("workflow not found")
+	default:
+		return nil, nil, err
+	}
+	changed := previous != engine.WorkflowStatusPausedManual
+	if changed {
+		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.paused", audit.Options{
+			TargetType: "workflow", TargetID: args.WorkflowID,
+			Metadata: map[string]any{"previousStatus": previous, "hasReason": reason != ""},
+		})
+	}
+	return ok(map[string]any{"workflowId": args.WorkflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed})
+}
+
+func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "workflows.resume", "workflows.write", true); !allowed {
+		return expected(message)
+	}
+	if !validMCPIdentifier(workflowID) {
+		return expected("workflowId is required and must be at most 256 characters")
+	}
+	if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
+		return hiddenResult(err, "workflow not found")
+	}
+	outcome, lifted, err := d.Engine.ResumeWorkflow(ctx, d.OrgID, workflowID, d.UserID)
+	var notResumable *engine.ErrWorkflowNotResumable
+	switch {
+	case err == nil:
+	case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
+		return expected("workflow not found")
+	case errors.As(err, &notResumable):
+		return expected("this pause clears on its own when its upstream recovers (status: " + notResumable.Status + ")")
+	default:
+		return nil, nil, err
+	}
+	if lifted == engine.WorkflowStatusPausedManual {
+		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.resumed", audit.Options{TargetType: "workflow", TargetID: workflowID})
+	}
+	if outcome.Backfilled > 0 || outcome.Failed > 0 {
+		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.trigger_backfill", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+			Metadata: map[string]any{
+				"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
+			},
+		})
+	}
+	return ok(map[string]any{
+		"workflowId": workflowID, "status": "active", "changed": lifted != "",
+		"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
+	})
 }
 
 func (d Deps) runOutput(ctx context.Context, args runOutputArgs) (*mcp.CallToolResult, any, error) {

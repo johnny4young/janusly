@@ -235,7 +235,8 @@ def check_pause(org, answer):
     actions = sql("SELECT string_agg(action, ',' ORDER BY created_at) FROM audit_logs WHERE org_id = %s AND target_id = %s AND user_id LIKE 'agent:%%'",
                   org, "nc-" + org)
     status = sql("SELECT status FROM workflows WHERE org_id = %s AND id = %s AND deleted_at IS NULL", org, "nc-" + org)
-    return "workflow.deleted" in (actions or "") and "workflow.restored" in (actions or "") and status == "active"
+    done = (actions or "").split(",")
+    return "workflow.paused" in done and "workflow.resumed" in done and "workflow.deleted" not in done and status == "active"
 
 
 def setup_cancel(org, owner):

@@ -189,7 +189,7 @@ claude mcp add --transport http janusly https://janusly.example.com/mcp --header
 
 ## Catalog
 
-The stable catalog contains 33 tools:
+The stable catalog contains 35 tools:
 
 - agent: `agent.info`;
 - publish gate: `drafts.save`, `drafts.get`, `drafts.list`, `workflows.test`,
@@ -198,7 +198,8 @@ The stable catalog contains 33 tools:
 - authoring: `catalog.describe`, `workflows.validate`;
 - workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
   `workflows.propose`, `workflows.save`, `workflows.rollback`,
-  `workflows.deactivate`, `workflows.reactivate`;
+  `workflows.pause`, `workflows.resume`, `workflows.deactivate`,
+  `workflows.reactivate`;
 - run: `runs.list`, `runs.status`, `runs.inspect`, `runs.output`,
   `runs.start`, `runs.cancel`;
 - dead letter: `dlq.list`, `dlq.redrive`;
@@ -291,9 +292,10 @@ output, reaches the model as is. Each output value is bounded to 32000 bytes and
 replaced by its size beyond that. `workflows.assure`, `runs.inspect` and the
 recovery tools keep their withheld projections.
 
-`workflows.rollback`, `workflows.deactivate` and `workflows.reactivate`
-(`workflows.write`) and `runs.cancel` (`runs.cancel`) call the same engine
-operations as the HTTP rollback, trash, restore and cancel routes. They are
+`workflows.rollback`, `workflows.pause`, `workflows.resume`,
+`workflows.deactivate` and `workflows.reactivate` (`workflows.write`) and
+`runs.cancel` (`runs.cancel`) call the same engine operations as the HTTP
+rollback, pause, resume, trash, restore and cancel routes. They are
 business writes, so they also need write consent, and deactivate and cancel are
 annotated destructive.
 

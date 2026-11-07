@@ -216,6 +216,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 		"POST /v1/workflows/save":                                        onlyIntegration(),
 		"POST /v1/workflows/rollback":                                    onlyIntegration(),
 		"POST /v1/workflows/{id}/resume":                                 onlyIntegration(),
+		"POST /v1/workflows/{id}/pause":                                  onlyIntegration(),
 		"POST /v1/workflows/{workflowId}/rollout":                        rolloutRow,
 		"POST /v1/workflows/{workflowId}/rollout/{rolloutId}/{decision}": rolloutRow,
 		"GET /v1/workflows/{workflowId}/rollout/qualification":           qualificationRow,

@@ -441,19 +441,24 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 	if workflowID == "" {
 		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
 	}
-	outcome, _, err := s.engine.ResumeWorkflowCircuitBreaker(r.Context(), rc.orgID, workflowID, rc.userID)
+	outcome, lifted, err := s.engine.ResumeWorkflow(r.Context(), rc.orgID, workflowID, rc.userID)
 	if err != nil {
-		var notPaused *engine.ErrWorkflowNotBreakerPaused
+		var notResumable *engine.ErrWorkflowNotResumable
 		switch {
 		case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
-		case errors.As(err, &notPaused):
+		case errors.As(err, &notResumable):
 			return opError(http.StatusConflict, "workflow_not_circuit_breaker_paused",
-				"Workflow is not paused by its circuit breaker (status: "+notPaused.Status+")",
-				map[string]any{"status": notPaused.Status})
+				"Workflow pause clears on its own (status: "+notResumable.Status+")",
+				map[string]any{"status": notResumable.Status})
 		default:
 			return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 		}
+	}
+	if lifted == engine.WorkflowStatusPausedManual {
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.resumed", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+		})
 	}
 	if outcome.Backfilled > 0 || outcome.Failed > 0 {
 		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.trigger_backfill", audit.Options{
@@ -466,6 +471,41 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 	return opOK(map[string]any{
 		"ok": true, "workflowId": workflowID, "status": "active",
 		"backfilled": outcome.Backfilled, "failed": outcome.Failed, "remaining": outcome.Remaining,
+	})
+}
+
+func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID string) opResult {
+	if workflowID == "" {
+		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
+	}
+	body, rejection := decodeJSONRecord(r)
+	if rejection != nil {
+		return *rejection
+	}
+	reason, _ := body["reason"].(string)
+	if raw, present := body["reason"]; present && raw != nil {
+		if _, isString := raw.(string); !isString {
+			return opError(http.StatusBadRequest, "workflows_pause_reason_invalid", "reason must be a string", nil)
+		}
+	}
+	reason = strings.TrimSpace(reason)
+	previous, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
+	switch {
+	case err == nil:
+	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
+		return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+	default:
+		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
+	changed := previous != engine.WorkflowStatusPausedManual
+	if changed {
+		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.paused", audit.Options{
+			TargetType: "workflow", TargetID: workflowID,
+			Metadata: map[string]any{"previousStatus": previous, "hasReason": reason != ""},
+		})
+	}
+	return opOK(map[string]any{
+		"ok": true, "workflowId": workflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed,
 	})
 }
 

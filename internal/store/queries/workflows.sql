@@ -218,6 +218,13 @@ WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
 SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
 WHERE id = $1 AND org_id = $2;
 
+-- name: LockWorkflowPauseState :one
+SELECT status FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE;
+
+-- name: SetWorkflowPauseState :exec
+UPDATE workflows SET status = sqlc.arg(status), paused_reason = sqlc.narg(paused_reason)
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
+
 -- name: LockWorkflowForRollout :one
 SELECT id FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE;
 

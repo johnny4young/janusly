@@ -59,3 +59,26 @@ staging environment, and `{{env.NAME}}` reads the process environment, within
 the operator allowlist, for every run. Per-environment variables or credentials would need an environment bound
 to each run at start and server-side resolution of references by that
 environment.
+
+## Pause and resume
+
+`workflows.status` is `active` or one of three pauses:
+
+- `paused_manual`: a person (`POST /workflows/{id}/pause`) or an agent
+  (`workflows.pause`) asked for it;
+- `paused_circuit_breaker`: tripped by consecutive failures;
+- `paused_upstream_degraded`: set and cleared by the upstream status poller.
+
+While paused, starts are refused with a 409 (`workflow_paused`,
+`workflow_circuit_breaker_paused` or `upstream_degraded`). Schedule ticks are
+dropped and audited, inbound trigger events are buffered, and runs already in
+progress continue. A pause never touches versions, schedule entries or an
+active rollout, which only an explicit rollout decision finishes.
+
+A manual pause replaces a system pause, and each automatic resume only
+matches its own status, so no automatic resume lifts a manual pause.
+`POST /workflows/{id}/resume` (`workflows.resume`) lifts manual and breaker
+pauses, then starts the buffered events oldest first in pages of 50. An
+upstream pause is refused with a 409 because it clears itself.
+Moving a workflow to the trash (`workflows.deactivate`) is a different
+operation: it cancels the active rollout and removes the schedule entries.

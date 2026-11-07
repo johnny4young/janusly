@@ -10014,6 +10014,84 @@
         "summary": "One exact immutable workflow version"
       }
     },
+    "/workflows/{id}/pause": {
+      "post": {
+        "operationId": "post_v1_workflows_id_pause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "changed": {
+                              "type": "boolean"
+                            },
+                            "ok": {
+                              "const": true
+                            },
+                            "status": {
+                              "const": "paused_manual"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "ok",
+                            "workflowId",
+                            "status",
+                            "changed"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Pause a workflow without touching its versions, schedules or rollout"
+      }
+    },
     "/workflows/{id}/resume": {
       "post": {
         "operationId": "post_v1_workflows_id_resume",
@@ -10083,7 +10161,7 @@
             "description": "Error — the v1 error envelope"
           }
         },
-        "summary": "Resume a workflow paused by its circuit breaker"
+        "summary": "Resume a manually paused or circuit-breaker-paused workflow"
       }
     },
     "/workflows/{workflowId}/rollout": {
