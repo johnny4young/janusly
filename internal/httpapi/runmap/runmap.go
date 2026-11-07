@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -98,10 +99,7 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 		totals["tokens"] = totals["tokens"].(int64) + cost.Tokens
 	}
 	typical := s.typicalDurations(r, rc, runID, nodes)
-	permissions := s.viewerPermissions(r, rc)
-	if !auth.IsPersonMode(modeOf(rc)) {
-		permissions = map[string]bool{}
-	}
+	permissions := s.deciderPermissions(r, rc)
 	pending, err := q.ListPendingToolApprovalRequesters(ctx, store.ListPendingToolApprovalRequestersParams{OrgID: rc.OrgID, RunID: runID})
 	if err != nil {
 		return internalError()
@@ -245,13 +243,15 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 	return lanes, nil
 }
 
-func (s *service) viewerPermissions(r *http.Request, rc httpkit.Request) map[string]bool {
-	if rc.Auth == nil {
+// deciderPermissions is the viewer's grant when they can decide at all: a
+// person with at least editor rank, as every decision route requires.
+func (s *service) deciderPermissions(r *http.Request, rc httpkit.Request) map[string]bool {
+	if rc.Auth == nil || !auth.IsPersonMode(rc.Auth.Mode) {
 		return map[string]bool{}
 	}
 	q := store.New(s.pool)
 	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
-	if err != nil || role == nil {
+	if err != nil || role == nil || auth.Rank[role.InheritsFrom] < auth.Rank[auth.RoleEditor] {
 		return map[string]bool{}
 	}
 	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
@@ -266,9 +266,9 @@ func (s *service) viewerPermissions(r *http.Request, rc httpkit.Request) map[str
 func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 	ctx := r.Context()
 	q := store.New(s.pool)
-	permissions := s.viewerPermissions(r, rc)
+	permissions := s.deciderPermissions(r, rc)
 	items := []map[string]any{}
-	if permissions["runs.start"] && auth.IsPersonMode(modeOf(rc)) {
+	if permissions["runs.start"] {
 		approvals, err := q.ListPendingToolApprovalsForOrg(ctx, rc.OrgID)
 		if err != nil {
 			return internalError()
@@ -290,14 +290,21 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 				"workflowId": row.WorkflowID, "since": optionalTime(row.StartedAt)})
 		}
 	}
-	if permissions["workflows.write"] && auth.IsPersonMode(modeOf(rc)) {
+	if permissions["workflows.write"] {
 		requests, err := q.ListPublishRequests(ctx, store.ListPublishRequestsParams{OrgID: rc.OrgID, FilterStatus: pendingStatus()})
 		if err != nil {
 			return internalError()
 		}
+		secondPerson, err := s.secondPersonRequired(r, rc)
+		if err != nil {
+			secondPerson = true
+		}
 		now := s.now()
 		for _, row := range requests {
 			if row.RequestedBy == rc.UserID || !now.Before(row.ExpiresAt) {
+				continue
+			}
+			if secondPerson && s.accountableFor(r, rc, row) {
 				continue
 			}
 			items = append(items, map[string]any{"kind": "publish_request", "id": row.ID, "workflowId": row.WorkflowID,
@@ -307,12 +314,35 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 	return httpkit.OK(map[string]any{"items": items})
 }
 
-func modeOf(rc httpkit.Request) auth.Mode {
-	if rc.Auth == nil {
-		return ""
+// secondPersonRequired and accountableFor mirror the approval route, so the
+// inbox never offers a decision that route would refuse.
+func (s *service) secondPersonRequired(r *http.Request, rc httpkit.Request) (bool, error) {
+	raw, err := store.New(s.pool).GetOrgConfigValue(r.Context(), store.GetOrgConfigValueParams{OrgID: rc.OrgID, Key: secondPersonKey})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
 	}
-	return rc.Auth.Mode
+	if err != nil {
+		return false, err
+	}
+	var required bool
+	return json.Unmarshal(raw, &required) == nil && required, nil
 }
+
+func (s *service) accountableFor(r *http.Request, rc httpkit.Request, row store.PublishRequest) bool {
+	if row.OnBehalfOf == rc.UserID || row.DraftedBy == rc.UserID {
+		return true
+	}
+	clientID, ok := strings.CutPrefix(row.DraftedBy, "agent:")
+	if !ok {
+		return false
+	}
+	client, err := store.New(s.pool).GetAgentClient(r.Context(), store.GetAgentClientParams{OrgID: rc.OrgID, ID: clientID})
+	return err != nil || client.CreatedBy == rc.UserID
+}
+
+// secondPersonKey is publishrequests.SecondPersonKey; feature packages do not
+// import each other.
+const secondPersonKey = "agents.publishRequiresSecondPerson"
 
 func optionalTime(at *time.Time) any {
 	if at == nil {

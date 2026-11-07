@@ -12,21 +12,23 @@ FROM usage_events
 WHERE org_id = $1 AND run_id = $2 AND metric = 'llm.completion'
 GROUP BY 1;
 
--- How long this step usually takes in this workflow: the median of its last
--- twenty successful executions.
+-- How long this step usually takes in this workflow: the median of its
+-- successful executions in the workflow's last 200 runs, so the cost of a
+-- poll never grows with the workflow's history.
 -- name: ListRunNodeTypicalDurations :many
-SELECT recent.node_id, (percentile_cont(0.5) WITHIN GROUP (ORDER BY recent.ms))::float8 AS median_ms
-FROM (
-  SELECT rn.node_id, extract(epoch FROM rn.finished_at - rn.started_at) * 1000 AS ms,
-         row_number() OVER (PARTITION BY rn.node_id ORDER BY rn.finished_at DESC) AS position
-  FROM run_nodes rn
-  JOIN runs r ON r.org_id = rn.org_id AND r.id = rn.run_id
-  WHERE rn.org_id = sqlc.arg(org_id) AND r.workflow_id = sqlc.arg(workflow_id)::text AND r.id <> sqlc.arg(run_id)
-    AND rn.status = 'succeeded' AND rn.started_at IS NOT NULL AND rn.finished_at IS NOT NULL
-    AND rn.node_id = ANY(sqlc.arg(node_ids)::text[])
-) recent
-WHERE recent.position <= 20
-GROUP BY recent.node_id;
+WITH recent_runs AS (
+  SELECT r.id FROM runs r
+  WHERE r.org_id = sqlc.arg(org_id) AND r.workflow_id = sqlc.arg(workflow_id)::text AND r.id <> sqlc.arg(run_id)
+  ORDER BY r.created_at DESC, r.id DESC
+  LIMIT 200
+)
+SELECT rn.node_id,
+       (percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM rn.finished_at - rn.started_at) * 1000))::float8 AS median_ms
+FROM recent_runs
+JOIN run_nodes rn ON rn.org_id = sqlc.arg(org_id) AND rn.run_id = recent_runs.id
+WHERE rn.status = 'succeeded' AND rn.started_at IS NOT NULL AND rn.finished_at IS NOT NULL
+  AND rn.node_id = ANY(sqlc.arg(node_ids)::text[])
+GROUP BY rn.node_id;
 
 -- name: ListRunAgentEvents :many
 SELECT coalesce(node_id, '')::text AS node_id, type, payload, created_at

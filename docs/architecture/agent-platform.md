@@ -354,13 +354,15 @@ stuck, what needs me. Per node: status, attempts, elapsed time and cost.
 The read models exist: `GET /runs/{runId}/map` (`runs.read`) returns each
 step's status, attempts, start, finish, elapsed time, AI cost and tokens from
 `usage_events`, waiting kind, child run, a `stuck` flag (running three times
-longer than the median of that step's last twenty successful executions,
-never under 30 seconds, or ten minutes without history) and `needsYou` (a
-person step or a tool approval the viewer may decide, never one they caused),
+longer than the median of that step's successful executions in the
+workflow's last 200 runs, never under 30 seconds, or ten minutes without
+history) and `needsYou` (a person step or a tool approval a person with
+editor rank may decide, never one they caused),
 plus agent lanes from `agent.*` and `multi_agent.*` events and run totals.
 `GET /needs-you` lists, for the signed-in person, tool approvals they did not
 cause, approval and form steps (both with `runs.start`) and agent publish
-requests (with `workflows.write`). The canvas does not use them yet.
+requests (with `workflows.write`, and not to the people a second-person rule
+excludes). The canvas does not use them yet.
 
 - **Agent and subworkflow lanes.** An `agent` or `multi_agent` node expands
   into a lane of its steps and tool calls from its `agent.*` events. A

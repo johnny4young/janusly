@@ -101,4 +101,32 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 	if res := h.callWithHeaders("GET", "/runs/"+runID+"/map", nil, "other-org-"+suffix, as(editor)); res.status != 404 && res.status != 403 {
 		t.Fatalf("another organization read the run map: %d", res.status)
 	}
+
+	// A viewer-rank role granted runs.start still cannot decide: every
+	// decision route requires editor rank.
+	starter := "starter-" + suffix
+	exec(`INSERT INTO org_roles (id, org_id, name, inherits_from, granted_permissions) VALUES ($1, $2, 'starter', 'viewer', '["runs.read","runs.start"]')`,
+		"role-"+suffix, h.org)
+	exec(`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, $3, 'starter')`, "m-"+starter, h.org, starter)
+	if kinds := inbox(starter); len(kinds) != 0 {
+		t.Fatalf("a viewer-rank role was offered decisions: %v", kinds)
+	}
+
+	// With a second person required, the agent's creator is not offered its publish request.
+	clientID := "client-" + suffix
+	exec(`INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)
+		VALUES ($1, $2, 'agent', ARRAY['read','publish'], decode(md5($1) || md5($2), 'hex'), 'abcd', $3, now() + interval '1 day')`, clientID, h.org, other)
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, 'wf', 'draft', 'qual', '{first_publish}', $3, $4, $3, now() + interval '1 day')`, "pub-"+suffix, h.org, "agent:"+clientID, other)
+	if kinds := inbox(other); kinds["publish_request"] != 1 {
+		t.Fatalf("publish request missing from the creator's inbox: %v", kinds)
+	}
+	exec(`INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'agents.publishRequiresSecondPerson', 'true', 'mcp', 'test', 'boolean')`, "cfg-"+suffix, h.org)
+	if kinds := inbox(other); kinds["publish_request"] != 0 {
+		t.Fatalf("the creator was offered a request only a second person may approve: %v", kinds)
+	}
+	if kinds := inbox(editor); kinds["publish_request"] != 1 {
+		t.Fatalf("a second person does not see the request: %v", kinds)
+	}
 }
