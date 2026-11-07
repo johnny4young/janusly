@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { pollUntilTerminal, startRun } from './_helpers/demo-helpers'
 import { openWorkspaceSection } from './_helpers/workspace-navigation'
 
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
@@ -16,22 +17,32 @@ async function captureWorkspace(page: Page, filename: string): Promise<void> {
   })
 }
 
-async function prepareEmptySession(page: Page): Promise<void> {
+async function prepareEmptySession(page: Page): Promise<string> {
   const orgId = `home-layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   await page.addInitScript((activeOrg) => {
     window.localStorage.setItem('janusly:activeOrg', activeOrg)
     window.localStorage.setItem('janusly:locale', 'en')
   }, orgId)
+  return orgId
 }
 
-test('Home leads with priorities and active work', async ({ page }) => {
+// An empty workspace settles on the Recovery Lab entry; one finished run gives the caught-up work layout.
+async function prepareCaughtUpSession(page: Page, request: APIRequestContext): Promise<void> {
+  const orgId = await prepareEmptySession(page)
+  const workflow = { id: `home-caught-up-${orgId}`, name: 'Caught up', nodes: [{ id: 'done', type: 'noop', config: {} }], edges: [] }
+  const { runId } = await startRun(request, workflow, undefined, orgId)
+  expect((await pollUntilTerminal(request, runId, 30_000, orgId)).status).toBe('succeeded')
+}
+
+test('Home leads with priorities and active work', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await prepareEmptySession(page)
+  await prepareCaughtUpSession(page, request)
   await page.goto('/')
 
   await expect(page.locator('.we-home-header .section-kicker', { hasText: 'Home' })).toBeVisible()
   await expect(page.getByTestId('home-health-summary')).toBeVisible()
   await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
+  await expect(page.getByTestId('home-priority-clear')).toBeVisible()
   await expect(page.getByTestId('home-active-work')).toBeVisible()
   await expect(page.getByTestId('home-today')).toBeVisible()
   await expect(page.getByTestId('home-operator-field')).toBeVisible()
@@ -65,14 +76,15 @@ test('Reports exposes calibration health without blocking an empty workspace', a
   expect(box?.height ?? 0).toBeGreaterThan(0)
 })
 
-test('Recovery Center remains usable on mobile and the builder is one tap away', async ({ page }) => {
+test('Recovery Center remains usable on mobile and the builder is one tap away', async ({ page, request }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await prepareEmptySession(page)
+  await prepareCaughtUpSession(page, request)
   await page.goto('/')
 
   const hero = page.locator('.we-recovery-center-hero')
   await expect(hero.locator('.section-kicker', { hasText: 'Home' })).toBeVisible()
   await expect(page.getByTestId('home-priority-inbox')).toBeVisible()
+  await expect(page.getByTestId('home-priority-clear')).toBeVisible()
   await expect(page.getByTestId('home-active-work')).toBeVisible()
   const heroBox = await hero.boundingBox()
   expect(heroBox?.y ?? 9999).toBeLessThan(844)

@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/johnny4young/janusly/internal/domain"
-	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/workflowvalidation"
 )
 
 // Every catalog template must parse and validate with zero fail-level
 // issues: the gallery imports these verbatim, so a broken entry becomes a
-// broken first-run experience. This also pins the i18n decoration every
-// entry needs for the EN/ES gallery.
+// broken first-run experience. It uses the save/start validator, so tool
+// inputs are checked too. This also pins the i18n decoration every entry
+// needs for the EN/ES gallery.
 func TestTemplateCatalogWorkflowsValidate(t *testing.T) {
 	for _, template := range templateCatalog {
 		id := template.ID
@@ -31,7 +32,7 @@ func TestTemplateCatalogWorkflowsValidate(t *testing.T) {
 		if wf == nil {
 			t.Fatalf("%s: workflow does not parse: %+v", id, issues)
 		}
-		result := domain.ValidateWithOptions(wf, grammar.DomainValidator, nil, domain.ValidationOptions{})
+		result := workflowvalidation.Validate(wf)
 		if !result.Valid {
 			t.Errorf("%s: workflow invalid: %+v", id, result.Issues)
 		}
