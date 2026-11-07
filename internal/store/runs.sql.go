@@ -640,8 +640,6 @@ func (q *Queries) GetAutoHealingRun(ctx context.Context, arg GetAutoHealingRunPa
 }
 
 const getDecisionEvent = `-- name: GetDecisionEvent :one
-
-
 SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events
 WHERE id = $1 AND run_id = $2 AND node_id = $3 AND type = 'decision.made'
@@ -662,8 +660,6 @@ type GetDecisionEventRow struct {
 	CreatedAt *time.Time
 }
 
-// Ascending page for the SSE catch-up: everything strictly after the
-// composite cursor, oldest first.
 // The /causal decision explorer: one exact decision.made event,
 // pinned to run + node so a foreign event id cannot leak.
 func (q *Queries) GetDecisionEvent(ctx context.Context, arg GetDecisionEventParams) (GetDecisionEventRow, error) {
@@ -832,6 +828,24 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (GetRunRow, erro
 		&i.TraceID,
 	)
 	return i, err
+}
+
+const getRunEventSeqForOrg = `-- name: GetRunEventSeqForOrg :one
+SELECT seq FROM run_events
+WHERE id = $1 AND run_id = $2 AND org_id = $3
+`
+
+type GetRunEventSeqForOrgParams struct {
+	ID    string
+	RunID string
+	OrgID string
+}
+
+func (q *Queries) GetRunEventSeqForOrg(ctx context.Context, arg GetRunEventSeqForOrgParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getRunEventSeqForOrg, arg.ID, arg.RunID, arg.OrgID)
+	var seq int64
+	err := row.Scan(&seq)
+	return seq, err
 }
 
 const getRunExecution = `-- name: GetRunExecution :one
@@ -1761,104 +1775,47 @@ func (q *Queries) ListRunEvents(ctx context.Context, arg ListRunEventsParams) ([
 	return items, nil
 }
 
-const listRunEventsAfter = `-- name: ListRunEventsAfter :many
-SELECT id, run_id, node_id, type, payload, created_at
+const listRunEventsAfterSeqForOrg = `-- name: ListRunEventsAfterSeqForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at, seq
 FROM run_events
-WHERE run_id = $1
-  AND (created_at, id) > ($2::timestamptz, $3::text)
-ORDER BY created_at ASC, id ASC
+WHERE run_id = $1 AND org_id = $2 AND seq > $3::bigint
+ORDER BY seq
 LIMIT $4
 `
 
-type ListRunEventsAfterParams struct {
-	RunID          string
-	AfterCreatedAt time.Time
-	AfterID        string
-	PageLimit      int32
+type ListRunEventsAfterSeqForOrgParams struct {
+	RunID     string
+	OrgID     string
+	AfterSeq  int64
+	PageLimit int32
 }
 
-type ListRunEventsAfterRow struct {
+type ListRunEventsAfterSeqForOrgRow struct {
 	ID        string
 	RunID     string
 	NodeID    pgtype.Text
 	Type      string
 	Payload   json.RawMessage
 	CreatedAt *time.Time
+	Seq       int64
 }
 
-func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]ListRunEventsAfterRow, error) {
-	rows, err := q.db.Query(ctx, listRunEventsAfter,
-		arg.RunID,
-		arg.AfterCreatedAt,
-		arg.AfterID,
-		arg.PageLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListRunEventsAfterRow
-	for rows.Next() {
-		var i ListRunEventsAfterRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.RunID,
-			&i.NodeID,
-			&i.Type,
-			&i.Payload,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRunEventsAfterForOrg = `-- name: ListRunEventsAfterForOrg :many
-SELECT id, run_id, node_id, type, payload, created_at
-FROM run_events
-WHERE run_id = $1 AND org_id = $2
-  AND (created_at, id) > ($3::timestamptz, $4::text)
-ORDER BY created_at ASC, id ASC
-LIMIT $5
-`
-
-type ListRunEventsAfterForOrgParams struct {
-	RunID          string
-	OrgID          string
-	AfterCreatedAt time.Time
-	AfterID        string
-	PageLimit      int32
-}
-
-type ListRunEventsAfterForOrgRow struct {
-	ID        string
-	RunID     string
-	NodeID    pgtype.Text
-	Type      string
-	Payload   json.RawMessage
-	CreatedAt *time.Time
-}
-
-func (q *Queries) ListRunEventsAfterForOrg(ctx context.Context, arg ListRunEventsAfterForOrgParams) ([]ListRunEventsAfterForOrgRow, error) {
-	rows, err := q.db.Query(ctx, listRunEventsAfterForOrg,
+// Ascending page for the SSE catch-up in commit order: everything strictly
+// after the sequence cursor.
+func (q *Queries) ListRunEventsAfterSeqForOrg(ctx context.Context, arg ListRunEventsAfterSeqForOrgParams) ([]ListRunEventsAfterSeqForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listRunEventsAfterSeqForOrg,
 		arg.RunID,
 		arg.OrgID,
-		arg.AfterCreatedAt,
-		arg.AfterID,
+		arg.AfterSeq,
 		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListRunEventsAfterForOrgRow
+	var items []ListRunEventsAfterSeqForOrgRow
 	for rows.Next() {
-		var i ListRunEventsAfterForOrgRow
+		var i ListRunEventsAfterSeqForOrgRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.RunID,
@@ -1866,6 +1823,7 @@ func (q *Queries) ListRunEventsAfterForOrg(ctx context.Context, arg ListRunEvent
 			&i.Type,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.Seq,
 		); err != nil {
 			return nil, err
 		}

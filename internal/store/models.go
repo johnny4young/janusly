@@ -755,6 +755,12 @@ type RunEvent struct {
 	Payload   json.RawMessage
 	CreatedAt *time.Time
 	HoldUntil *time.Time
+	Seq       int64
+}
+
+type RunEventSequence struct {
+	RunID   string
+	LastSeq int64
 }
 
 type RunNode struct {

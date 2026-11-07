@@ -308,10 +308,6 @@ VALUES ($1, $2, $3, $4, $5, $6, $7);
 INSERT INTO run_events (id, run_id, org_id, node_id, type, payload, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
 
--- Ascending page for the SSE catch-up: everything strictly after the
-
--- composite cursor, oldest first.
-
 -- The /causal decision explorer: one exact decision.made event,
 -- pinned to run + node so a foreign event id cannot leak.
 -- name: GetDecisionEvent :one
@@ -319,21 +315,18 @@ SELECT id, run_id, node_id, type, payload, created_at
 FROM run_events
 WHERE id = $1 AND run_id = $2 AND node_id = $3 AND type = 'decision.made';
 
--- name: ListRunEventsAfter :many
-SELECT id, run_id, node_id, type, payload, created_at
+-- Ascending page for the SSE catch-up in commit order: everything strictly
+-- after the sequence cursor.
+-- name: ListRunEventsAfterSeqForOrg :many
+SELECT id, run_id, node_id, type, payload, created_at, seq
 FROM run_events
-WHERE run_id = $1
-  AND (created_at, id) > (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::text)
-ORDER BY created_at ASC, id ASC
+WHERE run_id = $1 AND org_id = sqlc.arg(org_id) AND seq > sqlc.arg(after_seq)::bigint
+ORDER BY seq
 LIMIT sqlc.arg(page_limit);
 
--- name: ListRunEventsAfterForOrg :many
-SELECT id, run_id, node_id, type, payload, created_at
-FROM run_events
-WHERE run_id = $1 AND org_id = sqlc.arg(org_id)
-  AND (created_at, id) > (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::text)
-ORDER BY created_at ASC, id ASC
-LIMIT sqlc.arg(page_limit);
+-- name: GetRunEventSeqForOrg :one
+SELECT seq FROM run_events
+WHERE id = $1 AND run_id = $2 AND org_id = sqlc.arg(org_id);
 
 -- name: ListRunEvents :many
 SELECT id, run_id, node_id, type, payload, created_at

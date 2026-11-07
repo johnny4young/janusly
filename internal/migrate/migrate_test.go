@@ -55,6 +55,9 @@ func TestBaselineContainsCurrentRuntimeObjectsOnly(t *testing.T) {
 		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
 		"workflows_active_search_trgm_idx",
 		"dead_letters_recovery_search_trgm_idx",
+		"run_event_sequences",
+		"run_events_assign_seq",
+		"run_events_run_seq_idx",
 	} {
 		if !strings.Contains(baseline, object) {
 			t.Errorf("embedded baseline is missing current object %q", object)

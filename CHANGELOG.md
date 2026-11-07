@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A live run view no longer shows a step as running after it paused or
+  finished. When parallel branches wrote events at nearly the same moment,
+  the live stream could skip an event that was stamped earlier but saved
+  later, and the step stayed stale until a reload. The stream now follows the
+  order in which events are saved.
 - The app loads faster: the server sends its JavaScript, CSS, SVG and HTML
   brotli- or gzip-compressed instead of raw. A first Home load now transfers
   about 210 KiB of static files instead of about 800 KiB. The files are

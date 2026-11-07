@@ -1069,7 +1069,8 @@ CREATE TABLE public.run_events (
     type text NOT NULL,
     payload jsonb,
     created_at timestamp with time zone DEFAULT now(),
-    hold_until timestamp with time zone
+    hold_until timestamp with time zone,
+    seq bigint NOT NULL
 );
 
 
@@ -3492,6 +3493,28 @@ $$;
 CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
 
 CREATE TRIGGER run_events_stamp_org BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.stamp_run_row_org();
+
+-- The stream pages run events by seq. The counter row stays locked until
+-- commit, so a transaction that commits later always holds the higher seq.
+CREATE TABLE public.run_event_sequences (
+    run_id text PRIMARY KEY,
+    last_seq bigint NOT NULL
+);
+
+CREATE FUNCTION public.assign_run_event_seq() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO public.run_event_sequences AS counter (run_id, last_seq) VALUES (NEW.run_id, 1)
+    ON CONFLICT (run_id) DO UPDATE SET last_seq = counter.last_seq + 1
+    RETURNING counter.last_seq INTO NEW.seq;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER run_events_assign_seq BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.assign_run_event_seq();
+
+CREATE UNIQUE INDEX run_events_run_seq_idx ON public.run_events USING btree (run_id, seq);
 
 -- Authoring examples reference immutable versions; graphs stay in their owner.
 ALTER TABLE public.workflows ADD CONSTRAINT workflows_org_identity_unique UNIQUE (org_id, id);

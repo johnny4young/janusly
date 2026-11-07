@@ -75,12 +75,23 @@ variants that scope by the row's own `org_id`: a run id alone, however it was
 obtained, never returns another organization's rows. Engine-internal reads
 stay run-scoped because the claim already carries the tenant.
 
-Run events are ordered by `(created_at, id)`, and `created_at` has
+History pages order run events by `(created_at, id)`, and `created_at` has
 millisecond precision. Event ids are UUIDv7, which ascend in generation
 order within one process, so a step's events written within one millisecond
-keep their order in history pages and in the stream's catch-up cursor. Across
-HA instances the ids carry each host's sub-millisecond clock, so cross-instance
-order within a millisecond depends on clock synchronization.
+keep their order. Across HA instances the ids carry each host's
+sub-millisecond clock, so cross-instance order within a millisecond depends
+on clock synchronization.
+
+Timestamps follow when a step stamped its event, not when it committed, so
+the SSE stream pages by `run_events.seq` instead. The `run_events_assign_seq`
+trigger takes every insert, COPY included, from the run's
+`run_event_sequences` counter row. That row stays locked until commit, so a
+later commit always carries a higher seq and a reader's cursor can never pass
+an event that has not committed yet. Inserts into different runs never wait
+on each other. A transaction that appends events holds its run's counter until
+it commits, so it appends them after its other row writes, as the
+completion-family buffer does. Frame ids are the seq; a legacy
+`<iso>|<id>` cursor resumes at that event's seq.
 
 ## Tenant-scoped substring search
 

@@ -121,6 +121,8 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.schedule_entries",
 		"public.tool_approval_requests",
 		"public.run_actors",
+		"public.run_event_sequences",
+		"public.run_events_run_seq_idx",
 		"public.workflows_active_search_trgm_idx",
 		"public.dead_letters_recovery_search_trgm_idx",
 	} {
@@ -157,7 +159,8 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		{"schedule_entries", []string{"next_fire_at", "claimed_due_at"}},
 		{"runs", []string{"workflow_id", "trigger_kind"}},
 		{"run_nodes", []string{"org_id"}},
-		{"run_events", []string{"org_id"}},
+		{"run_events", []string{"org_id", "seq"}},
+		{"run_event_sequences", []string{"run_id", "last_seq"}},
 	}
 	for _, requirement := range requiredColumns {
 		for _, column := range requirement.columns {
@@ -173,6 +176,19 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 				return fmt.Errorf("database schema is incomplete: column public.%s.%s is missing; reset the database and rerun migrate", requirement.relation, column)
 			}
 		}
+	}
+
+	// Without the trigger every event insert fails its NOT NULL seq; name the cause at boot.
+	var sequenced bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_trigger
+			WHERE tgrelid = 'public.run_events'::regclass AND tgname = 'run_events_assign_seq' AND tgenabled <> 'D'
+		)`).Scan(&sequenced); err != nil {
+		return fmt.Errorf("inspect run event sequence trigger: %w", err)
+	}
+	if !sequenced {
+		return fmt.Errorf("database schema is incomplete: trigger run_events_assign_seq is missing; reset the database and rerun migrate")
 	}
 
 	var obsoleteSchema bool

@@ -61,7 +61,9 @@ of the published document.
 ## Streaming
 
 Run events use server-sent events over authenticated `fetch` plus
-`ReadableStream`. Clients reconnect using the run cursor and must treat event
+`ReadableStream`. Each event frame's `id` is the run's commit-ordered
+sequence number; clients reconnect by sending the last one as `Last-Event-ID`.
+An older `<iso>|<id>` cursor is still accepted. Clients must treat event
 payloads as operational summaries, not hidden model reasoning.
 
 ## CORS and limits

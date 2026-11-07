@@ -86,8 +86,8 @@ func TestCompletionEventsLandInOneCopy(t *testing.T) {
 	}
 
 	// The timeline itself is byte-compatible: exact vocabulary and order.
-	events, err := store.New(pool).ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
-		RunID: runID, AfterCreatedAt: time.Unix(0, 0), AfterID: "", PageLimit: 50,
+	events, err := store.New(pool).ListRunEventsAfterSeqForOrg(ctx, store.ListRunEventsAfterSeqForOrgParams{
+		RunID: runID, OrgID: org, AfterSeq: 0, PageLimit: 50,
 	})
 	if err != nil {
 		t.Fatalf("list events: %v", err)

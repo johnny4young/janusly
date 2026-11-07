@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -63,6 +64,55 @@ func TestRunEventInsertsUseNewEventID(t *testing.T) {
 	}
 	if sites < 30 {
 		t.Fatalf("found only %d run event inserts; the scan no longer sees them", sites)
+	}
+}
+
+// The baseline trigger is the only writer of run_events.seq: every insert,
+// COPY included, takes its position from the per-run counter at insert time.
+func TestRunEventInsertsCannotSkipTheSequence(t *testing.T) {
+	root := filepath.Join("..", "..")
+	baseline, err := os.ReadFile(filepath.Join(root, "internal", "migrate", "sql", "00001_baseline.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := regexp.MustCompile(`(?s)CREATE TABLE public\.run_events \((.*?)\n\);`).FindSubmatch(baseline)
+	if table == nil || !regexp.MustCompile(`\n\s*seq bigint NOT NULL\b`).Match(table[1]) {
+		t.Error("run_events.seq must be a NOT NULL bigint so no insert can land without a position")
+	}
+	for _, required := range []string{
+		"CREATE TRIGGER run_events_assign_seq BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.assign_run_event_seq();",
+		"RETURNING counter.last_seq INTO NEW.seq;",
+		"CREATE UNIQUE INDEX run_events_run_seq_idx ON public.run_events USING btree (run_id, seq);",
+	} {
+		if !strings.Contains(string(baseline), required) {
+			t.Errorf("baseline lost %q", required)
+		}
+	}
+	writesSeq := regexp.MustCompile(`(?is)(INSERT\s+INTO\s+(public\.)?run_events\s*\([^)]*\bseq\b|UPDATE\s+(public\.)?run_events\s+SET\s+([^;]*?,\s*)?seq\s*=)`)
+	bypass := regexp.MustCompile(`(?i)(DISABLE\s+TRIGGER|session_replication_role)`)
+	for _, dir := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".sql") {
+				return nil
+			}
+			source, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if writesSeq.Match(source) {
+				t.Errorf("%s: writes run_events.seq; only the baseline trigger may assign it", path)
+			}
+			if bypass.Match(source) {
+				t.Errorf("%s: disables triggers, which skips the run event sequence", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
