@@ -145,6 +145,13 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "run_events_assign_seq") {
 		t.Fatalf("a disabled sequence trigger must fail the boot gate: %v", err)
 	}
+	// A replica-only trigger never fires for ordinary sessions.
+	if _, err := db.ExecContext(ctx, `ALTER TABLE run_events ENABLE REPLICA TRIGGER run_events_assign_seq`); err != nil {
+		t.Fatalf("make sequence trigger replica-only: %v", err)
+	}
+	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "run_events_assign_seq") {
+		t.Fatalf("a replica-only sequence trigger must fail the boot gate: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `ALTER TABLE run_events ENABLE TRIGGER run_events_assign_seq`); err != nil {
 		t.Fatalf("enable sequence trigger: %v", err)
 	}

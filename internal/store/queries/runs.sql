@@ -495,7 +495,7 @@ DELETE FROM run_events WHERE id IN (
 -- delete below takes those ids back — never a second cutoff scan, so a row
 -- can never be deleted without having been exported first.
 -- name: SelectExpiredRunEventsBatch :many
-SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at
+SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at, re.seq
 FROM run_events re
 JOIN runs r ON r.id = re.run_id
 WHERE r.org_id = sqlc.arg(target_org)::text

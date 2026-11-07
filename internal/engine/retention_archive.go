@@ -47,7 +47,7 @@ func (e *Engine) archiveExpiredRunEvents(
 	encoder := json.NewEncoder(&body)
 	for _, row := range rows {
 		record := map[string]any{
-			"id": row.ID, "runId": row.RunID, "type": row.Type,
+			"id": row.ID, "runId": row.RunID, "seq": row.Seq, "type": row.Type,
 			"payload": json.RawMessage(row.Payload),
 		}
 		if row.NodeID.Valid {

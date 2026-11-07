@@ -2531,7 +2531,7 @@ func (q *Queries) RunNodeSupersededByRerun(ctx context.Context, arg RunNodeSuper
 }
 
 const selectExpiredRunEventsBatch = `-- name: SelectExpiredRunEventsBatch :many
-SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at
+SELECT re.id, re.run_id, re.node_id, re.type, re.payload, re.created_at, re.seq
 FROM run_events re
 JOIN runs r ON r.id = re.run_id
 WHERE r.org_id = $1::text
@@ -2554,6 +2554,7 @@ type SelectExpiredRunEventsBatchRow struct {
 	Type      string
 	Payload   json.RawMessage
 	CreatedAt *time.Time
+	Seq       int64
 }
 
 // Archival reads the EXACT batch it will hand to the object store, and the
@@ -2575,6 +2576,7 @@ func (q *Queries) SelectExpiredRunEventsBatch(ctx context.Context, arg SelectExp
 			&i.Type,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.Seq,
 		); err != nil {
 			return nil, err
 		}

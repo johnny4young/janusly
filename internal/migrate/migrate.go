@@ -183,7 +183,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 	if err := db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM pg_trigger
-			WHERE tgrelid = 'public.run_events'::regclass AND tgname = 'run_events_assign_seq' AND tgenabled <> 'D'
+			WHERE tgrelid = 'public.run_events'::regclass AND tgname = 'run_events_assign_seq' AND tgenabled IN ('O', 'A')
 		)`).Scan(&sequenced); err != nil {
 		return fmt.Errorf("inspect run event sequence trigger: %w", err)
 	}

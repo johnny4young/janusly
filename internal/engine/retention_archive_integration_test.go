@@ -109,6 +109,7 @@ func TestRunEventArchivalExportsBeforeDeleting(t *testing.T) {
 			var record struct {
 				ID      string          `json:"id"`
 				RunID   string          `json:"runId"`
+				Seq     int64           `json:"seq"`
 				NodeID  string          `json:"nodeId"`
 				Type    string          `json:"type"`
 				Payload json.RawMessage `json:"payload"`
@@ -121,6 +122,9 @@ func TestRunEventArchivalExportsBeforeDeleting(t *testing.T) {
 			}
 			if len(record.Payload) == 0 {
 				t.Fatalf("archived record lost its payload: %+v", record)
+			}
+			if record.Seq <= 0 {
+				t.Fatalf("archived record lost its stream position: %+v", record)
 			}
 			exported[record.ID] = true
 		}

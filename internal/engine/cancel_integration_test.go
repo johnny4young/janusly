@@ -3,6 +3,8 @@
 package engine
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -145,5 +147,73 @@ func TestRunningNodeFinishesNaturallyAfterCancel(t *testing.T) {
 	}
 	if secondStatus != "cancelled" || runStatus != "cancelled" {
 		t.Fatalf("cancelled run must not schedule downstream: second=%s run=%s", secondStatus, runStatus)
+	}
+}
+
+// Cancel appends run.cancelled after its semantic-case locks, so a cancel
+// waiting on a case never holds the run's event sequence row.
+func TestCancelDoesNotHoldEventSequenceWhileWaitingOnCases(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	runID, err := eng.StartRun(ctx, StartInput{OrgID: org, Workflow: mustParse(t, linearDoc)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	caseID := "case-cancel-" + runID
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO recovery_cases (id, org_id, run_id, workflow_version_id, source, detector_id,
+			source_node_id, detector_kind, action, message, state)
+		SELECT $1, org_id, id, workflow_version_id, 'semantic_violation', 'detector', 'first',
+			'schema', 'observe', 'monitoring', 'monitoring'
+		FROM runs WHERE id = $2`, caseID, runID); err != nil {
+		t.Fatalf("seed case: %v", err)
+	}
+	locker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = locker.Rollback(ctx) }()
+	var lockerPID uint32
+	if err := locker.QueryRow(ctx, `SELECT pg_backend_pid() FROM recovery_cases WHERE id = $1 FOR UPDATE`, caseID).Scan(&lockerPID); err != nil {
+		t.Fatalf("lock case: %v", err)
+	}
+
+	cancelled := make(chan error, 1)
+	go func() { cancelled <- eng.CancelRun(ctx, runID, nil) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, int32(lockerPID)).Scan(&waiting); err != nil {
+			t.Fatalf("inspect waiters: %v", err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cancel never waited on the case lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	insertCtx, cancelInsert := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelInsert()
+	at := time.Now()
+	if err := store.New(pool).InsertRunEventAt(insertCtx, store.InsertRunEventAtParams{
+		ID: newEventID(), RunID: runID, OrgID: org, Type: "node.tick", Payload: json.RawMessage(`{}`), CreatedAt: &at,
+	}); err != nil {
+		t.Fatalf("an event insert must not wait for a cancel blocked on a case lock: %v", err)
+	}
+
+	if _, err := locker.Exec(ctx, `UPDATE recovery_cases SET state = 'abandoned' WHERE id = $1`, caseID); err != nil {
+		t.Fatalf("release case: %v", err)
+	}
+	if err := locker.Commit(ctx); err != nil {
+		t.Fatalf("commit locker: %v", err)
+	}
+	if err := <-cancelled; err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	var terminal int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM run_events WHERE run_id = $1 AND type = 'run.cancelled'`, runID).Scan(&terminal); err != nil || terminal != 1 {
+		t.Fatalf("run.cancelled events = %d, err %v", terminal, err)
 	}
 }
