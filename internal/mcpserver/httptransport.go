@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -146,10 +147,8 @@ func tokenInQuery(r *http.Request) (string, bool) {
 				return name, true
 			}
 		}
-		for _, value := range values {
-			if agentclient.LooksLikeToken(value) {
-				return name, true
-			}
+		if slices.ContainsFunc(values, agentclient.LooksLikeToken) {
+			return name, true
 		}
 	}
 	return "", false
