@@ -213,7 +213,7 @@ func (e *Engine) RedriveDeadLetterWithOptions(ctx context.Context, orgID, deadLe
 		return fmt.Errorf("marshal redrive payload: %w", err)
 	}
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: deadLetter.RunID,
+		ID: newEventID(), RunID: deadLetter.RunID,
 		NodeID: pgtype.Text{String: deadLetter.NodeID, Valid: true},
 		Type:   "node.redriven", Payload: payload, CreatedAt: &redrivenAt,
 	}); err != nil {
@@ -288,7 +288,7 @@ func (e *Engine) RedriveRunNode(ctx context.Context, orgID, runID, nodeID, actor
 		return fmt.Errorf("marshal redrive payload: %w", err)
 	}
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: e.newID(), RunID: runID,
+		ID: newEventID(), RunID: runID,
 		NodeID: pgtype.Text{String: nodeID, Valid: true},
 		Type:   "node.redriven", Payload: payload, CreatedAt: &redrivenAt,
 	}); err != nil {

@@ -328,7 +328,7 @@ func (e *Engine) applySemanticResolution(
 		}
 	}
 
-	eventID := e.newID()
+	eventID := newEventID()
 	reason := signature.ScrubSecretShapes(target.candidate.Reason)
 	artifactPairs := make(map[string]semanticResolutionArtifactPair, len(casesToResolve))
 	for index, item := range casesToResolve {

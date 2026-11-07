@@ -63,7 +63,7 @@ func (e *Engine) RetryOrFail(ctx context.Context, claim ClaimedNode, node domain
 		}); err != nil {
 			return fmt.Errorf("schedule retry wakeup: %w", err)
 		}
-		events.add(e.newID(), claim.RunID, claim.NodeID, "node.retry", eventJSON, retriedAt)
+		events.add(newEventID(), claim.RunID, claim.NodeID, "node.retry", eventJSON, retriedAt)
 		return nil
 	})
 }
@@ -166,7 +166,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 			if err != nil {
 				return fmt.Errorf("marshal handled payload: %w", err)
 			}
-			events.add(e.newID(), claim.RunID, claim.NodeID, "node.failed", handledJSON, failedAt)
+			events.add(newEventID(), claim.RunID, claim.NodeID, "node.failed", handledJSON, failedAt)
 			_, err = e.scheduleDownstream(ctx, q, events, claim, failedAt)
 			return err
 		}
@@ -175,7 +175,7 @@ func (e *Engine) failNodeTx(ctx context.Context, claim ClaimedNode, execErr erro
 			return err
 		}
 
-		events.add(e.newID(), claim.RunID, claim.NodeID, "node.failed", eventJSON, failedAt)
+		events.add(newEventID(), claim.RunID, claim.NodeID, "node.failed", eventJSON, failedAt)
 
 		if run.Status == "failed" {
 			return nil

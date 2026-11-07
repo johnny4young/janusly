@@ -93,7 +93,7 @@ func (e *Engine) MarkNodeWaiting(ctx context.Context, claim ClaimedNode, waiting
 		if marked == 0 {
 			return errSkipCommit
 		}
-		events.add(e.newID(), claim.RunID, claim.NodeID, "node.waiting", eventJSON, checkpointAt)
+		events.add(newEventID(), claim.RunID, claim.NodeID, "node.waiting", eventJSON, checkpointAt)
 		// A claim may arrive after a retry wakeup became due. Replacing or
 		// clearing it in the same checkpoint transaction prevents a human wait
 		// from inheriting a retry clock and auto-resuming.
@@ -210,7 +210,7 @@ func (e *Engine) processApprovalTimeout(
 				if previousAssignee != "" {
 					payload["previousAssignee"] = previousAssignee
 				}
-				events.add(e.newID(), runID, nodeID, "approval.escalated",
+				events.add(newEventID(), runID, nodeID, "approval.escalated",
 					safePersist(payload, e.persistence.MaxBytes()), escalatedAt)
 				applied = true
 				return nil
@@ -247,7 +247,7 @@ func (e *Engine) processApprovalTimeout(
 		if err := q.DeleteWakeup(ctx, node.ID); err != nil {
 			return fmt.Errorf("clear failed approval wakeup: %w", err)
 		}
-		events.add(e.newID(), runID, nodeID, eventType, safePersist(map[string]any{
+		events.add(newEventID(), runID, nodeID, eventType, safePersist(map[string]any{
 			"deadlineAt": deadlineAt, "onTimeout": policy, "error": errorPayload,
 		}, e.persistence.MaxBytes()), failedAt)
 		statuses, err := e.nodeStatuses(ctx, q, runID)
@@ -375,7 +375,7 @@ func (e *Engine) ResumeRunAs(ctx context.Context, runID, nodeID string, input ma
 		if target.Type == "human_form" || target.Type == "webhook" {
 			eventPayload = safePersist(map[string]any{"output": output}, e.persistence.MaxBytes())
 		}
-		events.add(e.newID(), runID, nodeID, "node.resumed", eventPayload, finishedAt)
+		events.add(newEventID(), runID, nodeID, "node.resumed", eventPayload, finishedAt)
 		_, err = e.scheduleDownstream(ctx, q, events, ClaimedNode{RunID: runID, NodeID: nodeID}, finishedAt)
 		return err
 	})
@@ -511,7 +511,7 @@ func (e *Engine) failInvalidSnapshotTimer(ctx context.Context, runID, nodeID str
 		if err != nil {
 			return fmt.Errorf("marshal timer failure: %w", err)
 		}
-		events.add(e.newID(), runID, nodeID, "node.failed", eventJSON, failedAt)
+		events.add(newEventID(), runID, nodeID, "node.failed", eventJSON, failedAt)
 		statuses, err := e.nodeStatuses(ctx, q, runID)
 		if err != nil {
 			return err

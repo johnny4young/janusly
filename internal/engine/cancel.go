@@ -51,7 +51,7 @@ func (e *Engine) CancelRun(ctx context.Context, runID string, reason any) error 
 	}); err != nil {
 		return fmt.Errorf("cancel nodes: %w", err)
 	}
-	terminalEventID := e.newID()
+	terminalEventID := newEventID()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 		ID: terminalEventID, RunID: runID, Type: "run.cancelled",
 		Payload: eventJSON, CreatedAt: &cancelledAt,

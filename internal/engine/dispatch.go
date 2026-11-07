@@ -369,7 +369,7 @@ func (d *Dispatcher) Execute(ctx context.Context, claim ClaimedNode, node domain
 			raw := d.engine.persistence.Payload(payload, grammar.PersistOptions{
 				RedactedValues: rendered.RedactedValues,
 			})
-			eventID := d.engine.newID()
+			eventID := newEventID()
 			if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
 				ID: eventID, RunID: claim.RunID, OrgID: claim.OrgID,
 				NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
@@ -450,7 +450,7 @@ func (d *Dispatcher) recordUnresolvedPaths(ctx context.Context, q *store.Queries
 	}
 	eventAt := d.engine.eventNow()
 	if err := q.InsertRunEventAt(ctx, store.InsertRunEventAtParams{
-		ID: d.engine.newID(), RunID: claim.RunID, OrgID: claim.OrgID,
+		ID: newEventID(), RunID: claim.RunID, OrgID: claim.OrgID,
 		NodeID: pgtype.Text{String: claim.NodeID, Valid: true},
 		Type:   "template.unresolved_path", Payload: payload, CreatedAt: &eventAt,
 	}); err != nil {
