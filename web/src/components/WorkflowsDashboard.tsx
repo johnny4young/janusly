@@ -537,7 +537,7 @@ function useWorkflowsDashboardController({
       try {
         await contractApi('POST /workflows/{id}/pause', `/workflows/${encodeURIComponent(workflowId)}/pause`, {},
           { guard: isPostWorkflowsIdPauseResponse })
-        addToast(t('workflowsDashboard.pausedToast'), 'success')
+        addToast(t('workflowsDashboard.paused'), 'success')
         bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
