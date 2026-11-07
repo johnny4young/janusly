@@ -864,6 +864,8 @@ CREATE TABLE public.publish_requests (
     reasons text[] NOT NULL,
     requested_by text NOT NULL,
     on_behalf_of text NOT NULL,
+    drafted_by text NOT NULL,
+    scope_tag text,
     status text DEFAULT 'pending'::text NOT NULL,
     decided_by text,
     decided_at timestamp with time zone,
@@ -872,7 +874,7 @@ CREATE TABLE public.publish_requests (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT publish_requests_decision_check CHECK (((status = ANY (ARRAY['published'::text, 'rejected'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
     CONSTRAINT publish_requests_published_check CHECK (((status = 'published'::text) = (published_version_id IS NOT NULL))),
-    CONSTRAINT publish_requests_reasons_check CHECK (((cardinality(reasons) >= 1) AND (reasons <@ ARRAY['writes'::text, 'first_publish'::text, 'outbound'::text]))),
+    CONSTRAINT publish_requests_reasons_check CHECK (((cardinality(reasons) >= 1) AND (reasons <@ ARRAY['writes'::text, 'first_publish'::text, 'outbound'::text, 'callers'::text]))),
     CONSTRAINT publish_requests_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by))),
     CONSTRAINT publish_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'published'::text, 'rejected'::text, 'expired'::text, 'superseded'::text])))
 );

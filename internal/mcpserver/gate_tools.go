@@ -26,7 +26,10 @@ func init() {
 	}
 }
 
-const maxQualificationsPerHour = 30
+const (
+	maxQualificationsPerHour = 30
+	maxDraftRunsPerHour      = 120
+)
 
 var credentialNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
 
@@ -253,7 +256,7 @@ func (d Deps) saveDraft(ctx context.Context, args draftSaveArgs) (*mcp.CallToolR
 	if len(problems) > 0 {
 		return gateChecksError("fixtures are invalid", problems)
 	}
-	digest, err := publishgate.Digest(document, fixtures)
+	digest, err := publishgate.Digest(baseVersion.String, document, fixtures)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -365,14 +368,29 @@ func (d Deps) testDraft(ctx context.Context, args draftTestArgs) (*mcp.CallToolR
 	if refused != nil || err != nil {
 		return refused, nil, err
 	}
+	if recent, err := store.New(d.Pool).CountRecentAgentDraftRuns(ctx, store.CountRecentAgentDraftRunsParams{
+		OrgID: d.OrgID, CreatedBy: pgtype.Text{String: d.UserID, Valid: true},
+	}); err != nil {
+		return nil, nil, err
+	} else if recent >= maxDraftRunsPerHour {
+		return gateError("rate_limited", "at most 120 draft and fixture runs per hour", "", "Stub more steps and test fewer cases at a time.")
+	}
 	wf, _, _, err := publishgate.DraftWorkflow(draft)
 	if err != nil {
 		return nil, nil, err
 	}
 	fixture := publishgate.Fixture{Name: "test", Input: args.Input, Stubs: args.Stubs, Expect: publishgate.Expectation{Status: "succeeded"}}
 	rawFixture, _ := json.Marshal([]publishgate.Fixture{fixture})
-	if _, problems := publishgate.ParseFixtures(rawFixture, wf); len(problems) > 0 {
-		return gateChecksError("stubs are invalid", problems)
+	_, problems := publishgate.ParseFixtures(rawFixture, wf)
+	for _, nodeID := range publishgate.StubRequired(wf) {
+		if _, stubbed := args.Stubs[nodeID]; !stubbed {
+			problems = append(problems, publishgate.Check{Code: "stub_required", Status: "failed", Path: "/stubs/" + nodeID,
+				Message: "this step reaches outside Janusly or reads a secret, so it does not run before a person approves the workflow",
+				Fix:     "Pass a stand-in output for it in stubs."})
+		}
+	}
+	if len(problems) > 0 {
+		return gateChecksError("the test cannot run as asked", problems)
 	}
 	runs, err := d.gate().StartFixtureRuns(ctx, d.OrgID, d.UserID, wf, []publishgate.Fixture{fixture})
 	if err != nil {
@@ -533,7 +551,7 @@ func (d Deps) publishDraft(ctx context.Context, args publishArgs) (*mcp.CallTool
 		return nil, nil, err
 	}
 	if len(reasons) == 0 {
-		saved, err := gate.Publish(ctx, publishgate.PublishInput{OrgID: d.OrgID, Actor: d.UserID, Draft: draft, Tag: d.scopeTag()})
+		saved, err := gate.Publish(ctx, publishgate.PublishInput{OrgID: d.OrgID, Actor: d.UserID, Draft: draft})
 		if err != nil {
 			return publishFailure(err)
 		}
@@ -557,6 +575,16 @@ func (d Deps) requestPublication(ctx context.Context, draft store.WorkflowDraft,
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// The same lock a person's decision takes, so superseding never lands in
+	// the middle of an approval.
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('publish_workflow:' || $1 || ':' || $2, 0))`,
+		d.OrgID, draft.WorkflowID).Scan(&locked); err != nil {
+		return nil, nil, err
+	}
+	if !locked {
+		return gateError("conflict", "a person is deciding a publish request for this workflow", "", "Retry workflows.publish in a moment.")
+	}
 	qtx := q.WithTx(tx)
 	if err := qtx.SupersedePublishRequests(ctx, store.SupersedePublishRequestsParams{OrgID: d.OrgID, WorkflowID: draft.WorkflowID}); err != nil {
 		return nil, nil, err
@@ -564,6 +592,7 @@ func (d Deps) requestPublication(ctx context.Context, draft store.WorkflowDraft,
 	request, err := qtx.InsertPublishRequest(ctx, store.InsertPublishRequestParams{
 		ID: "pub_" + uuid.NewString(), OrgID: d.OrgID, WorkflowID: draft.WorkflowID, DraftID: draft.ID,
 		QualificationID: receipt.ID, Reasons: reasons, RequestedBy: d.UserID, OnBehalfOf: onBehalfOf,
+		DraftedBy: draft.CreatedBy, ScopeTag: publishgate.OptionalText(d.scopeTag()),
 		ExpiresAt: time.Now().Add(publishgate.RequestLifetime),
 	})
 	if err != nil {
@@ -618,7 +647,6 @@ func (d Deps) publishStatus(ctx context.Context, requestID string) (*mcp.CallToo
 		return notFound()
 	}
 	q := store.New(d.Pool)
-	_ = q.ExpirePublishRequest(ctx, store.ExpirePublishRequestParams{OrgID: d.OrgID, ID: requestID})
 	request, err := q.GetPublishRequest(ctx, store.GetPublishRequestParams{OrgID: d.OrgID, ID: requestID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return notFound()
@@ -633,9 +661,13 @@ func (d Deps) publishStatus(ctx context.Context, requestID string) (*mcp.CallToo
 			return notFound()
 		}
 	}
+	status := request.Status
+	if status == "pending" && !time.Now().Before(request.ExpiresAt) {
+		status = "expired"
+	}
 	view := map[string]any{
 		"publishRequestId": request.ID, "workflowId": request.WorkflowID, "draftId": request.DraftID,
-		"status": request.Status, "reasons": request.Reasons, "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
+		"status": status, "reasons": request.Reasons, "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 	if request.PublishedVersionID.Valid {
 		view["versionId"] = request.PublishedVersionID.String

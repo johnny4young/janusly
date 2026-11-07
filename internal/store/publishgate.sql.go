@@ -13,6 +13,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRecentAgentDraftRuns = `-- name: CountRecentAgentDraftRuns :one
+SELECT count(*)::int FROM runs
+WHERE org_id = $1 AND created_by = $2 AND replay_mode = 'validation' AND created_at > now() - interval '1 hour'
+`
+
+type CountRecentAgentDraftRunsParams struct {
+	OrgID     string
+	CreatedBy pgtype.Text
+}
+
+func (q *Queries) CountRecentAgentDraftRuns(ctx context.Context, arg CountRecentAgentDraftRunsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countRecentAgentDraftRuns, arg.OrgID, arg.CreatedBy)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countRecentDraftQualifications = `-- name: CountRecentDraftQualifications :one
 SELECT count(*)::int FROM draft_qualifications
 WHERE org_id = $1 AND created_by = $2 AND created_at > now() - interval '1 hour'
@@ -34,8 +51,8 @@ const decidePublishRequest = `-- name: DecidePublishRequest :one
 UPDATE publish_requests
 SET status = $1, decided_by = $2::text, decided_at = now(),
     published_version_id = $3
-WHERE org_id = $4 AND id = $5 AND status = 'pending' AND expires_at > now()
-RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, status, decided_by, decided_at, published_version_id, expires_at, created_at
+WHERE org_id = $4 AND id = $5 AND status = 'pending'
+RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at
 `
 
 type DecidePublishRequestParams struct {
@@ -46,6 +63,7 @@ type DecidePublishRequestParams struct {
 	ID                 string
 }
 
+// The caller holds the workflow's publish lock and checked expiry under it.
 func (q *Queries) DecidePublishRequest(ctx context.Context, arg DecidePublishRequestParams) (PublishRequest, error) {
 	row := q.db.QueryRow(ctx, decidePublishRequest,
 		arg.Status,
@@ -64,6 +82,8 @@ func (q *Queries) DecidePublishRequest(ctx context.Context, arg DecidePublishReq
 		&i.Reasons,
 		&i.RequestedBy,
 		&i.OnBehalfOf,
+		&i.DraftedBy,
+		&i.ScopeTag,
 		&i.Status,
 		&i.DecidedBy,
 		&i.DecidedAt,
@@ -134,7 +154,7 @@ func (q *Queries) GetDraftQualification(ctx context.Context, arg GetDraftQualifi
 }
 
 const getPublishRequest = `-- name: GetPublishRequest :one
-SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests WHERE org_id = $1 AND id = $2
+SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests WHERE org_id = $1 AND id = $2
 `
 
 type GetPublishRequestParams struct {
@@ -154,37 +174,8 @@ func (q *Queries) GetPublishRequest(ctx context.Context, arg GetPublishRequestPa
 		&i.Reasons,
 		&i.RequestedBy,
 		&i.OnBehalfOf,
-		&i.Status,
-		&i.DecidedBy,
-		&i.DecidedAt,
-		&i.PublishedVersionID,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getPublishRequestForUpdate = `-- name: GetPublishRequestForUpdate :one
-SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests WHERE org_id = $1 AND id = $2 FOR UPDATE
-`
-
-type GetPublishRequestForUpdateParams struct {
-	OrgID string
-	ID    string
-}
-
-func (q *Queries) GetPublishRequestForUpdate(ctx context.Context, arg GetPublishRequestForUpdateParams) (PublishRequest, error) {
-	row := q.db.QueryRow(ctx, getPublishRequestForUpdate, arg.OrgID, arg.ID)
-	var i PublishRequest
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.WorkflowID,
-		&i.DraftID,
-		&i.QualificationID,
-		&i.Reasons,
-		&i.RequestedBy,
-		&i.OnBehalfOf,
+		&i.DraftedBy,
+		&i.ScopeTag,
 		&i.Status,
 		&i.DecidedBy,
 		&i.DecidedAt,
@@ -304,10 +295,11 @@ func (q *Queries) InsertDraftQualification(ctx context.Context, arg InsertDraftQ
 
 const insertPublishRequest = `-- name: InsertPublishRequest :one
 INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons,
-                              requested_by, on_behalf_of, expires_at)
+                              requested_by, on_behalf_of, drafted_by, scope_tag, expires_at)
 VALUES ($1, $2, $3, $4, $5,
-        $6::text[], $7, $8, $9)
-RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, status, decided_by, decided_at, published_version_id, expires_at, created_at
+        $6::text[], $7, $8, $9,
+        $10, $11)
+RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at
 `
 
 type InsertPublishRequestParams struct {
@@ -319,6 +311,8 @@ type InsertPublishRequestParams struct {
 	Reasons         []string
 	RequestedBy     string
 	OnBehalfOf      string
+	DraftedBy       string
+	ScopeTag        pgtype.Text
 	ExpiresAt       time.Time
 }
 
@@ -332,6 +326,8 @@ func (q *Queries) InsertPublishRequest(ctx context.Context, arg InsertPublishReq
 		arg.Reasons,
 		arg.RequestedBy,
 		arg.OnBehalfOf,
+		arg.DraftedBy,
+		arg.ScopeTag,
 		arg.ExpiresAt,
 	)
 	var i PublishRequest
@@ -344,6 +340,8 @@ func (q *Queries) InsertPublishRequest(ctx context.Context, arg InsertPublishReq
 		&i.Reasons,
 		&i.RequestedBy,
 		&i.OnBehalfOf,
+		&i.DraftedBy,
+		&i.ScopeTag,
 		&i.Status,
 		&i.DecidedBy,
 		&i.DecidedAt,
@@ -400,7 +398,7 @@ func (q *Queries) InsertWorkflowDraft(ctx context.Context, arg InsertWorkflowDra
 }
 
 const listPublishRequests = `-- name: ListPublishRequests :many
-SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests
+SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests
 WHERE org_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC, id DESC
@@ -430,6 +428,8 @@ func (q *Queries) ListPublishRequests(ctx context.Context, arg ListPublishReques
 			&i.Reasons,
 			&i.RequestedBy,
 			&i.OnBehalfOf,
+			&i.DraftedBy,
+			&i.ScopeTag,
 			&i.Status,
 			&i.DecidedBy,
 			&i.DecidedAt,
@@ -647,6 +647,33 @@ type WorkflowExistsInOrgParams struct {
 
 func (q *Queries) WorkflowExistsInOrg(ctx context.Context, arg WorkflowExistsInOrgParams) (bool, error) {
 	row := q.db.QueryRow(ctx, workflowExistsInOrg, arg.OrgID, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const workflowHasCallers = `-- name: WorkflowHasCallers :one
+SELECT EXISTS (
+  SELECT 1 FROM workflows w
+  JOIN LATERAL (
+    SELECT v.dag_json FROM workflow_versions v
+    WHERE v.org_id = w.org_id AND v.workflow_id = w.id
+    ORDER BY v.version DESC LIMIT 1
+  ) latest ON true
+  WHERE w.org_id = $1 AND w.id <> $2 AND w.deleted_at IS NULL
+    AND latest.dag_json @> jsonb_build_object('nodes', jsonb_build_array(
+          jsonb_build_object('type', 'subworkflow', 'config', jsonb_build_object('workflowId', $2::text))))
+)
+`
+
+type WorkflowHasCallersParams struct {
+	OrgID      string
+	WorkflowID string
+}
+
+// Unpinned and pinned callers alike: a change to the callee reaches them.
+func (q *Queries) WorkflowHasCallers(ctx context.Context, arg WorkflowHasCallersParams) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowHasCallers, arg.OrgID, arg.WorkflowID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +21,6 @@ import (
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/httpkit"
-	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/publishgate"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -130,29 +131,35 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 		return httpkit.Error(http.StatusForbidden, "person_required", "only a person decides a publish request", nil)
 	}
 	ctx := r.Context()
+	id := r.PathValue("id")
+	q := store.New(s.pool)
+	found, err := q.GetPublishRequest(ctx, store.GetPublishRequestParams{OrgID: rc.OrgID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return notFound()
+	}
+	if err != nil {
+		return internalError()
+	}
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return internalError()
 	}
 	defer conn.Release()
-	id := r.PathValue("id")
-	// A try-lock per request: two approvers never publish the same draft twice.
+	// One lock per workflow, shared with superseding: two decisions, or a
+	// decision and a newer request, never interleave.
+	key := "publish_workflow:" + rc.OrgID + ":" + found.WorkflowID
 	var locked bool
-	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended('publish_request:' || $1, 0))`, id).Scan(&locked); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, key).Scan(&locked); err != nil {
 		return internalError()
 	}
 	if !locked {
-		return httpkit.Error(http.StatusConflict, "publish_request_busy", "another person is deciding this request", nil)
+		return httpkit.Error(http.StatusConflict, "publish_request_busy", "another decision for this workflow is in progress", nil)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended('publish_request:' || $1, 0))`, id)
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key)
 	}()
-	q := store.New(s.pool)
 	_ = q.ExpirePublishRequest(ctx, store.ExpirePublishRequestParams{OrgID: rc.OrgID, ID: id})
 	request, err := q.GetPublishRequest(ctx, store.GetPublishRequestParams{OrgID: rc.OrgID, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return notFound()
-	}
 	if err != nil {
 		return internalError()
 	}
@@ -162,9 +169,10 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 	if rc.UserID == request.RequestedBy {
 		return httpkit.Error(http.StatusForbidden, "publish_request_requester", "the requester cannot decide its own request", nil)
 	}
-	if approve && rc.UserID == request.OnBehalfOf && orgconfig.LoadBool(ctx, s.pool, rc.OrgID, SecondPersonKey) {
-		return httpkit.Error(http.StatusForbidden, "publish_request_second_person",
-			"this organization requires someone other than the agent's creator to approve", nil)
+	if approve {
+		if refused := s.secondPerson(ctx, rc, request); refused != nil {
+			return *refused
+		}
 	}
 	if !approve {
 		return s.settle(ctx, rc, request, "rejected", pgtype.Text{}, nil)
@@ -182,7 +190,11 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 	} else if err != nil {
 		return internalError()
 	}
-	saved, err := s.gate.Publish(ctx, publishgate.PublishInput{OrgID: rc.OrgID, Actor: rc.UserID, Draft: draft, Tag: ""})
+	tag := ""
+	if request.ScopeTag.Valid && slices.Contains(request.Reasons, "first_publish") {
+		tag = request.ScopeTag.String
+	}
+	saved, err := s.gate.Publish(ctx, publishgate.PublishInput{OrgID: rc.OrgID, Actor: rc.UserID, Draft: draft, Tag: tag})
 	switch {
 	case errors.Is(err, publishgate.ErrStaleBase):
 		return httpkit.Error(http.StatusConflict, "publish_request_stale_base",
@@ -212,6 +224,42 @@ func (s *service) settle(ctx context.Context, rc httpkit.Request, request store.
 	maps.Copy(metadata, extra)
 	s.audit.Write(ctx, s.pool, rc.Auth, action, audit.Options{TargetType: "workflow", TargetID: request.WorkflowID, Metadata: metadata})
 	return httpkit.OK(map[string]any{"request": view(row)})
+}
+
+// secondPerson refuses the people accountable for the request, the creators
+// of the requesting and the drafting agents, when the organization asks for
+// a second person. An unreadable setting refuses too.
+func (s *service) secondPerson(ctx context.Context, rc httpkit.Request, request store.PublishRequest) *httpkit.Result {
+	raw, err := store.New(s.pool).GetOrgConfigValue(ctx, store.GetOrgConfigValueParams{OrgID: rc.OrgID, Key: SecondPersonKey})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		result := httpkit.Error(http.StatusServiceUnavailable, "publish_request_policy_unavailable",
+			"the approval policy cannot be read; try again", nil)
+		return &result
+	}
+	var required bool
+	if json.Unmarshal(raw, &required) != nil || !required {
+		return nil
+	}
+	accountable := map[string]bool{request.OnBehalfOf: true}
+	if clientID, ok := strings.CutPrefix(request.DraftedBy, "agent:"); ok {
+		client, err := store.New(s.pool).GetAgentClient(ctx, store.GetAgentClientParams{OrgID: rc.OrgID, ID: clientID})
+		if err != nil {
+			result := internalError()
+			return &result
+		}
+		accountable[client.CreatedBy] = true
+	} else {
+		accountable[request.DraftedBy] = true
+	}
+	if accountable[rc.UserID] {
+		result := httpkit.Error(http.StatusForbidden, "publish_request_second_person",
+			"this organization requires someone other than the agent's creator to approve", nil)
+		return &result
+	}
+	return nil
 }
 
 func view(row store.PublishRequest) map[string]any {

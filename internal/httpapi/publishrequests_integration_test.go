@@ -23,8 +23,8 @@ func TestPublishRequestRoutesArePeopleOnly(t *testing.T) {
 		}
 	}
 	requestID := "pub_" + suffix
-	if _, err := pool.Exec(t.Context(), `INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, expires_at)
-		VALUES ($1, $2, 'wf', 'draft', 'qual', '{writes}', 'agent:x', 'someone', now() + interval '1 day')`, requestID, h.org); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, 'wf', 'draft', 'qual', '{writes}', 'agent:x', 'someone', 'agent:x', now() + interval '1 day')`, requestID, h.org); err != nil {
 		t.Fatal(err)
 	}
 	if res := h.callWithHeaders("GET", "/publish-requests?status=pending", nil, "", map[string]string{"x-user-id": viewer}); res.status != 200 {

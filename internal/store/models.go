@@ -517,6 +517,8 @@ type PublishRequest struct {
 	Reasons            []string
 	RequestedBy        string
 	OnBehalfOf         string
+	DraftedBy          string
+	ScopeTag           pgtype.Text
 	Status             string
 	DecidedBy          pgtype.Text
 	DecidedAt          *time.Time

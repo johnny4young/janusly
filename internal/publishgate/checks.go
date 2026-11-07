@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -61,13 +60,15 @@ func Passed(checks []Check) bool {
 	return !slices.ContainsFunc(checks, func(check Check) bool { return check.Status != "passed" })
 }
 
-// Digest binds a receipt to the exact document and fixtures it qualified.
-func Digest(document []byte, fixtures []Fixture) (string, error) {
+// Digest binds a receipt to the exact document, fixtures and base version it
+// qualified, so a draft re-saved after the base moved is a new draft.
+func Digest(baseVersionID string, document []byte, fixtures []Fixture) (string, error) {
 	rawFixtures, err := json.Marshal(fixtures)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.New()
+	sum.Write([]byte(baseVersionID + "\n"))
 	sum.Write(document)
 	sum.Write([]byte{'\n'})
 	sum.Write(rawFixtures)
@@ -110,6 +111,10 @@ func ParseFixtures(raw json.RawMessage, wf *domain.Workflow) ([]Fixture, []Check
 		default:
 			checks = append(checks, failed("fixture_expectation_invalid", path+"/expect/status",
 				"expect.status must be succeeded, failed or waiting", "Say how the run must end."))
+		}
+		for _, secretPath := range secretLiteralPaths(map[string]any{"input": fixture.Input, "stubs": fixture.Stubs}, path) {
+			checks = append(checks, failed("secret_literal", secretPath, "a fixture value looks like a secret written in clear",
+				"Use a made-up value; fixtures are stored with the draft."))
 		}
 		for _, nodeID := range sortedKeys(fixture.Stubs) {
 			stubPath := path + "/stubs/" + nodeID
@@ -160,6 +165,20 @@ func StaticChecks(wf *domain.Workflow, document map[string]any, fixtures []Fixtu
 				"a write step opts out of checking its result, so a failed send would read as success",
 				"Remove resultPolicy or set it to require_ok."))
 		}
+	}
+	required := StubRequired(wf)
+	for index, fixture := range fixtures {
+		for _, nodeID := range required {
+			if _, stubbed := fixture.Stubs[nodeID]; !stubbed {
+				checks = append(checks, failed("stub_required", fmt.Sprintf("/fixtures/%d/stubs/%s", index, nodeID),
+					"this step reaches outside Janusly or reads a secret, so a fixture may not run it before a person approves the workflow",
+					"Stub its output in this fixture."))
+			}
+		}
+	}
+	if mentionsSensitive(wf.Outputs) {
+		checks = append(checks, failed("secret_in_outputs", "/outputs",
+			"a declared output references a secret or the environment, which would put it in the run's output", "Remove the reference from outputs."))
 	}
 	if len(fixtures) == 0 {
 		checks = append(checks, failed("fixtures_missing", "/fixtures",
@@ -256,45 +275,69 @@ func sortedKeys[V any](values map[string]V) []string {
 	return keys
 }
 
-// logicTypes compute inside the run and reach nothing outside it. Every other
-// step type is part of the outbound surface, which fails closed for new types.
-var logicTypes = map[string]bool{
-	"transform": true, "condition": true, "noop": true, "router": true,
-	"parallel_fork": true, "join": true, "wait_until": true,
+// Step classes for the gate. Logic and person steps reach nothing outside the
+// run; pure tools only transform their input. Anything else, or any step that
+// mentions a secret or the environment, reaches outside Janusly.
+var (
+	logicTypes = map[string]bool{
+		"transform": true, "condition": true, "noop": true, "router": true,
+		"parallel_fork": true, "join": true, "wait_until": true,
+	}
+	personTypes  = map[string]bool{"approval": true, "human_form": true}
+	triggerTypes = map[string]bool{
+		"schedule": true, "webhook": true, "webhook_received": true, "email_received": true,
+		"file_dropped": true, "pagerduty_incident": true, "mcp_server_event": true,
+	}
+	pureTools = map[string]bool{
+		"text.uppercase": true, "json.parse": true, "json.pick": true, "json.set": true, "json.merge": true,
+		"csv.parse": true, "csv.filter": true, "csv.stringify": true, "time.now": true, "time.window": true,
+	}
+)
+
+// mentionsSensitive is a deliberately broad text check: any secret or
+// environment reference, in any spelling the renderer might accept.
+func mentionsSensitive(value any) bool {
+	raw, _ := json.Marshal(value)
+	text := strings.ToLower(string(raw))
+	return strings.Contains(text, "secret") || strings.Contains(text, "env.")
 }
 
-var contextReference = regexp.MustCompile(`context\.([A-Za-z0-9_-]+)`)
+func pureStep(node domain.Node) bool {
+	if mentionsSensitive(node.Config) {
+		return false
+	}
+	if node.Type == "tool" {
+		name, _ := node.Config["tool"].(string)
+		return pureTools[name]
+	}
+	return logicTypes[node.Type] || personTypes[node.Type]
+}
 
-// OutboundSurface lists what a workflow can reach outside its own logic:
-// every non-logic step's full config, any logic step that mentions a secret,
-// and every step those depend on through templates, because a templated
-// target moves when its source does. A change to it needs a person, even
-// without writes, because a read can still carry data out.
-func OutboundSurface(wf *domain.Workflow) []string {
-	configs := map[string]string{}
-	types := map[string]string{}
+// StubRequired lists the steps an agent's test or fixture run may not
+// execute: they would send data out or read a secret before a person
+// approved the workflow.
+func StubRequired(wf *domain.Workflow) []string {
+	ids := []string{}
 	for _, node := range wf.Nodes {
-		raw, _ := json.Marshal(node.Config)
-		configs[node.ID], types[node.ID] = string(raw), node.Type
-	}
-	surface := map[string]bool{}
-	var include func(id string)
-	include = func(id string) {
-		entry := types[id] + " " + id + " " + configs[id]
-		if surface[entry] {
-			return
-		}
-		surface[entry] = true
-		for _, match := range contextReference.FindAllStringSubmatch(configs[id], -1) {
-			if _, known := configs[match[1]]; known && match[1] != id {
-				include(match[1])
-			}
+		if !pureStep(node) && (!triggerTypes[node.Type] || mentionsSensitive(node.Config)) {
+			ids = append(ids, node.ID)
 		}
 	}
+	return ids
+}
+
+// ReachesOut lists what keeps a publication from going live on its receipt
+// alone: every step that is not pure, triggers included, and declared
+// outputs that mention a secret.
+func ReachesOut(wf *domain.Workflow) []string {
+	ids := []string{}
 	for _, node := range wf.Nodes {
-		if !logicTypes[node.Type] || strings.Contains(strings.ToLower(configs[node.ID]), "secret") {
-			include(node.ID)
+		if !pureStep(node) {
+			ids = append(ids, node.ID)
 		}
 	}
-	return sortedKeys(surface)
+	if mentionsSensitive(wf.Outputs) {
+		ids = append(ids, "/outputs")
+	}
+	return ids
 }

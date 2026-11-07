@@ -101,38 +101,49 @@ through the gate, whose tools return failures as
 2. `workflows.test` (`test`) runs a draft as a draft-test validation run:
    writes are suppressed, stubs replace the steps they name, and the agent
    reads the run with `runs.status` and `runs.output`. An agent always sees
-   the runs it started.
+   the runs it started. Only pure steps run unstubbed: logic, person steps,
+   triggers and a fixed list of pure tools (`text.uppercase`, `json.*`,
+   `csv.parse`, `csv.filter`, `csv.stringify`, `time.now`, `time.window`).
+   Every other step, and any step that mentions a secret or the environment,
+   must have a stub (`stub_required`), so nothing an agent wrote reaches
+   outside Janusly or reads a secret before a person approves it. 120 draft
+   and fixture runs per client per hour.
 3. `workflows.qualify` (`test`) records a receipt bound to the draft's digest.
    Static checks come first: structural validation, production readiness
    errors, declared outputs, a Recovery Contract v2 with passing evaluation
    fixtures when any step may write, no write step with `resultPolicy:
-   envelope`, at least one behaviour fixture, no secret-shaped literal, and
-   every tool, subworkflow and credential bound to the tenant catalog. When
+   envelope`, at least one behaviour fixture that stubs every step a test may
+   not run, no output that reads a secret, no secret-shaped literal in the
+   document or the fixtures, and every tool, subworkflow and credential bound
+   to the tenant catalog. When
    they pass, each fixture runs as a draft test; `qualifications.get`
    settles the receipt once every run ended, comparing the end status
    (`succeeded`, `failed`, or `waiting` at a person's step) and a subset of
-   the declared output. Runs still going after ten minutes fail. Thirty
-   qualifications per client per hour.
+   the declared output, and cancels any judged run still open. Runs still
+   going after ten minutes fail. Thirty qualifications per client per hour.
 4. `workflows.publish` (`publish`, a business write) takes a passed receipt
-   for the same digest, at most 24 hours old. A read-only change to a
-   workflow that already has a version is appended at once through the
-   canonical engine save. A workflow that may write, one never published, or
-   a change to what the workflow reaches outside its own logic (the full
-   config of every step that is not pure logic, of any step mentioning a
-   secret, and of every step those read through templates) opens a publish
-   request instead (`approval_required`, reasons
-   `writes`, `first_publish`, `outbound`), because a read can still carry data
-   out; a newer request for the same workflow supersedes an older one. A draft whose workflow gained a version since it was drafted
-   is refused as stale.
+   for the same digest, at most 24 hours old; the digest covers the base
+   version too. Only a workflow made of pure steps, already published, with
+   no output reading a secret, and called by no other workflow, is appended
+   at once through the canonical engine save. Anything else opens a publish
+   request (`approval_required`) with reasons `first_publish`, `writes`,
+   `outbound` (a step that is not pure, triggers included, because a read can
+   still carry data out) and `callers` (another workflow calls this one, so
+   the change reaches it). A newer request for the same workflow supersedes an
+   older one. The engine save compares the draft's base version under the
+   workflow lock, so a draft whose workflow gained a version is refused as
+   stale, even against a concurrent save.
 
 People decide publish requests through `GET /publish-requests`,
 `GET /publish-requests/{id}` (the draft, the current version, the receipt) and
 `POST /publish-requests/{id}/approve` or `/reject` (`workflows.write`, person
-modes only). The requester can never decide its own request. The agent's
-creator may approve unless the organization sets
-`agents.publishRequiresSecondPerson`. Approval re-checks the receipt and the
-base version and appends the version as the approver; `publish.status`
-reports the outcome to the agent. `credentials.request` returns the link where
+modes only). Deciding and superseding share one lock per workflow, so they
+never interleave. The requester can never decide its own request. The
+creators of the requesting and the drafting agents may approve unless the
+organization sets `agents.publishRequiresSecondPerson`; a setting that cannot
+be read refuses. Approval re-checks the receipt and the base version and
+appends the version as the approver, tagging a new workflow with the scoped
+client's tag; `publish.status` reports the outcome to the agent. `credentials.request` returns the link where
 a person creates a credential; no tool accepts a secret value.
 
 ## Remote transport

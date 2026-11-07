@@ -96,8 +96,8 @@ func seedAgentTenant(t *testing.T, pool *pgxpool.Pool, eng *engine.Engine, label
 		VALUES ($1, $2, $3, '{"id":"x","nodes":[],"edges":[]}', repeat('a', 64), $4)`, tenant.draftID, tenant.org, tenant.workflowID, tenant.creator)
 	exec(`INSERT INTO draft_qualifications (id, org_id, draft_id, digest, status, checks, created_by, completed_at)
 		VALUES ($1, $2, $3, repeat('a', 64), 'passed', '[]', $4, now())`, tenant.qualificationID, tenant.org, tenant.draftID, tenant.creator)
-	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, expires_at)
-		VALUES ($1, $2, $3, $4, $5, '{writes}', 'agent:seed', $6, now() + interval '1 day')`,
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, '{writes}', 'agent:seed', $6, 'agent:seed', now() + interval '1 day')`,
 		tenant.requestID, tenant.org, tenant.workflowID, tenant.draftID, tenant.qualificationID, tenant.creator)
 	return tenant
 }
