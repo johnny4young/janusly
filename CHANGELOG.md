@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The app loads faster: the server sends its JavaScript, CSS, SVG and HTML
+  brotli- or gzip-compressed instead of raw. A first Home load now transfers
+  about 210 KiB of static files instead of about 800 KiB. The files are
+  compressed once at build time, keep their one-year caching and gain ETags,
+  so a reload revalidates the page shell instead of downloading it again. The
+  OpenAPI document is gzipped as well; other API responses stay uncompressed.
 - The success rate, open failures and longest downtime links beside the Home
   health score are at least 24 px tall, so each one is an easier touch target.
 - The PagerDuty example that opens AI Studio compiles into a complete intent

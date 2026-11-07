@@ -18,7 +18,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	contractdoc "github.com/johnny4young/janusly/contract"
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/authoring"
@@ -252,10 +251,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /readyz", readyzHandler(readinessTimeout, s.pool.Ping))
 	// Public generated contract. Exact mux patterns win before the embedded
 	// SPA catch-all and the bytes are the same artifact `make ci` drift-checks.
-	mux.HandleFunc("GET /v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(contractdoc.OpenAPI)
-	})
+	mux.HandleFunc("GET /v1/openapi.json", serveOpenAPI)
 	// Legacy public health — the web's OperationsPage polls this every 20s.
 	// Public-safe shape from the contract: no raw bucket/error/key detail.
 	// rateLimiter is the degradation tracker's public snapshot; queue

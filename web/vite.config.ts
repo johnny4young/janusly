@@ -12,6 +12,7 @@ import { cssFloor } from './scripts/css-floor-plugin.mjs'
 import { reactEsmFacade } from './scripts/react-esm-facade-plugin.mjs'
 import { trimVendor } from './scripts/trim-vendor-plugin.mjs'
 import { pruneAuthClient } from './scripts/prune-auth-client-plugin.mjs'
+import { precompress } from './scripts/precompress-plugin.mjs'
 import { resolveWebTestWorkerLimit } from './vitest-worker-policy.js'
 
 /**
@@ -71,6 +72,7 @@ export default defineConfig(({ mode }) => ({
         return result.code ? { code: result.code, map: null } : null
       },
     },
+    precompress(),
   ],
   resolve: {
     alias: { '@': resolve(import.meta.dirname, 'src') },
