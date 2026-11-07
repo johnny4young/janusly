@@ -247,9 +247,9 @@ public listener, before `webdist`:
 - **Rebinding and cross-origin.** Requests whose `Host` is not loopback or the host of
   `JANUSLY_WEB_BASE_URL` are refused. This allowlist replaces the SDK's
   localhost check, which would refuse a reverse proxy on the same host.
-  A request with an `Origin` header is refused unless that origin is listed in
-  `JANUSLY_MCP_ALLOWED_ORIGINS` (empty by default; native clients send none),
-  and `http.CrossOriginProtection` wraps the handler.
+  Browsers are not supported callers: a request with an `Origin` header is
+  refused (native clients send none), and `http.CrossOriginProtection` wraps
+  the handler. JSON-RPC batches are refused.
 - **Bounds.** 256 KB request bodies (the SDK limit and the existing request
   guard), the existing 256000-byte response gate, and the per-client limit
   after authentication. Failed authentications are not limited per address:

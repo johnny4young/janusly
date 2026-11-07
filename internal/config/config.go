@@ -76,8 +76,9 @@ type MCPHTTP struct {
 	Enabled bool
 	// AllowedHosts are Host values answered besides loopback: the host of
 	// JANUSLY_WEB_BASE_URL plus JANUSLY_MCP_ALLOWED_HOSTS.
-	AllowedHosts   []string
-	AllowedOrigins []string
+	AllowedHosts []string
+	// RefuseForwardedHTTP is set in production behind a trusted proxy.
+	RefuseForwardedHTTP bool
 }
 
 // IsProduction is the single process-environment gate for production-only

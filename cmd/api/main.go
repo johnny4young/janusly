@@ -300,7 +300,7 @@ func run() error {
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
 			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,
 		}, mcpserver.HTTPOptions{
-			AllowedHosts: cfg.MCPHTTP.AllowedHosts, AllowedOrigins: cfg.MCPHTTP.AllowedOrigins, Logger: logger,
+			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
 		})
 		logger.Info("remote mcp enabled", "path", "/mcp", "allowedHosts", cfg.MCPHTTP.AllowedHosts)
 	}

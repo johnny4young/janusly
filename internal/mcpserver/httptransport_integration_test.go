@@ -151,6 +151,13 @@ func TestRemoteMCPServesAgentClientsOverStreamableHTTP(t *testing.T) {
 	if status, _, _ := rawPost(t, endpoint, withOrigin, initializeBody); status != http.StatusForbidden {
 		t.Fatalf("browser origin accepted: %d", status)
 	}
+	batch := "[" + strings.TrimSuffix(strings.Repeat(initializeBody+",", 3), ",") + "]"
+	if status, _, _ := rawPost(t, endpoint, auth, batch); status != http.StatusBadRequest {
+		t.Fatalf("JSON-RPC batch accepted: %d", status)
+	}
+	if status, _, _ := rawPost(t, endpoint+"?session="+issued.Token, auth, initializeBody); status != http.StatusBadRequest {
+		t.Fatalf("token under another query name accepted: %d", status)
+	}
 	big := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"workflows.validate","arguments":{"workflow":{"name":"` +
 		strings.Repeat("x", 300_000) + `"}}}}`
 	if status, _, _ := rawPost(t, endpoint, auth, big); status != http.StatusRequestEntityTooLarge {
@@ -164,6 +171,18 @@ func TestRemoteMCPServesAgentClientsOverStreamableHTTP(t *testing.T) {
 		t.Fatalf("stateless GET: %v %v", err, res)
 	} else {
 		_ = res.Body.Close()
+	}
+
+	strict := httptest.NewServer(NewHTTPHandler(Deps{Engine: eng, Pool: pool, NewID: uuid.NewString},
+		HTTPOptions{RefuseForwardedHTTP: true}))
+	t.Cleanup(strict.Close)
+	forwarded := map[string]string{"Authorization": "Bearer " + issued.Token, "X-Forwarded-Proto": "http"}
+	if status, _, _ := rawPost(t, strict.URL+"/mcp", forwarded, initializeBody); status != http.StatusForbidden {
+		t.Fatalf("plain HTTP behind the proxy accepted: %d", status)
+	}
+	forwarded["X-Forwarded-Proto"] = "https"
+	if status, _, _ := rawPost(t, strict.URL+"/mcp", forwarded, initializeBody); status != http.StatusOK {
+		t.Fatalf("https behind the proxy refused: %d", status)
 	}
 
 	if _, err := store.New(pool).RevokeAgentClient(context.Background(), store.RevokeAgentClientParams{

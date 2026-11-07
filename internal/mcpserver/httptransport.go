@@ -1,8 +1,10 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,10 +20,10 @@ import (
 type HTTPOptions struct {
 	// AllowedHosts are the Host values the endpoint answers besides loopback.
 	AllowedHosts []string
-	// AllowedOrigins are browser origins allowed to call; empty refuses any
-	// request that carries an Origin header.
-	AllowedOrigins []string
-	Logger         *slog.Logger
+	// RefuseForwardedHTTP refuses requests a trusted proxy marks as plain
+	// HTTP, so a bearer token never travels in clear in production.
+	RefuseForwardedHTTP bool
+	Logger              *slog.Logger
 }
 
 const principalExtraKey = "janusly.principal"
@@ -108,31 +110,61 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	for _, host := range opts.AllowedHosts {
 		hosts[strings.ToLower(host)] = true
 	}
-	origins := map[string]bool{}
-	for _, origin := range opts.AllowedOrigins {
-		origins[strings.TrimRight(origin, "/")] = true
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		for _, name := range tokenQueryParams {
-			if query.Has(name) {
-				if opts.Logger != nil {
-					opts.Logger.Warn("mcp request refused: credential in query string", "param", name)
-				}
-				http.Error(w, "credentials belong in the Authorization header, never in the URL", http.StatusBadRequest)
-				return
+		if name, found := tokenInQuery(r); found {
+			if opts.Logger != nil {
+				opts.Logger.Warn("mcp request refused: credential in query string", "param", name)
 			}
+			http.Error(w, "credentials belong in the Authorization header, never in the URL", http.StatusBadRequest)
+			return
+		}
+		if opts.RefuseForwardedHTTP && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
+			http.Error(w, "remote MCP requires https", http.StatusForbidden)
+			return
 		}
 		if !hostAllowed(r.Host, hosts) {
 			http.Error(w, "host not allowed", http.StatusForbidden)
 			return
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && !origins[strings.TrimRight(origin, "/")] {
-			http.Error(w, "origin not allowed", http.StatusForbidden)
+		// Browsers are not supported callers: native clients send no Origin.
+		if r.Header.Get("Origin") != "" {
+			http.Error(w, "browser origins are not allowed", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodPost && isBatch(w, r) {
+			http.Error(w, "JSON-RPC batches are not accepted; send one message per request", http.StatusBadRequest)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func tokenInQuery(r *http.Request) (string, bool) {
+	for name, values := range r.URL.Query() {
+		for _, refused := range tokenQueryParams {
+			if strings.EqualFold(name, refused) {
+				return name, true
+			}
+		}
+		for _, value := range values {
+			if agentclient.LooksLikeToken(value) {
+				return name, true
+			}
+		}
+	}
+	return "", false
+}
+
+// isBatch peeks at the body and puts it back. A batch would fan one request
+// out into thousands of concurrent tool calls, each audited.
+func isBatch(w http.ResponseWriter, r *http.Request) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMCPRequestBytes+1))
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '['
 }
 
 func hostAllowed(hostport string, allowed map[string]bool) bool {

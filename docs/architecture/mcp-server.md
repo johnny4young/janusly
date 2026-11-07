@@ -98,16 +98,21 @@ mode: no session is kept, so any instance answers any request, and `GET` and
   refused; every failure is a 401 with `WWW-Authenticate: Bearer`. The token
   is resolved on every request, so revocation applies to the next one.
 - A token-like query parameter (`access_token`, `token`, `api_key`, `key`,
-  `auth`, `authorization`) is refused with 400 before authentication, and only
-  its name is logged.
+  `auth`, `authorization`, or any value starting `jly_agent_`) is refused with
+  400 before authentication, and only its name is logged. In production behind
+  `JANUSLY_TRUSTED_PROXY`, a request the proxy marks `X-Forwarded-Proto: http`
+  is refused, so a token never travels in clear.
 - A `Host` other than loopback, the `JANUSLY_WEB_BASE_URL` host or one in
   `JANUSLY_MCP_ALLOWED_HOSTS` is refused, which defeats DNS rebinding. This
   allowlist replaces the SDK's localhost check, which would refuse a reverse
-  proxy on the same host. A request carrying an `Origin` is refused unless the
-  origin is in `JANUSLY_MCP_ALLOWED_ORIGINS`, and `http.CrossOriginProtection`
-  wraps the handler.
+  proxy on the same host. Browsers are not supported callers: any request
+  carrying an `Origin` is refused, and `http.CrossOriginProtection` wraps the
+  handler.
 - Request bodies are capped at 256000 bytes (413 beyond), the same as the
-  per-call request guard.
+  per-call request guard. JSON-RPC batches are refused with 400, because one
+  request would otherwise fan out into thousands of concurrent, audited calls.
+- A tool's internal error is logged and answered with fixed text; database
+  and connection details never reach the client.
 - Audit rows record `transport: http`.
 
 Failed authentications are not rate limited per address: tokens carry 256

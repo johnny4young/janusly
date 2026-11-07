@@ -13,18 +13,17 @@ func TestRemoteMCPIsOffUntilEnabled(t *testing.T) {
 	}
 }
 
-func TestRemoteMCPAllowsTheWebHostAndListedOrigins(t *testing.T) {
+func TestRemoteMCPAllowsTheWebHostAndListedHosts(t *testing.T) {
 	cfg, err := Load(env(map[string]string{
-		"JANUSLY_ENV": "production", "JANUSLY_MCP_HTTP_ENABLED": "true",
-		"JANUSLY_WEB_BASE_URL":        "https://Janusly.Example.com/app",
-		"JANUSLY_MCP_ALLOWED_HOSTS":   "mcp.example.com, internal.example.com",
-		"JANUSLY_MCP_ALLOWED_ORIGINS": "https://studio.example.com/",
+		"JANUSLY_ENV": "production", "JANUSLY_MCP_HTTP_ENABLED": "true", "JANUSLY_TRUSTED_PROXY": "true",
+		"JANUSLY_WEB_BASE_URL":      "https://Janusly.Example.com/app",
+		"JANUSLY_MCP_ALLOWED_HOSTS": "mcp.example.com, internal.example.com",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.MCPHTTP.Enabled || !slices.Equal(cfg.MCPHTTP.AllowedHosts, []string{"janusly.example.com", "mcp.example.com", "internal.example.com"}) ||
-		!slices.Equal(cfg.MCPHTTP.AllowedOrigins, []string{"https://studio.example.com"}) {
+	if !cfg.MCPHTTP.Enabled || !cfg.MCPHTTP.RefuseForwardedHTTP ||
+		!slices.Equal(cfg.MCPHTTP.AllowedHosts, []string{"janusly.example.com", "mcp.example.com", "internal.example.com"}) {
 		t.Fatalf("remote MCP config: %+v", cfg.MCPHTTP)
 	}
 }
@@ -34,7 +33,6 @@ func TestRemoteMCPRefusesUnsafeConfiguration(t *testing.T) {
 		"production without a web URL": {"JANUSLY_ENV": "production"},
 		"production over http":         {"JANUSLY_ENV": "production", "JANUSLY_WEB_BASE_URL": "http://janusly.example.com"},
 		"host with a scheme":           {"JANUSLY_MCP_ALLOWED_HOSTS": "https://mcp.example.com"},
-		"origin with a path":           {"JANUSLY_MCP_ALLOWED_ORIGINS": "https://studio.example.com/app"},
 		"not a boolean":                {"JANUSLY_MCP_HTTP_ENABLED": "yes"},
 	} {
 		if _, ok := values["JANUSLY_MCP_HTTP_ENABLED"]; !ok {

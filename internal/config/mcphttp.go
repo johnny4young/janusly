@@ -36,14 +36,7 @@ func loadMCPHTTP(getenv func(string) string, production bool, problems []string)
 		}
 		cfg.AllowedHosts = append(cfg.AllowedHosts, strings.ToLower(host))
 	}
-	for _, origin := range splitList(getenv("JANUSLY_MCP_ALLOWED_ORIGINS")) {
-		parsed, err := url.Parse(origin)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Path != "" && parsed.Path != "/") {
-			problems = append(problems, "JANUSLY_MCP_ALLOWED_ORIGINS lists origins such as https://app.example.com")
-			continue
-		}
-		cfg.AllowedOrigins = append(cfg.AllowedOrigins, parsed.Scheme+"://"+parsed.Host)
-	}
+	cfg.RefuseForwardedHTTP = production && getenv("JANUSLY_TRUSTED_PROXY") == "true"
 	return cfg, problems
 }
 

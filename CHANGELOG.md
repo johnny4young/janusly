@@ -6,8 +6,8 @@
   `JANUSLY_MCP_HTTP_ENABLED=true`, the executable serves MCP at `/mcp` on its
   public port for agent client tokens, so Claude Code, Codex or Cursor connect
   with `claude mcp add --transport http` and a bearer header. It is off by
-  default, refuses tokens in URLs, unknown hosts and browser origins, and in
-  production needs an https web URL.
+  default, refuses tokens in URLs, unknown hosts, browser origins and request
+  batches, and in production needs an https web URL.
 - External agents get their own credentials. A member creates an agent client
   for Claude Code, Codex or another agent with a capability ceiling (read,
   operate, and the propose, test, publish and report capabilities that later
