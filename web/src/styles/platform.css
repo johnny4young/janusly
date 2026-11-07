@@ -1564,7 +1564,9 @@
 .we-home-contributors button {
   width: 100%;
   min-width: 190px;
+  min-height: 24px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 2px 6px;

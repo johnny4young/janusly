@@ -142,7 +142,8 @@ test('grouped control-plane panels and shared mutations remain bilingual', async
 
     const successToast = page.getByText(copy.added(connectionName), { exact: true })
     await expect(successToast).toBeVisible()
-    await expect(page.locator('.list-card').filter({ hasText: connectionName })).toBeVisible()
+    const connectionRow = page.getByTestId('connections-table').getByRole('row').filter({ hasText: connectionName })
+    await expect(connectionRow.getByRole('rowheader', { name: connectionName, exact: true })).toBeVisible()
     await expect(successToast).not.toBeVisible({ timeout: 8_000 })
 
     const main = page.locator('.workspace-main')

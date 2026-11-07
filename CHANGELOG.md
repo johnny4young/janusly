@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The success rate, open failures and longest downtime links beside the Home
+  health score are at least 24 px tall, so each one is an easier touch target.
 - The PagerDuty example that opens AI Studio compiles into a complete intent
   brief. It named the user in a form the brief compiler did not read, so Build
   proposal stayed disabled until the author added the user ID by hand.
