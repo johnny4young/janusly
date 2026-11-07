@@ -307,6 +307,8 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
       ).toBeLessThanOrEqual(2)
       await capture(costCard, 'web-es-operations-cache-efficiency-mobile')
       await page.setViewportSize({ width: 1280, height: 720 })
+      // The sidebar stays aria-hidden until the app re-renders for the wider viewport.
+      await expect(mobileSidebar).not.toHaveAttribute('aria-hidden', 'true')
     }
 
     await captureRunUsageStates(page, runId, locale)
