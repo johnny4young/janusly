@@ -2,9 +2,9 @@
 // appends. Sites add rows in causal order; inCompletionTx flushes
 // the whole buffer in ONE CopyFrom round trip right before the stream
 // notify, instead of one INSERT per event. Payload bytes, ids, and
-// created_at values are exactly what the per-row inserts produced — the
-// (created_at, id) keyset defines read order, so batching changes round
-// trips only, never the timeline.
+// created_at values are exactly what the per-row inserts produced, and the
+// COPY takes seqs in buffer order, so batching changes round trips only,
+// never history order or the stream's seq order.
 package engine
 
 import (

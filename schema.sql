@@ -47,6 +47,22 @@ COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access met
 
 
 --
+-- Name: assign_run_event_seq(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.assign_run_event_seq() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO public.run_event_sequences AS counter (run_id, last_seq) VALUES (NEW.run_id, 1)
+    ON CONFLICT (run_id) DO UPDATE SET last_seq = counter.last_seq + 1
+    RETURNING counter.last_seq INTO NEW.seq;
+    RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: protect_organization_owner_membership(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1127,6 +1143,16 @@ CREATE TABLE public.run_actors (
 
 
 --
+-- Name: run_event_sequences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.run_event_sequences (
+    run_id text NOT NULL,
+    last_seq bigint NOT NULL
+);
+
+
+--
 -- Name: run_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1138,7 +1164,8 @@ CREATE TABLE public.run_events (
     type text NOT NULL,
     payload jsonb,
     created_at timestamp with time zone DEFAULT now(),
-    hold_until timestamp with time zone
+    hold_until timestamp with time zone,
+    seq bigint NOT NULL
 );
 
 
@@ -2152,6 +2179,14 @@ ALTER TABLE ONLY public.routing_stats
 
 ALTER TABLE ONLY public.run_actors
     ADD CONSTRAINT run_actors_pkey PRIMARY KEY (run_id, node_id, role, actor);
+
+
+--
+-- Name: run_event_sequences run_event_sequences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.run_event_sequences
+    ADD CONSTRAINT run_event_sequences_pkey PRIMARY KEY (run_id);
 
 
 --
@@ -3207,6 +3242,13 @@ CREATE INDEX run_events_run_created_id_idx ON public.run_events USING btree (run
 
 
 --
+-- Name: run_events_run_seq_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX run_events_run_seq_idx ON public.run_events USING btree (run_id, seq);
+
+
+--
 -- Name: run_nodes_failed_finished_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3722,6 +3764,13 @@ CREATE TRIGGER protect_organization_owner_membership_delete BEFORE DELETE ON pub
 --
 
 CREATE TRIGGER protect_organization_owner_membership_update BEFORE UPDATE OF user_id, role ON public.org_members FOR EACH ROW EXECUTE FUNCTION public.protect_organization_owner_membership();
+
+
+--
+-- Name: run_events run_events_assign_seq; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER run_events_assign_seq BEFORE INSERT ON public.run_events FOR EACH ROW EXECUTE FUNCTION public.assign_run_event_seq();
 
 
 --

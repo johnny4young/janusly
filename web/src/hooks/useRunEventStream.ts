@@ -25,8 +25,9 @@
  * Invariants:
  * - Initial timeline history comes from the regular `/status` fetch (the poll
  *   loop runs until SSE connects). This hook carries live signals and, on
- *   (re)connect, replays the gap by sending the newest known event id as
- *   `Last-Event-ID`. Overlap is harmless — the store dedupes by id.
+ *   reconnect, replays the gap by sending the last frame id it received as
+ *   `Last-Event-ID`; the first connect sends the newest known event as an
+ *   `<iso>|<id>` cursor. Overlap is harmless — the store dedupes by id.
  * - Never throws into render; all stream faults degrade to the polling
  *   fallback.
  */
@@ -139,9 +140,11 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
     let retryTimer: ReturnType<typeof setTimeout> | null = null
 
     const store = useWorkflowStore
-    // Newest event the client already has → `Last-Event-ID` cursor so the
-    // server replays only the gap on (re)connect.
+    // Frame ids follow commit order, so the last one is the only cursor that
+    // cannot skip an event committed late with an earlier timestamp.
+    let lastFrameId: string | undefined
     const newestCursor = (): string | undefined => {
+      if (lastFrameId) return lastFrameId
       const events = store.getState().events
       const newest = events[events.length - 1]
       return newest?.createdAt && newest.id ? `${newest.createdAt}|${newest.id}` : undefined
@@ -234,6 +237,7 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
           createdAt: signal.createdAt,
         }
         pendingEvents.push(event)
+        if (frame.id) lastFrameId = frame.id
         const runNode = runNodeFromEvent(event)
         if (runNode) pendingNodes.push(runNode)
         scheduleFlush()
@@ -310,7 +314,7 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
           return
         }
         // Stream ended without a terminal signal — reconnect from the last
-        // composite cursor.
+        // frame id.
         if (!stopped) { failures += 1; fallbackToPolling(); scheduleReconnect() }
       } catch {
         clearTimeout(firstByteTimer)

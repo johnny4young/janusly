@@ -37,10 +37,12 @@ function Harness({ runId, patchRunSummary }: { runId: string | null; patchRunSum
   return <div />
 }
 
+let frameSeq = 0
 const eventFrame = (id: string, createdAt: string) =>
-  `id: ${createdAt}|${id}\nevent: run-event\ndata: ${JSON.stringify({ kind: 'event', id, nodeId: 'n1', type: 'node.succeeded', payload: { ok: true }, createdAt })}\n\n`
+  `id: ${++frameSeq}\nevent: run-event\ndata: ${JSON.stringify({ kind: 'event', id, nodeId: 'n1', type: 'node.succeeded', payload: { ok: true }, createdAt })}\n\n`
 
 beforeEach(() => {
+  frameSeq = 0
   openRunEventStreamMock.mockReset()
   useWorkflowStore.getState().resetRun()
 })
@@ -239,7 +241,7 @@ describe('useRunEventStream', () => {
     expect(openRunEventStreamMock).toHaveBeenCalledTimes(1)
   })
 
-  it('lands a truncated catch-up page and reconnects immediately from its newest cursor', async () => {
+  it('lands a truncated catch-up page and reconnects immediately from its last frame id', async () => {
     const createdAt = '2026-05-28T00:08:20.000Z'
     openRunEventStreamMock
       .mockResolvedValueOnce(streamResponse([
@@ -256,13 +258,23 @@ describe('useRunEventStream', () => {
     render(<Harness runId="run-1" />)
 
     await waitFor(() => expect(openRunEventStreamMock).toHaveBeenCalledTimes(2))
-    expect(openRunEventStreamMock.mock.calls[1]?.[1]).toMatchObject({
-      lastEventId: `${createdAt}|evt-500`,
-    })
+    expect(openRunEventStreamMock.mock.calls[0]?.[1]).toMatchObject({ lastEventId: undefined })
+    expect(openRunEventStreamMock.mock.calls[1]?.[1]).toMatchObject({ lastEventId: '1' })
     await waitFor(() => {
       expect(useWorkflowStore.getState().events.map(event => event.id)).toEqual(['evt-500', 'evt-501'])
     })
     expect(useWorkflowStore.getState().streamTransport).toBe('sse')
+  })
+
+  it('opens the first stream from the newest stored event', async () => {
+    const createdAt = '2026-05-28T00:09:00.000Z'
+    useWorkflowStore.getState().addEvents([{ id: 'evt-polled', nodeId: 'n1', type: 'node.queued', payload: null, createdAt }])
+    openRunEventStreamMock.mockResolvedValue(streamResponse([': connected\n\n']))
+
+    render(<Harness runId="run-1" />)
+
+    await waitFor(() => expect(openRunEventStreamMock).toHaveBeenCalledTimes(1))
+    expect(openRunEventStreamMock.mock.calls[0]?.[1]).toMatchObject({ lastEventId: `${createdAt}|evt-polled` })
   })
 
   it('does not open a stream and sets transport idle when runId is null', () => {

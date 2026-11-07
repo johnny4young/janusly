@@ -104,6 +104,7 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	for _, relation := range []string{
 		"org_digest_state", "rate_limit_windows", "run_start_idempotency", "run_summary_memory_jobs", "run_wakeups",
 		"workflows_active_search_trgm_idx", "dead_letters_recovery_search_trgm_idx",
+		"run_event_sequences", "run_events_run_seq_idx",
 	} {
 		var found bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, relation).Scan(&found); err != nil {
@@ -136,6 +137,23 @@ func TestFreshMigrationIsIdempotentAndComplete(t *testing.T) {
 	}
 	if obsoleteCount != 0 {
 		t.Fatalf("fresh database contains %d unsupported schema objects", obsoleteCount)
+	}
+
+	if _, err := db.ExecContext(ctx, `ALTER TABLE run_events DISABLE TRIGGER run_events_assign_seq`); err != nil {
+		t.Fatalf("disable sequence trigger: %v", err)
+	}
+	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "run_events_assign_seq") {
+		t.Fatalf("a disabled sequence trigger must fail the boot gate: %v", err)
+	}
+	// A replica-only trigger never fires for ordinary sessions.
+	if _, err := db.ExecContext(ctx, `ALTER TABLE run_events ENABLE REPLICA TRIGGER run_events_assign_seq`); err != nil {
+		t.Fatalf("make sequence trigger replica-only: %v", err)
+	}
+	if err := AssertMigrated(ctx, dsn); err == nil || !strings.Contains(err.Error(), "run_events_assign_seq") {
+		t.Fatalf("a replica-only sequence trigger must fail the boot gate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE run_events ENABLE TRIGGER run_events_assign_seq`); err != nil {
+		t.Fatalf("enable sequence trigger: %v", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `DROP TABLE run_wakeups`); err != nil {

@@ -1,7 +1,7 @@
 // Live run streaming over SSE, shaped to the contract protocol the web
 // already speaks (fetch + ReadableStream, never EventSource): a retry hint
 // and connected comment on open, database catch-up from the Last-Event-ID
-// composite cursor (bounded, with the catchup-truncated reconnect signal),
+// sequence cursor (bounded, with the catchup-truncated reconnect signal),
 // then the live tail — driven here by the Postgres event notify instead of
 // the contract's Redis hub, with a polling fallback so a lost notification
 // only delays, never loses.
@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -115,6 +116,25 @@ func (h *streamHub) listen(ctx context.Context, pool *pgxpool.Pool) {
 	}
 }
 
+// streamCursor resolves Last-Event-ID to the run event sequence. An absent
+// or unknown cursor replays from the beginning; the web dedupes by event id.
+// A legacy "<iso>|<id>" cursor resumes at that event's seq: every lower seq
+// committed no later than it, so a client holding the event holds them too.
+func streamCursor(ctx context.Context, q *store.Queries, runID, orgID, raw string) (int64, error) {
+	if seq, err := strconv.ParseInt(raw, 10, 64); err == nil && seq >= 0 {
+		return seq, nil
+	}
+	_, eventID, ok := parseEventsCursor(raw)
+	if !ok {
+		return 0, nil
+	}
+	seq, err := q.GetRunEventSeqForOrg(ctx, store.GetRunEventSeqForOrgParams{ID: eventID, RunID: runID, OrgID: orgID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return seq, err
+}
+
 func isTerminalRunStatus(status string) bool {
 	return status == "succeeded" || status == "failed" || status == "cancelled" || status == "timed_out"
 }
@@ -142,6 +162,11 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		s.internal(w, rc, errors.New("streaming unsupported"))
 		return
 	}
+	cursor, err := streamCursor(r.Context(), q, runID, rc.orgID, r.Header.Get("Last-Event-ID"))
+	if err != nil {
+		s.internal(w, rc, err)
+		return
+	}
 
 	header := w.Header()
 	header.Set("Content-Type", "text/event-stream")
@@ -160,16 +185,6 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 		return
 	}
 
-	// Catch-up boundary from the composite Last-Event-ID; absent means from
-	// the very beginning — the deliberate overlap the web dedupes by id.
-	cursorAt := time.Time{}
-	cursorID := ""
-	if raw := r.Header.Get("Last-Event-ID"); raw != "" {
-		if at, id, ok := parseEventsCursor(raw); ok {
-			cursorAt, cursorID = at, id
-		}
-	}
-
 	wake, unsubscribe := s.hub.subscribe(runID)
 	defer unsubscribe()
 	heartbeat := time.NewTicker(streamHeartbeat)
@@ -178,9 +193,8 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 	var terminalGrace <-chan time.Time
 
 	for {
-		rows, err := q.ListRunEventsAfterForOrg(r.Context(), store.ListRunEventsAfterForOrgParams{
-			RunID: runID, OrgID: rc.orgID, AfterCreatedAt: cursorAt, AfterID: cursorID,
-			PageLimit: streamCatchupMax + 1,
+		rows, err := q.ListRunEventsAfterSeqForOrg(r.Context(), store.ListRunEventsAfterSeqForOrgParams{
+			RunID: runID, OrgID: rc.orgID, AfterSeq: cursor, PageLimit: streamCatchupMax + 1,
 		})
 		if err != nil {
 			return
@@ -197,11 +211,11 @@ func (s *V1Server) streamRun(w http.ResponseWriter, r *http.Request, rc v1Reques
 				"createdAt": timeOrNull(row.CreatedAt),
 			}
 			data, _ := json.Marshal(frame)
-			frameID := row.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z") + "|" + row.ID
+			frameID := strconv.FormatInt(row.Seq, 10)
 			if !write("id: " + frameID + "\nevent: run-event\ndata: " + string(data) + "\n\n") {
 				return
 			}
-			cursorAt, cursorID = *row.CreatedAt, row.ID
+			cursor = row.Seq
 		}
 		if truncated {
 			data, _ := json.Marshal(map[string]any{"kind": "catchup-truncated", "replayed": len(page)})
