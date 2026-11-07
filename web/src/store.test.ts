@@ -1108,6 +1108,36 @@ describe('useWorkflowStore semantic workflow signals', () => {
     store.setRunNodes([])
     expect(useWorkflowStore.getState().runNodes).toEqual([])
   })
+
+  it('keeps nodes that changed live after the snapshot was requested', () => {
+    const store = useWorkflowStore.getState()
+    store.setRunNodes([
+      { nodeId: 'a', status: 'running' },
+      { nodeId: 'b', status: 'queued' },
+    ])
+    const basis = useWorkflowStore.getState().runNodes
+    store.mergeRunNode({ nodeId: 'a', status: 'waiting', stateJson: { waiting: { kind: 'approval' } } })
+    store.mergeRunNode({ nodeId: 'c', status: 'queued' })
+
+    store.setRunNodes([
+      { nodeId: 'a', status: 'running' },
+      { nodeId: 'b', status: 'running' },
+      { nodeId: 'c', status: 'pending' },
+    ], basis)
+    expect(useWorkflowStore.getState().runNodes).toMatchObject([
+      { nodeId: 'a', status: 'waiting', stateJson: { waiting: { kind: 'approval' } } },
+      { nodeId: 'b', status: 'running' },
+      { nodeId: 'c', status: 'queued' },
+    ])
+
+    // A later snapshot requested after those updates applies in full.
+    store.setRunNodes([
+      { nodeId: 'a', status: 'running' },
+      { nodeId: 'b', status: 'succeeded' },
+      { nodeId: 'c', status: 'running' },
+    ], useWorkflowStore.getState().runNodes)
+    expect(useWorkflowStore.getState().runNodes.map((node) => node.status)).toEqual(['running', 'succeeded', 'running'])
+  })
 })
 
 describe('poll-refreshed collections keep their identity when nothing changed', () => {
