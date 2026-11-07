@@ -310,7 +310,7 @@ func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 		return expected("workflow not found")
 	case errors.As(err, &notResumable):
-		return expected("this pause clears on its own when its upstream recovers (status: " + notResumable.Status + ")")
+		return expected("an upstream this workflow depends on is degraded; it resumes when the upstream recovers (status: " + notResumable.Status + ")")
 	default:
 		return nil, nil, err
 	}

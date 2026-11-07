@@ -532,7 +532,7 @@ function useWorkflowsDashboardController({
       recoveryBusyRef.current.add(workflowId)
       setRecoveryBusyIds((current) => new Set(current).add(workflowId))
       setWorkflows((prev) =>
-        prev.map((w) => (w.id === workflowId ? { ...w, status: STATUS_PAUSED_MANUAL } : w)),
+        prev.map((w) => (w.id === workflowId ? { ...w, status: STATUS_PAUSED_MANUAL, pausedReason: null } : w)),
       )
       try {
         await contractApi('POST /workflows/{id}/pause', `/workflows/${encodeURIComponent(workflowId)}/pause`, {},

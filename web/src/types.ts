@@ -157,7 +157,7 @@ export type SolutionPackPublic = {
 }
 /**
  * `status` / `pausedReason` are the workflow's OPERATIONAL state (`active`,
- * `paused_upstream_degraded`, `paused_circuit_breaker`) — distinct from
+ * `paused_manual`, `paused_upstream_degraded`, `paused_circuit_breaker`) — distinct from
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */

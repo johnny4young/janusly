@@ -94,6 +94,15 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 		return true, err
 	}
 
+	// A paused workflow holds the campaign at this item until it resumes.
+	if status, err := q.GetDeadLetterWorkflowStatus(ctx, store.GetDeadLetterWorkflowStatusParams{
+		OrgID: campaign.OrgID, ID: item.DeadLetterID,
+	}); err == nil && status != "active" {
+		return true, q.ReleaseReplayCampaignItem(ctx, store.ReleaseReplayCampaignItemParams{
+			ID: item.ID, ClaimToken: pgtype.Text{String: claimToken, Valid: true},
+		})
+	}
+
 	// Per-item fault isolation: a failed replay settles the item and moves
 	// on; it never wedges the campaign.
 	var itemError pgtype.Text
