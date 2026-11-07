@@ -838,15 +838,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     // A snapshot describes the run when the server built it, which can predate
     // an SSE event applied while the request was in flight; with SSE connected
     // polling stops, so a rewound node would stick. A node that changed since
-    // `basis` (the nodes the request was sent against) keeps its live state,
-    // and terminal states never regress.
+    // `basis` (the nodes the request was sent against) keeps its live status,
+    // state and error but takes the snapshot's timing and attempts. Terminal
+    // states never regress.
     if (nodes.length === 0) return { runNodes: nodes }
     const previous = new Map(state.runNodes.map((node) => [node.nodeId, node]))
     const requested = basis ? new Map(basis.map((node) => [node.nodeId, node])) : null
     const runNodes = nodes.map((node) => {
       const existing = previous.get(node.nodeId)
       if (!existing) return node
-      if (requested && requested.get(node.nodeId) !== existing) return existing
+      if (requested && requested.get(node.nodeId) !== existing) {
+        return { ...node, status: existing.status, stateJson: existing.stateJson, errorJson: existing.errorJson }
+      }
       if (isTerminalNodeStatus(existing.status) && !isTerminalNodeStatus(node.status)) return existing
       return node
     })

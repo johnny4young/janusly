@@ -216,6 +216,33 @@ describe('useRunPolling request ownership', () => {
     ])
   })
 
+  it('keeps timing and attempts from the snapshot for a node the stream advanced', async () => {
+    let resolveStatus!: (value: unknown) => void
+    vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
+    useWorkflowStore.setState({ runId: 'run-a' })
+
+    render(<Harness runId="run-a" />)
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      useWorkflowStore.getState().mergeRunNode({ nodeId: 'fetch', status: 'failed', errorJson: { message: 'boom' } })
+    })
+    await act(async () => {
+      resolveStatus({
+        run: { id: 'run-a', status: 'running' },
+        nodes: [{
+          nodeId: 'fetch', status: 'running', attempts: 2,
+          startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null,
+        }],
+      })
+    })
+
+    expect(useWorkflowStore.getState().runNodes).toEqual([expect.objectContaining({
+      nodeId: 'fetch', status: 'failed', errorJson: { message: 'boom' },
+      attempts: 2, startedAt: '2026-01-01T00:00:00.000Z', finishedAt: null,
+    })])
+  })
+
   it('reserves summary ownership before awaiting the status response', async () => {
     let resolveStatus!: (value: unknown) => void
     vi.mocked(api).mockImplementation(() => new Promise(resolve => { resolveStatus = value => resolve(statusResponse(value)) }))
