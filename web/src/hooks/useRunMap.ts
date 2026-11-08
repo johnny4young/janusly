@@ -4,7 +4,8 @@
  * The feed refetches the map shortly after the run projection changes (stream
  * frames or the polling fallback), and on a slow tick so elapsed time and the
  * stuck signal advance while nothing streams. The tick stops once the run is
- * terminal. A failed read keeps the previous map.
+ * terminal. A failed read keeps the previous map within the same identity.
+ * An organization or user change retires all feeds and cached snapshots.
  */
 
 import { useCallback, useSyncExternalStore } from 'react'
@@ -32,6 +33,23 @@ type Feed = {
 
 const feeds = new Map<string, Feed>()
 let lastSnapshot: RunMapSnapshot | null = null
+
+function identityKey(): string {
+  const { userId, orgId } = useWorkflowStore.getState()
+  return JSON.stringify([userId, orgId])
+}
+
+// Cached maps contain tenant facts and viewer-specific decisions. Retire
+// them even when no view is mounted, before another identity can read them.
+useWorkflowStore.subscribe((state, previous) => {
+  if (state.userId === previous.userId && state.orgId === previous.orgId) return
+  lastSnapshot = null
+  const retired = [...feeds.values()]
+  for (const feed of retired) closeFeed(feed)
+  for (const feed of retired) {
+    for (const listener of feed.listeners) listener()
+  }
+})
 
 function syncTick(feed: Feed) {
   const finished = feed.snapshot !== null && isTerminalRunStatus(feed.snapshot.map.run.status)
@@ -92,7 +110,7 @@ function openFeed(runId: string): Feed {
 }
 
 function closeFeed(feed: Feed) {
-  feeds.delete(feed.runId)
+  if (feeds.get(feed.runId) === feed) feeds.delete(feed.runId)
   feed.unwatch()
   feed.controller.abort()
   clearTimeout(feed.settle)
@@ -121,10 +139,11 @@ export function refreshRunMap(runId: string) {
 const noop = () => undefined
 
 export function useRunMap(runId: string | null | undefined): RunMapSnapshot | null {
+  const identity = useWorkflowStore(state => JSON.stringify([state.userId, state.orgId]))
   const subscribe = useCallback(
-    (listener: () => void) => (runId ? subscribeRunMap(runId, listener) : noop),
-    [runId],
+    (listener: () => void) => (runId && identity === identityKey() ? subscribeRunMap(runId, listener) : noop),
+    [identity, runId],
   )
-  const read = useCallback(() => (runId ? readRunMap(runId) : null), [runId])
+  const read = useCallback(() => (runId && identity === identityKey() ? readRunMap(runId) : null), [identity, runId])
   return useSyncExternalStore(subscribe, read, read)
 }

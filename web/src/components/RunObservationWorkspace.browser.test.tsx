@@ -1,8 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api'
 import type { RunMap } from '../run-map'
+import { useWorkflowStore } from '../store'
 import { leadingAccents } from '../test/leading-accent'
 import type { RunNode, RunSummary } from '../types'
 import { RunObservationWorkspace } from './CanvasWorkspace'
@@ -60,11 +61,26 @@ function mount(onApproveNode = vi.fn(async () => undefined)) {
 }
 
 beforeEach(() => {
+  useWorkflowStore.getState().setAuth({ session: null, user: null, userId: 'viewer-a', orgId: 'org-a' })
   vi.mocked(api).mockReset()
   vi.mocked(api).mockResolvedValue(map)
 })
 
 describe('run map canvas (browser mode)', () => {
+  it('removes prior-workspace totals and decisions when the next workspace refuses the run', async () => {
+    mount()
+    expect(await screen.findByTestId('run-map-totals')).toBeVisible()
+    expect(await screen.findByRole('button', { name: 'Approve Charge card' })).toBeVisible()
+    vi.mocked(api).mockRejectedValue(new Error('run not found'))
+    act(() => {
+      useWorkflowStore.getState().setAuth({ session: null, user: null, userId: 'viewer-a', orgId: 'org-b' })
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('run-map-totals')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Approve Charge card' })).not.toBeInTheDocument()
+    })
+  })
+
   it('shows totals, a stuck step on a dashed full border and no leading bar', async () => {
     const { container } = mount()
     const totals = await screen.findByTestId('run-map-totals')
