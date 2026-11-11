@@ -95,13 +95,14 @@ mode: no session is kept, so any instance answers any request, and `GET` and
 
 - Only `Authorization: Bearer jly_agent_…` authenticates. Browser sessions,
   identity provider tokens, the service token and development headers are
-  refused; every failure is a 401 with `WWW-Authenticate: Bearer`. The token
-  is resolved on every request, so revocation applies to the next one.
+  refused; every credential failure is a 401 with `WWW-Authenticate: Bearer`,
+  and a token store failure is a 500 with fixed text. The token is resolved on
+  every request, so revocation applies to the next one.
 - A token-like query parameter (`access_token`, `token`, `api_key`, `key`,
-  `auth`, `authorization`, or any value starting `jly_agent_`) is refused with
-  400 before authentication, and only its name is logged. In production behind
-  `JANUSLY_TRUSTED_PROXY`, a request the proxy marks `X-Forwarded-Proto: http`
-  is refused, so a token never travels in clear.
+  `auth`, `authorization`), or `jly_agent_` anywhere in the query string, is
+  refused with 400 before authentication, and only the parameter name is
+  logged. In production behind `JANUSLY_TRUSTED_PROXY`, a request with `http`
+  in any `X-Forwarded-Proto` hop is refused, so a token never travels in clear.
 - A `Host` other than loopback, the `JANUSLY_WEB_BASE_URL` host or one in
   `JANUSLY_MCP_ALLOWED_HOSTS` is refused, which defeats DNS rebinding. This
   allowlist replaces the SDK's localhost check, which would refuse a reverse
@@ -109,8 +110,10 @@ mode: no session is kept, so any instance answers any request, and `GET` and
   carrying an `Origin` is refused, and `http.CrossOriginProtection` wraps the
   handler.
 - Request bodies are capped at 256000 bytes (413 beyond), the same as the
-  per-call request guard. JSON-RPC batches are refused with 400, because one
-  request would otherwise fan out into thousands of concurrent, audited calls.
+  per-call request guard. Authenticated JSON-RPC batches are refused with 400,
+  because one request would otherwise fan out into thousands of concurrent,
+  audited calls. `subscriptions/listen` is refused, so no stream outlives the
+  token check made when its request started.
 - A tool's internal error is logged and answered with fixed text; database
   and connection details never reach the client.
 - Audit rows record `transport: http`.

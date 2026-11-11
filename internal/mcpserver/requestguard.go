@@ -78,22 +78,29 @@ func (server Deps) requestGuard(next mcp.MethodHandler) mcp.MethodHandler {
 		}
 		d.auditToolDecision(ctx, decision.toolName, decision.permissions, decision.write,
 			decision.allowed, decision.reason, decision.phase)
-		return withoutInternalError(toolName, result), err
+		return withoutInternalError(d.logger(), toolName, result), err
 	}
 }
 
 // withoutInternalError replaces the text of a handler's Go error, which the
 // SDK would otherwise send verbatim (database and connection details).
 // Expected business failures never carry one.
-func withoutInternalError(toolName string, result mcp.Result) mcp.Result {
+func withoutInternalError(logger *slog.Logger, toolName string, result mcp.Result) mcp.Result {
 	call, ok := result.(*mcp.CallToolResult)
 	if !ok || call == nil || call.GetError() == nil {
 		return result
 	}
-	slog.Error("mcp tool failed", "tool", toolName, "error", call.GetError())
+	logger.Error("mcp tool failed", "tool", toolName, "error", call.GetError())
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{
 		&mcp.TextContent{Text: toolName + " failed for an internal reason; retry later"},
 	}}
+}
+
+func (d Deps) logger() *slog.Logger {
+	if d.Logger != nil {
+		return d.Logger
+	}
+	return slog.Default()
 }
 
 // decodeFailureDetail tells the caller how to repair a call the SDK rejected

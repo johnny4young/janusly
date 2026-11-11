@@ -8,10 +8,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/johnny4young/janusly/internal/agentclient"
@@ -38,6 +40,9 @@ var tokenQueryParams = []string{"access_token", "token", "api_key", "key", "auth
 func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 	resolver := agentclient.Resolver{Pool: deps.Pool}
 	deps.Transport = "http"
+	if deps.Logger == nil {
+		deps.Logger = opts.Logger
+	}
 	deps.ResolveActor = func(_ context.Context, req mcp.Request) (*agentclient.Principal, error) {
 		extra := req.GetExtra()
 		if extra == nil || extra.TokenInfo == nil {
@@ -49,14 +54,7 @@ func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 		}
 		return principal, nil
 	}
-	server := NewServer(deps)
-	streamable := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{
-			Stateless: true, JSONResponse: true, MaxRequestBodyBytes: maxMCPRequestBytes, Logger: opts.Logger,
-			// guardHTTP's host allowlist replaces this check, which would refuse
-			// a reverse proxy on the same host.
-			DisableLocalhostProtection: true,
-		})
+	streamable := newStreamableHandler(deps, opts.Logger)
 	verify := func(ctx context.Context, token string, _ *http.Request) (*sdkauth.TokenInfo, error) {
 		principal, err := resolver.Resolve(ctx, token)
 		if errors.Is(err, agentclient.ErrInvalidToken) {
@@ -74,9 +72,32 @@ func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 			Extra: map[string]any{principalExtraKey: principal},
 		}, nil
 	}
-	authenticated := challenge(sdkauth.RequireBearerToken(verify, nil)(streamable))
+	authenticated := challenge(sdkauth.RequireBearerToken(verify, nil)(refuseBatches(streamable)))
 	protected := http.NewCrossOriginProtection().Handler(authenticated)
 	return guardHTTP(protected, opts)
+}
+
+func newStreamableHandler(deps Deps, logger *slog.Logger) http.Handler {
+	server := NewServer(deps)
+	server.AddReceivingMiddleware(refuseLongLived)
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
+		&mcp.StreamableHTTPOptions{
+			Stateless: true, JSONResponse: true, MaxRequestBodyBytes: maxMCPRequestBytes, Logger: logger,
+			// guardHTTP's host allowlist replaces this check, which would refuse
+			// a reverse proxy on the same host.
+			DisableLocalhostProtection: true,
+		})
+}
+
+// refuseLongLived rejects the subscription stream: they skip the tool guard and
+// would outlive the token check made when the request started.
+func refuseLongLived(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method == "subscriptions/listen" {
+			return nil, &jsonrpc.Error{Code: jsonrpc.CodeMethodNotFound, Message: method + " is not supported"}
+		}
+		return next(ctx, method, req)
+	}
 }
 
 var errVerificationUnavailable = errors.New("token verification is temporarily unavailable")
@@ -119,7 +140,7 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 			http.Error(w, "credentials belong in the Authorization header, never in the URL", http.StatusBadRequest)
 			return
 		}
-		if opts.RefuseForwardedHTTP && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
+		if opts.RefuseForwardedHTTP && forwardedPlainHTTP(r) {
 			http.Error(w, "remote MCP requires https", http.StatusForbidden)
 			return
 		}
@@ -132,6 +153,14 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 			http.Error(w, "browser origins are not allowed", http.StatusForbidden)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// refuseBatches runs after authentication so an anonymous caller cannot make
+// the server buffer a request body.
+func refuseBatches(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && isBatch(w, r) {
 			http.Error(w, "JSON-RPC batches are not accepted; send one message per request", http.StatusBadRequest)
 			return
@@ -140,14 +169,31 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	})
 }
 
-func tokenInQuery(r *http.Request) (string, bool) {
-	for name, values := range r.URL.Query() {
-		for _, refused := range tokenQueryParams {
-			if strings.EqualFold(name, refused) {
-				return name, true
+// forwardedPlainHTTP checks every hop, so a client-supplied "https" ahead of
+// the proxy's own value cannot mask a plain HTTP leg.
+func forwardedPlainHTTP(r *http.Request) bool {
+	for _, value := range r.Header.Values("X-Forwarded-Proto") {
+		for proto := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(proto), "http") {
+				return true
 			}
 		}
-		if slices.ContainsFunc(values, agentclient.LooksLikeToken) {
+	}
+	return false
+}
+
+// tokenInQuery also scans the raw query, because url.ParseQuery drops pairs it
+// cannot parse and a token may sit in a key or mid-value.
+func tokenInQuery(r *http.Request) (string, bool) {
+	raw := r.URL.RawQuery
+	if unescaped, err := url.QueryUnescape(raw); err == nil {
+		raw = unescaped
+	}
+	if strings.Contains(raw, agentclient.TokenPrefix) {
+		return "(agent token)", true
+	}
+	for name := range r.URL.Query() {
+		if slices.ContainsFunc(tokenQueryParams, func(refused string) bool { return strings.EqualFold(name, refused) }) {
 			return name, true
 		}
 	}
