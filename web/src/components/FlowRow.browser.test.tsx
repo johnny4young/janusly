@@ -2,27 +2,19 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 
+import { flowRowProps } from '../test/flow-row-fixture'
 import type { SavedWorkflow } from '../types'
-import { FlowRow, type FlowRowProps } from './FlowRow'
+import { FlowRow } from './FlowRow'
 
 vi.mock('./WorkflowHealthBadge', () => ({ WorkflowHealthBadge: () => null }))
 vi.mock('./FlowHealthTrend', () => ({ FlowHealthTrend: () => null }))
 
 function mount(status: SavedWorkflow['status'] = 'active') {
-  const noop = () => undefined
   const onOpen = vi.fn()
   const pauseWorkflow = vi.fn()
   const deleteWorkflow = vi.fn()
-  const props: FlowRowProps = {
-    workflow: { id: 'menu-workflow', orgId: 'org-menu', name: 'Menu workflow', status },
-    canWrite: true, folderOptions: [], tagOptions: [], hasFolders: false,
-    selectionMode: false, selectedIds: new Set(), draggingId: null,
-    onOpen, toggleSelected: noop, setDraggingId: noop, setDropTarget: noop,
-    setRowTag: noop, moveToFolder: noop, deleteWorkflow, resumeWorkflow: noop,
-    pauseWorkflow, recoveryBusy: false,
-    t: ((key: string) => key) as FlowRowProps['t'],
-  }
-  render(<table style={{ width: 1000 }}><tbody><FlowRow {...props} /></tbody></table>)
+  const workflow = { id: 'menu-workflow', orgId: 'org-menu', name: 'Menu workflow', status }
+  render(<table><tbody><FlowRow {...flowRowProps(workflow, { onOpen, pauseWorkflow, deleteWorkflow })} /></tbody></table>)
   return { onOpen, pauseWorkflow, deleteWorkflow }
 }
 
