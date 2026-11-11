@@ -251,7 +251,7 @@ func (rv *Resolver) extract(ctx context.Context, r *http.Request) (*principal, e
 	}
 	// Agent tokens authenticate only the MCP surface. Refusing them here
 	// also keeps them from being forwarded to the identity provider.
-	if strings.Contains(r.Header.Get("Authorization"), AgentTokenPrefix) {
+	if strings.Contains(strings.ToLower(r.Header.Get("Authorization")), AgentTokenPrefix) {
 		return nil, nil
 	}
 	// 2. Supabase JWT.
