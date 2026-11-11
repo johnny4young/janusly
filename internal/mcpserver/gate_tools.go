@@ -239,8 +239,12 @@ func (d Deps) saveDraft(ctx context.Context, args draftSaveArgs) (*mcp.CallToolR
 		if !visible {
 			return gateError("not_found", "workflow not found", "/workflowId", "workflows.list shows the workflows you can change; omit workflowId to propose a new one.")
 		}
-		if latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: d.OrgID}); err == nil {
+		latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: d.OrgID})
+		switch {
+		case err == nil:
 			baseVersion = pgtype.Text{String: latest.ID, Valid: true}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return nil, nil, err
 		}
 	}
 	wf.ID = workflowID
@@ -430,6 +434,13 @@ func (d Deps) qualifyDraft(ctx context.Context, draftID string) (*mcp.CallToolRe
 	status := "failed"
 	var completedAt *time.Time
 	if publishgate.Passed(checks) {
+		if recent, err := q.CountRecentAgentDraftRuns(ctx, store.CountRecentAgentDraftRunsParams{
+			OrgID: d.OrgID, CreatedBy: pgtype.Text{String: d.UserID, Valid: true},
+		}); err != nil {
+			return nil, nil, err
+		} else if int(recent)+len(fixtures) > maxDraftRunsPerHour {
+			return gateError("rate_limited", "at most 120 draft and fixture runs per hour", "", "Qualify again later or with fewer fixtures.")
+		}
 		if runs, err = d.gate().StartFixtureRuns(ctx, d.OrgID, d.UserID, wf, fixtures); err != nil {
 			return nil, nil, err
 		}

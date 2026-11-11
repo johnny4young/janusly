@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/johnny4young/janusly/internal/authoring"
@@ -195,10 +195,13 @@ func StaticChecks(wf *domain.Workflow, document map[string]any, fixtures []Fixtu
 			code, fix = "credential_missing", "Ask a person to create the credential; credentials.request returns the link."
 		}
 		message := fmt.Sprintf("%s %q is not available in this organization", missing.Kind, missing.Requested)
+		if missing.Requested == "" {
+			message = fmt.Sprintf("%s is incomplete: %s", missing.Field, missing.Reason)
+		}
 		if len(missing.Alternatives) > 0 {
 			fix += " Closest: " + strings.Join(missing.Alternatives, ", ") + "."
 		}
-		checks = append(checks, failed(code, nodePath(missing.NodeID)+"/config/"+missing.Field, message, fix))
+		checks = append(checks, failed(code, nodePath(missing.NodeID)+"/"+strings.ReplaceAll(missing.Field, ".", "/"), message, fix))
 	}
 	if len(checks) == 0 {
 		checks = append(checks, Check{Code: "static", Status: "passed", Message: "structure, readiness, contracts, credentials and literals passed"})
@@ -267,12 +270,7 @@ func secretLiteralPaths(value any, path string) []string {
 }
 
 func sortedKeys[V any](values map[string]V) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(values))
 }
 
 // Step classes for the gate. Logic and person steps reach nothing outside the

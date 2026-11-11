@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -59,6 +60,8 @@ type Deps struct {
 	Transport string
 	// WebBaseURL prefixes the links tools hand to people.
 	WebBaseURL string
+	// Logger records internal tool failures; nil uses slog.Default().
+	Logger *slog.Logger
 
 	actor *callActor
 }
