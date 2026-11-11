@@ -512,6 +512,8 @@ function useWorkflowsDashboardController({
             ? { ...w, status: prior.status, pausedReason: prior.pausedReason }
             : w)),
         )
+        // A refused resume can still move a manual pause to an upstream pause.
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
         addToast(tApiError(err) || t('workflowsDashboard.resumeFailed'), 'error')
       } finally {
         recoveryBusyRef.current.delete(workflowId)
