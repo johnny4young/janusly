@@ -15,7 +15,7 @@ import (
 
 const listPendingToolApprovalRequesters = `-- name: ListPendingToolApprovalRequesters :many
 SELECT node_id, requester_ids FROM tool_approval_requests
-WHERE org_id = $1 AND run_id = $2 AND status = 'pending' AND consumed_at IS NULL
+WHERE org_id = $1 AND run_id = $2 AND status = 'pending' AND consumed_at IS NULL AND expires_at > now()
 `
 
 type ListPendingToolApprovalRequestersParams struct {
@@ -53,9 +53,18 @@ SELECT t.id, t.run_id, t.node_id, t.tool, t.requester_ids, t.expires_at, coalesc
 FROM tool_approval_requests t
 JOIN runs r ON r.id = t.run_id AND r.org_id = t.org_id
 WHERE t.org_id = $1 AND t.status = 'pending' AND t.consumed_at IS NULL AND t.expires_at > now()
+  AND $2::text <> ALL (t.requester_ids)
+  AND r.status = 'running' AND r.replay_mode IS NULL
+  AND EXISTS (SELECT 1 FROM run_nodes rn WHERE rn.org_id = t.org_id AND rn.run_id = t.run_id AND rn.node_id = t.node_id
+              AND rn.status = 'waiting' AND rn.state_json #>> '{waiting,kind}' = 'tool_approval')
 ORDER BY t.created_at
 LIMIT 50
 `
+
+type ListPendingToolApprovalsForOrgParams struct {
+	OrgID  string
+	Viewer string
+}
 
 type ListPendingToolApprovalsForOrgRow struct {
 	ID           string
@@ -67,8 +76,8 @@ type ListPendingToolApprovalsForOrgRow struct {
 	WorkflowID   string
 }
 
-func (q *Queries) ListPendingToolApprovalsForOrg(ctx context.Context, orgID string) ([]ListPendingToolApprovalsForOrgRow, error) {
-	rows, err := q.db.Query(ctx, listPendingToolApprovalsForOrg, orgID)
+func (q *Queries) ListPendingToolApprovalsForOrg(ctx context.Context, arg ListPendingToolApprovalsForOrgParams) ([]ListPendingToolApprovalsForOrgRow, error) {
+	rows, err := q.db.Query(ctx, listPendingToolApprovalsForOrg, arg.OrgID, arg.Viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -96,16 +105,20 @@ func (q *Queries) ListPendingToolApprovalsForOrg(ctx context.Context, orgID stri
 }
 
 const listRunAgentEvents = `-- name: ListRunAgentEvents :many
-SELECT coalesce(node_id, '')::text AS node_id, type, payload, created_at
-FROM run_events
-WHERE org_id = $1 AND run_id = $2 AND (type LIKE 'agent.%' OR type LIKE 'multi_agent.%')
+SELECT node_id, type, payload, created_at FROM (
+  SELECT coalesce(node_id, '')::text AS node_id, type, payload, created_at, seq,
+         row_number() OVER (PARTITION BY node_id ORDER BY seq DESC) AS recent
+  FROM run_events
+  WHERE org_id = $1 AND run_id = $2 AND (type LIKE 'agent.%' OR type LIKE 'multi_agent.%')
+) events
+WHERE recent <= $3::int
 ORDER BY seq
-LIMIT 500
 `
 
 type ListRunAgentEventsParams struct {
-	OrgID string
-	RunID string
+	OrgID   string
+	RunID   string
+	PerNode int32
 }
 
 type ListRunAgentEventsRow struct {
@@ -115,8 +128,9 @@ type ListRunAgentEventsRow struct {
 	CreatedAt *time.Time
 }
 
+// The latest events of each agent node, so one busy node cannot hide another's lane.
 func (q *Queries) ListRunAgentEvents(ctx context.Context, arg ListRunAgentEventsParams) ([]ListRunAgentEventsRow, error) {
-	rows, err := q.db.Query(ctx, listRunAgentEvents, arg.OrgID, arg.RunID)
+	rows, err := q.db.Query(ctx, listRunAgentEvents, arg.OrgID, arg.RunID, arg.PerNode)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +155,8 @@ func (q *Queries) ListRunAgentEvents(ctx context.Context, arg ListRunAgentEvents
 }
 
 const listRunMapNodes = `-- name: ListRunMapNodes :many
-SELECT node_id, status, coalesce(attempts, 0)::int AS attempts, started_at, finished_at, state_json
+SELECT node_id, status, coalesce(attempts, 0)::int AS attempts, started_at, finished_at, state_json,
+       coalesce(error_json->>'childRunId', '')::text AS failed_child_run_id
 FROM run_nodes
 WHERE org_id = $1 AND run_id = $2
 ORDER BY node_id
@@ -153,12 +168,13 @@ type ListRunMapNodesParams struct {
 }
 
 type ListRunMapNodesRow struct {
-	NodeID     string
-	Status     string
-	Attempts   int32
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	StateJson  json.RawMessage
+	NodeID           string
+	Status           string
+	Attempts         int32
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	StateJson        json.RawMessage
+	FailedChildRunID string
 }
 
 func (q *Queries) ListRunMapNodes(ctx context.Context, arg ListRunMapNodesParams) ([]ListRunMapNodesRow, error) {
@@ -177,6 +193,7 @@ func (q *Queries) ListRunMapNodes(ctx context.Context, arg ListRunMapNodesParams
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.StateJson,
+			&i.FailedChildRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -190,10 +207,12 @@ func (q *Queries) ListRunMapNodes(ctx context.Context, arg ListRunMapNodesParams
 
 const listRunNodeCosts = `-- name: ListRunNodeCosts :many
 SELECT coalesce(metadata->>'nodeId', '')::text AS node_id,
-       coalesce(sum((metadata->>'costUsd')::numeric), 0)::float8 AS cost_usd,
+       coalesce(sum(greatest((metadata->>'costUsd')::double precision, 0))
+         FILTER (WHERE jsonb_typeof(metadata->'costUsd') = 'number'), 0)::float8 AS cost_usd,
        coalesce(sum(quantity), 0)::bigint AS tokens
 FROM usage_events
 WHERE org_id = $1 AND run_id = $2 AND metric = 'llm.completion'
+  AND metadata->'providerSimulated' IS DISTINCT FROM 'true'::jsonb
 GROUP BY 1
 `
 
@@ -290,7 +309,9 @@ SELECT rn.run_id, rn.node_id, rn.started_at, coalesce(rn.state_json->'waiting'->
 FROM run_nodes rn
 JOIN runs r ON r.org_id = rn.org_id AND r.id = rn.run_id
 WHERE rn.org_id = $1 AND rn.status = 'waiting' AND r.status = 'running' AND r.replay_mode IS NULL
-  AND rn.state_json->'waiting'->>'kind' IN ('approval', 'human_form')
+  AND (rn.state_json->'waiting'->>'kind' = 'approval'
+       OR (rn.state_json->'waiting'->>'kind' = 'human_form'
+           AND (rn.state_json->'waiting'->>'resumeTokenExpiresAt')::timestamptz > now()))
 ORDER BY rn.started_at NULLS LAST
 LIMIT 50
 `
