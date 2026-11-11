@@ -171,7 +171,26 @@ describe('run map identity isolation', () => {
     expect(mapCalls()).toBe(2)
     await act(async () => { release(runMap('late-private-run')) })
     await flush()
+    view.rerender()
     expect(view.result.current).toBeNull()
+    const later = renderHook(() => useRunMap('late-private-run'))
+    expect(later.result.current).toBeNull()
+    later.unmount()
+    view.unmount()
+  })
+
+  it('does not refetch a retired feed when a queued reload finishes', async () => {
+    act(() => identity('user-a', 'org-a'))
+    let release: (value: RunMap) => void = () => undefined
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => useRunMap('queued-run'))
+    refreshRunMap('queued-run')
+    vi.mocked(api).mockImplementation(() => new Promise(() => undefined))
+    act(() => identity('user-a', 'org-b'))
+    const calls = mapCalls()
+    await act(async () => { release(runMap('queued-run')) })
+    await flush()
+    expect(mapCalls()).toBe(calls)
     view.unmount()
   })
 

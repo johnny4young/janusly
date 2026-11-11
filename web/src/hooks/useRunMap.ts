@@ -34,9 +34,9 @@ type Feed = {
 const feeds = new Map<string, Feed>()
 let lastSnapshot: RunMapSnapshot | null = null
 
-function identityKey(): string {
-  const { userId, orgId } = useWorkflowStore.getState()
-  return JSON.stringify([userId, orgId])
+function isCurrentIdentity(userId: string | null, orgId: string | null): boolean {
+  const state = useWorkflowStore.getState()
+  return state.userId === userId && state.orgId === orgId
 }
 
 // Cached maps contain tenant facts and viewer-specific decisions. Retire
@@ -139,11 +139,15 @@ export function refreshRunMap(runId: string) {
 const noop = () => undefined
 
 export function useRunMap(runId: string | null | undefined): RunMapSnapshot | null {
-  const identity = useWorkflowStore(state => JSON.stringify([state.userId, state.orgId]))
+  const userId = useWorkflowStore(state => state.userId)
+  const orgId = useWorkflowStore(state => state.orgId)
   const subscribe = useCallback(
-    (listener: () => void) => (runId && identity === identityKey() ? subscribeRunMap(runId, listener) : noop),
-    [identity, runId],
+    (listener: () => void) => (runId && isCurrentIdentity(userId, orgId) ? subscribeRunMap(runId, listener) : noop),
+    [orgId, runId, userId],
   )
-  const read = useCallback(() => (runId && identity === identityKey() ? readRunMap(runId) : null), [identity, runId])
+  const read = useCallback(
+    () => (runId && isCurrentIdentity(userId, orgId) ? readRunMap(runId) : null),
+    [orgId, runId, userId],
+  )
   return useSyncExternalStore(subscribe, read, read)
 }
