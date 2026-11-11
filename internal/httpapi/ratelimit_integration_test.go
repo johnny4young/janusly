@@ -35,10 +35,10 @@ func frozenRateLimitClock(options V1ServerOptions) V1ServerOptions {
 	return options
 }
 
-func frozenClockHarness(t *testing.T) *apiHarness {
+func frozenClockHarness(t *testing.T, startWorkers bool) *apiHarness {
 	options := defaultV1ServerOptionsForTest()
 	options.Logger = quietTestLogger()
-	return newAPIHarnessWithOptions(t, false, frozenRateLimitClock(options))
+	return newAPIHarnessWithOptions(t, startWorkers, frozenRateLimitClock(options))
 }
 
 func countRows(t *testing.T, table string) int64 {
@@ -59,7 +59,7 @@ func countRows(t *testing.T, table string) int64 {
 // an unauthenticated caller could fill the table. The bucket now trips before
 // the handler touches storage.
 func TestSsoStartIsRateLimitedPerIP(t *testing.T) {
-	h := frozenClockHarness(t)
+	h := frozenClockHarness(t, false)
 	resetRateWindow(t, ssoStartLimit.Name)
 	path := "/auth/sso/start?orgId=" + h.org
 	for i := 0; i < ssoStartLimit.Max; i++ {
@@ -104,7 +104,7 @@ func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
 // The public status page is unauthenticated; the IP bucket keeps a token
 // scan from turning into three queries per request forever.
 func TestPublicStatusPageIsRateLimitedPerIP(t *testing.T) {
-	h := frozenClockHarness(t)
+	h := frozenClockHarness(t, false)
 	resetRateWindow(t, publicStatusPageLimit.Name)
 	path := "/public/status/" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	for i := 0; i < publicStatusPageLimit.Max; i++ {

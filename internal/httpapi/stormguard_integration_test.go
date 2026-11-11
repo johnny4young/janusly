@@ -12,9 +12,7 @@ import (
 // audits trigger.event.skipped, and answers 429 with the contract's
 // exact body — while a distinct trigger keeps its own budget.
 func TestWebhookStormGuardSkipsOverLimit(t *testing.T) {
-	options := defaultV1ServerOptionsForTest()
-	options.Logger = quietTestLogger()
-	h := newAPIHarnessWithOptions(t, true, frozenRateLimitClock(options))
+	h := frozenClockHarness(t, true)
 	pool := testPool(t)
 	wfID := "wf-storm-" + h.org
 
