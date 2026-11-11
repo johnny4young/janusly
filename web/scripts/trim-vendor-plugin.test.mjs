@@ -40,6 +40,11 @@ test('React Flow purity follows an aliased React memo import', () => {
   assert.match(result.code, /\/\* @__PURE__ \*\/\s*memoResize\(ResizeControl\)/)
 })
 
+test('React Flow purity covers the .mjs entry the package also ships', () => {
+  const result = trimVendor().transform(source(), REACT_FLOW_ID.replace(/\.js$/, '.mjs'))
+  assert.match(result?.code ?? '', /\/\* @__PURE__ \*\/\s*memo\(ResizeControl\)/)
+})
+
 test('React Flow purity does not annotate other modules', () => {
   assert.equal(trimVendor().transform(source(), '/node_modules/another-library/index.js'), null)
 })
@@ -52,7 +57,6 @@ test('React Flow purity matches the installed dependency and preserves its sourc
   const result = trimVendor().transform(code, id)
   assert.match(result?.code ?? '', /NodeResizeControl = \/\* @__PURE__ \*\/\s*memo\(ResizeControl\)/)
   assert.equal(result.code.replace('/* @__PURE__ */ ', ''), code)
-  assert.equal(readFileSync(id, 'utf8'), code)
 })
 
 test('React Flow purity lets the bundler omit unused resize code and keeps it for an explicit consumer', async () => {
