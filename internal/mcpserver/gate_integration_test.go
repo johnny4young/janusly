@@ -240,6 +240,18 @@ func TestAgentPublishesThroughTheGate(t *testing.T) {
 	if status, body := decide(tenant.creator, freshRequest, "approve"); status != http.StatusForbidden {
 		t.Fatalf("the creator approved alone despite the setting: %d %v", status, body)
 	}
+	setPolicy := func(value string) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), `UPDATE org_configs SET value_json = $3::jsonb WHERE org_id = $1 AND key = $2`,
+			tenant.org, publishrequests.SecondPersonKey, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPolicy(`"yes"`)
+	if status, body := decide(reviewer, freshRequest, "approve"); status != http.StatusServiceUnavailable {
+		t.Fatalf("an unreadable second-person setting allowed an approval: %d %v", status, body)
+	}
+	setPolicy(`true`)
 	if status, body := decide(reviewer, freshRequest, "reject"); status != http.StatusOK || body["request"].(map[string]any)["status"] != "rejected" {
 		t.Fatalf("a second person's rejection: %d %v", status, body)
 	}

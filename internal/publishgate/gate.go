@@ -83,6 +83,12 @@ func (g Gate) StartFixtureRuns(ctx context.Context, orgID, actor string, wf *dom
 				runs = append(runs, FixtureRun{Fixture: fixture.Name, Status: "failed", Detail: rejection.Code + ": " + rejection.Message})
 				continue
 			}
+			// No receipt will judge the runs already started, so stop them.
+			for _, run := range runs {
+				if run.RunID != "" {
+					_ = g.Engine.CancelRun(context.WithoutCancel(ctx), run.RunID, "fixture run abandoned")
+				}
+			}
 			return nil, err
 		}
 		runs = append(runs, FixtureRun{Fixture: fixture.Name, RunID: started.RunID, Status: "running"})
@@ -300,6 +306,15 @@ func (g Gate) Publish(ctx context.Context, in PublishInput) (engine.SaveWorkflow
 	if err != nil {
 		return engine.SaveWorkflowVersionResult{}, err
 	}
+	// Tag first: a version saved without its tag would leave the new
+	// workflow outside the drafting client's scope.
+	if in.Tag != "" {
+		if err := store.New(g.Pool).TagWorkflowIfUntagged(ctx, store.TagWorkflowIfUntaggedParams{
+			ID: g.NewID(), OrgID: in.OrgID, WorkflowID: wf.ID, Tag: in.Tag,
+		}); err != nil {
+			return engine.SaveWorkflowVersionResult{}, err
+		}
+	}
 	base := in.Draft.BaseVersionID.String
 	saved, err := g.Engine.SaveWorkflowVersion(ctx, engine.SaveWorkflowVersionInput{
 		OrgID: in.OrgID, UserID: in.Actor, Workflow: wf, NewID: g.NewID, ExpectedBaseVersionID: &base,
@@ -307,17 +322,7 @@ func (g Gate) Publish(ctx context.Context, in PublishInput) (engine.SaveWorkflow
 	if errors.Is(err, engine.ErrWorkflowSaveBaseMoved) {
 		return saved, ErrStaleBase
 	}
-	if err != nil {
-		return saved, err
-	}
-	if in.Tag != "" {
-		if err := store.New(g.Pool).TagWorkflowIfUntagged(ctx, store.TagWorkflowIfUntaggedParams{
-			ID: g.NewID(), OrgID: in.OrgID, WorkflowID: wf.ID, Tag: in.Tag,
-		}); err != nil {
-			return saved, err
-		}
-	}
-	return saved, nil
+	return saved, err
 }
 
 // OptionalText maps an empty string to NULL.
