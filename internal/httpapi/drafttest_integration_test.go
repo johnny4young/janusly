@@ -331,7 +331,7 @@ func TestDraftTestKeepsTheStartGates(t *testing.T) {
 	t.Run("the start rate limit applies", func(t *testing.T) {
 		options := defaultV1ServerOptionsForTest()
 		options.StartRateLimitPerMinute = 2
-		h := newAPIHarnessWithOptions(t, false, options)
+		h := newAPIHarnessWithOptions(t, false, frozenRateLimitClock(options))
 		for range 2 {
 			if res := h.call("POST", "/runs/draft-test", map[string]any{}, ""); res.status == http.StatusTooManyRequests {
 				t.Fatal("tripped early")

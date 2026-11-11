@@ -383,7 +383,7 @@ func TestGenerateWorkflowBestOfNReadmitsEveryProviderCall(t *testing.T) {
 }
 
 func TestGenerateWorkflowBestOfNReadmitsEveryCallToRateLimit(t *testing.T) {
-	h := newAPIHarness(t)
+	h := frozenClockHarness(t, true)
 	pool := testPool(t)
 
 	var calls atomic.Int64

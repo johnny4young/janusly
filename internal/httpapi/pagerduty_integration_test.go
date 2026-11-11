@@ -343,7 +343,10 @@ func TestPagerDutySignedV3Flow(t *testing.T) {
 // event as rate_limited and every lock waiter must converge to that row instead
 // of interpreting `status != received` as admission.
 func TestPagerDutyConcurrentRateLimitSettlementNeverStartsRun(t *testing.T) {
-	h := newAPIHarness(t)
+	options := defaultV1ServerOptionsForTest()
+	options.Logger = quietTestLogger()
+	options = frozenRateLimitClock(options)
+	h := newAPIHarnessWithOptions(t, true, options)
 	pool := testPool(t)
 	secretstore.ResetForTests()
 	t.Cleanup(secretstore.ResetForTests)
@@ -377,10 +380,10 @@ func TestPagerDutyConcurrentRateLimitSettlementNeverStartsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	bucket := "trigger." + versionID + ".on_pagerduty"
+	window := options.rateLimitNow().Truncate(time.Minute)
 	if _, err := pool.Exec(t.Context(), `INSERT INTO rate_limit_windows
-		(name,key,window_start,count,expires_at)
-		VALUES ($1,$2,date_trunc('minute',now()),1,date_trunc('minute',now())+interval '1 minute')`,
-		bucket, h.org); err != nil {
+		(name,key,window_start,count,expires_at) VALUES ($1,$2,$3,1,$4)`,
+		bucket, h.org, window, window.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
