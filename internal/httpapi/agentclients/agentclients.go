@@ -53,9 +53,11 @@ func Mount(mux *http.ServeMux, deps Deps) {
 		httpkit.WriteUnversioned(w, s.list(r, rc))
 	})
 	deps.Routes.Route(mux, "POST /agent-clients", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		httpkit.WriteUnversioned(w, s.create(r, rc))
 	})
 	deps.Routes.Route(mux, "POST /agent-clients/{id}/rotate", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		httpkit.WriteUnversioned(w, s.rotate(r, rc))
 	})
 	deps.Routes.Route(mux, "POST /agent-clients/{id}/revoke", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
@@ -66,7 +68,7 @@ func Mount(mux *http.ServeMux, deps Deps) {
 // requirePerson refuses automation: a service token has no person to act
 // for, so it can neither own nor manage an agent client.
 func requirePerson(rc httpkit.Request) *httpkit.Result {
-	if rc.Auth == nil || rc.Auth.Mode == auth.ModeServiceToken || rc.Auth.Mode == auth.ModeAgent {
+	if rc.Auth == nil || !auth.IsPersonMode(rc.Auth.Mode) {
 		result := httpkit.Error(http.StatusForbidden, "person_required", "agent clients are managed by a signed-in person", nil)
 		return &result
 	}
