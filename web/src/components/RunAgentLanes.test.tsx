@@ -54,4 +54,10 @@ describe('<RunAgentLanes />', () => {
     render(<RunAgentLanes runId="run-empty" />)
     expect(await screen.findByTestId('run-agent-lanes-empty')).toHaveTextContent('Esta ejecución no tiene pasos de agentes.')
   })
+
+  it('says the read failed instead of loading forever', async () => {
+    vi.mocked(api).mockRejectedValue(new Error('forbidden'))
+    render(<RunAgentLanes runId="run-denied" />)
+    expect(await screen.findByTestId('run-agent-lanes-failed')).toBeVisible()
+  })
 })

@@ -173,16 +173,21 @@ func (s *service) nodeView(node store.ListRunMapNodesRow, nodeType string, cost 
 		} `json:"subworkflow"`
 	}
 	_ = json.Unmarshal(node.StateJson, &state)
+	// A redriven or reclaimed step keeps its previous attempt's finished_at.
+	finishedAt := node.FinishedAt
+	if slices.Contains([]string{"pending", "queued", "running", "waiting"}, node.Status) {
+		finishedAt = nil
+	}
 	view := map[string]any{
 		"nodeId": node.NodeID, "type": nodeType, "status": node.Status, "attempts": node.Attempts,
-		"startedAt": optionalTime(node.StartedAt), "finishedAt": optionalTime(node.FinishedAt),
+		"startedAt": optionalTime(node.StartedAt), "finishedAt": optionalTime(finishedAt),
 		"elapsedMs": nil, "costUsd": cost.CostUsd, "tokens": cost.Tokens,
 		"stuck": false, "needsYou": false, "waitingKind": nil, "childRunId": nil,
 	}
 	if node.StartedAt != nil {
 		end := now
-		if node.FinishedAt != nil {
-			end = *node.FinishedAt
+		if finishedAt != nil {
+			end = *finishedAt
 		}
 		elapsed := end.Sub(*node.StartedAt)
 		view["elapsedMs"] = elapsed.Milliseconds()
@@ -269,6 +274,12 @@ func laneStep(event store.ListRunAgentEventsRow) map[string]any {
 	for _, key := range []string{"tool", "status", "agent", "name"} {
 		if value, ok := payload[key].(string); ok && value != "" {
 			step[key] = value
+		}
+	}
+	// A planned step names its tool inside the plan.
+	if plan, ok := payload["plan"].(map[string]any); ok && step["tool"] == nil {
+		if tool, ok := plan["tool"].(string); ok && tool != "" {
+			step["tool"] = tool
 		}
 	}
 	for _, key := range []string{"iteration", "index"} {

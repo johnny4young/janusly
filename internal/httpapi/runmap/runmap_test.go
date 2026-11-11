@@ -73,4 +73,19 @@ func TestLaneStepKeepsOnlyTypedFields(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("laneStep = %#v, want %#v", got, want)
 	}
+	planned := laneStep(store.ListRunAgentEventsRow{Type: "agent.step.planned",
+		Payload: []byte(`{"agent":"a","iteration":0,"plan":{"tool":"crm.lookup","input":{"secret":"x"}}}`)})
+	if planned["tool"] != "crm.lookup" || planned["plan"] != nil || planned["input"] != nil {
+		t.Fatalf("planned step must name only its tool: %#v", planned)
+	}
+}
+
+func TestNodeViewIgnoresAPreviousAttemptsFinish(t *testing.T) {
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	started, finished := now.Add(-40*time.Minute), now.Add(-time.Hour)
+	view := (&service{}).nodeView(store.ListRunMapNodesRow{NodeID: "n", Status: "running", StartedAt: &started, FinishedAt: &finished},
+		"http", store.ListRunNodeCostsRow{}, nil, nil, nil, "viewer", now)
+	if view["finishedAt"] != nil || view["elapsedMs"] != (40*time.Minute).Milliseconds() || view["stuck"] != true {
+		t.Fatalf("redriven running step: %v", view)
+	}
 }

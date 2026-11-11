@@ -3225,6 +3225,7 @@
   "runWorkspace.openFullTimeline": "Abrir cronología completa",
   "runWorkspace.openFullAgents": "Abrir vista completa de agentes",
   "runWorkspace.lanes.empty": "Esta ejecución no tiene pasos de agentes.",
+  "runWorkspace.lanes.loadFailed": "No se pudieron cargar los pasos de agentes",
   "runWorkspace.lanes.kind.agent": "Agente",
   "runWorkspace.lanes.kind.multi_agent": "Equipo de agentes",
   "runWorkspace.lanes.team": "Equipo",

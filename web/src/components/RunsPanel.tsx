@@ -56,7 +56,7 @@ export type RunsPanelProps = {
   activeRunId?: string | null
   onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
-  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void
+  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void | Promise<void>
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
   onRedriveNode: (nodeId: string) => void

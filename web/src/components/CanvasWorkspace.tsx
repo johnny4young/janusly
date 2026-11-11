@@ -60,7 +60,8 @@ function useEditorRunMapNodes(nodes: WorkflowGraphNode[], active: boolean): Work
   const runDetail = useWorkflowStore(state => state.runDetail)
   const runNodes = useWorkflowStore(state => state.runNodes)
   const workflowId = useWorkflowStore(state => state.currentWorkflowId)
-  const run = runDetail && runDetail.id === runId && getRunWorkflowIdentity(runDetail).id === workflowId ? runDetail : null
+  const runWorkflowId = runDetail?.id === runId ? getRunWorkflowIdentity(runDetail).id : null
+  const run = runDetail && runWorkflowId !== null && runWorkflowId === workflowId ? runDetail : null
   const snapshot = useRunMap(active && run ? run.id : null)
   const overlays = useMemo(
     () => (run ? projectRunMapOverlays(snapshot, runNodes, run, false) : NO_OVERLAYS),
@@ -102,16 +103,16 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
 }) {
   const { t } = useT()
   const runId = run.id
-  const snapshot = useRunMap(runId)
+  const graph = useMemo(() => {
+    const snapshot = getRunWorkflowSnapshot(run.inputJson)
+    return snapshot ? workflowToGraph(snapshot) : null
+  }, [run.inputJson])
+  const snapshot = useRunMap(graph ? runId : null)
   const canStartRuns = permissions.includes('runs.start')
   const overlays = useMemo(
     () => projectRunMapOverlays(snapshot, runNodes, run, canStartRuns),
     [canStartRuns, run, runNodes, snapshot],
   )
-  const graph = useMemo(() => {
-    const snapshot = getRunWorkflowSnapshot(run.inputJson)
-    return snapshot ? workflowToGraph(snapshot) : null
-  }, [run.inputJson])
   const nodes = useMemo(
     () => {
       if (!graph) return []
@@ -142,7 +143,11 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
   const [pendingNodeId, setPendingNodeId] = useState<string | null>(null)
   const [form, setForm] = useState<{ nodeId: string; errors: string[]; submitting: boolean } | null>(null)
   const [rerunNodeId, setRerunNodeId] = useState<string | null>(null)
-  const actions = useMemo<RunMapActions | null>(() => execution ? {
+  // App rebuilds `execution` every render; depend on its stable callbacks only.
+  const onApproveNode = execution?.onApproveNode
+  const onSubmitHumanForm = execution?.onSubmitHumanForm
+  const onOpenRun = execution?.onOpenRun
+  const actions = useMemo<RunMapActions | null>(() => onApproveNode && onOpenRun ? {
     pendingNodeId,
     decide: (nodeId, choice) => {
       const decision = overlays.get(nodeId)?.decision
@@ -151,15 +156,15 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
       const toolDecision = decision.kind === 'tool_approval'
         ? { approvalId: decision.approvalId, paramsDigest: decision.paramsDigest, decision: choice }
         : undefined
-      void Promise.resolve(execution.onApproveNode(nodeId, toolDecision) as unknown).finally(() => {
+      void Promise.resolve(onApproveNode(nodeId, toolDecision)).finally(() => {
         setPendingNodeId(current => (current === nodeId ? null : current))
         refreshRunMap(runId)
       })
     },
     openForm: nodeId => setForm({ nodeId, errors: [], submitting: false }),
     rerun: setRerunNodeId,
-    openRun: (childRunId) => { void execution.onOpenRun(childRunId) },
-  } : null, [execution, overlays, pendingNodeId, runId])
+    openRun: (childRunId) => { void onOpenRun(childRunId) },
+  } : null, [onApproveNode, onOpenRun, overlays, pendingNodeId, runId])
   const summary = useMemo(
     () => snapshot && <RunMapTotals map={snapshot.map} overlays={overlays} />,
     [overlays, snapshot],
@@ -189,7 +194,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
         </ReactFlowProvider>
       </section>
       <div className="run-observation-panel">{panel}</div>
-      {execution && form && formWaiting && (
+      {onSubmitHumanForm && form && formWaiting && (
         <Suspense fallback={null}>
           <HumanFormDialog
             key={form.nodeId}
@@ -201,10 +206,16 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
             submitting={form.submitting}
             onCancel={() => setForm(null)}
             onSubmit={async (input) => {
-              setForm({ ...form, errors: [], submitting: true })
-              const errors = await execution.onSubmitHumanForm(form.nodeId, input, formWaiting.resumeToken)
-              refreshRunMap(runId)
-              setForm(errors && errors.length > 0 ? { ...form, errors, submitting: false } : null)
+              const { nodeId } = form
+              setForm({ nodeId, errors: [], submitting: true })
+              let errors: string[] | undefined
+              try {
+                errors = await onSubmitHumanForm(nodeId, input, formWaiting.resumeToken)
+              } finally {
+                refreshRunMap(runId)
+                // A cancel during the submit closed the dialog; keep it closed.
+                setForm(current => current?.nodeId !== nodeId ? current : errors && errors.length > 0 ? { nodeId, errors, submitting: false } : null)
+              }
             }}
           />
         </Suspense>

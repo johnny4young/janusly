@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { laneStepLabel, liveElapsedMs, projectAgentLanes, projectRunMapOverlays, type RunMap, type RunMapSnapshot } from './run-map'
+import { formatRunCost, laneStepLabel, liveElapsedMs, projectAgentLanes, projectRunMapOverlays, type RunMap, type RunMapSnapshot } from './run-map'
 import type { RunNode } from './types'
 
 type MapNode = RunMap['nodes'][number]
@@ -105,6 +105,7 @@ describe('projectAgentLanes', () => {
         { type: 'multi_agent.agent.started', at: null, name: 'researcher', index: 0 },
         { type: 'multi_agent.agent.0.started', at: null, agent: 'researcher' },
         { type: 'multi_agent.agent.0.tool.started', at: null, agent: 'researcher', tool: 'search' },
+        { type: 'agent.reasoning', at: null, agent: 'researcher' },
         { type: 'multi_agent.agent.failed', at: null, name: 'writer', index: 1, status: 'failed' },
         { type: 'multi_agent.completed', at: null },
       ] },
@@ -112,8 +113,9 @@ describe('projectAgentLanes', () => {
     expect(lanes[0]).toMatchObject({ nodeId: 'think', kind: 'agent', stepCount: 3 })
     expect(lanes[0]!.tracks).toHaveLength(1)
     expect(lanes[0]!.tracks[0]!.steps.map(view => view.tone)).toEqual(['info', 'tool', 'success'])
-    expect(lanes[1]!.stepCount).toBe(5)
+    expect(lanes[1]!.stepCount).toBe(6)
     expect(lanes[1]!.tracks.map(track => track.agent)).toEqual([null, 'researcher', 'writer'])
+    expect(lanes[1]!.tracks[1]!.steps.map(view => view.step.type)).toContain('agent.reasoning')
     expect(lanes[1]!.tracks[2]!.steps[0]!.tone).toBe('error')
   })
 
@@ -124,5 +126,12 @@ describe('projectAgentLanes', () => {
     expect(laneStepLabel({ type: 'multi_agent.agent.completed', at: null, name: 'writer' })).toEqual({ key: 'multiAgent.agentCompleted', params: { name: 'writer' } })
     expect(laneStepLabel({ type: 'agent.memory.recalled', at: null }).key).toBe('runWorkspace.lanes.step.memory')
     expect(laneStepLabel({ type: 'agent.custom', at: null })).toEqual({ key: 'runWorkspace.lanes.step.other', params: { type: 'agent.custom' } })
+  })
+})
+
+describe('formatRunCost', () => {
+  it('keeps two significant digits for small costs without rounding away dollars', () => {
+    expect(formatRunCost(0.0125, 'en')).toBe('$0.013')
+    expect(formatRunCost(1234.56, 'en')).toBe('$1,234.56')
   })
 })

@@ -88,7 +88,10 @@ export function liveElapsedMs(overlay: Pick<RunMapNodeOverlay, 'elapsedMs' | 'li
 }
 
 export function formatRunCost(usd: number, locale: string): string {
-  return usd.toLocaleString(locale, { style: 'currency', currency: 'USD', maximumSignificantDigits: 2 })
+  // Two significant digits for cents-scale costs, never fewer than whole cents.
+  return usd.toLocaleString(locale, {
+    style: 'currency', currency: 'USD', maximumSignificantDigits: 2, maximumFractionDigits: 2, roundingPriority: 'morePrecision',
+  })
 }
 
 export function formatTokenCount(tokens: number, locale: string): string {
@@ -144,7 +147,9 @@ export function projectAgentLanes(lanes: readonly RunMapLane[]): AgentLaneView[]
     let stepCount = 0
     lane.steps.forEach((step, index) => {
       if (INNER_LIFECYCLE.test(step.type)) return
-      const agent = lane.kind === 'multi_agent' && step.type.startsWith('multi_agent.agent') ? laneAgent(step) ?? null : null
+      // Crew agents also emit unprefixed `agent.*` steps (reasoning) under their name.
+      const perAgent = step.type.startsWith('multi_agent.agent') || step.type.startsWith('agent.')
+      const agent = lane.kind === 'multi_agent' && perAgent ? laneAgent(step) ?? null : null
       const track = tracks.get(agent) ?? []
       track.push({ key: `${index}:${step.type}`, step, label: laneStepLabel(step), tone: laneTone(step) })
       tracks.set(agent, track)

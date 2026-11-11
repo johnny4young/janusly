@@ -85,7 +85,7 @@ describe('run map node overlay', () => {
     ])
     render(<RunMapTotals map={map} overlays={overlays} />)
     const totals = screen.getByTestId('run-map-totals')
-    expect(within(totals).getByText('$1.5')).toBeVisible()
+    expect(within(totals).getByText('$1.50')).toBeVisible()
     expect(within(totals).getByText('12.4K')).toBeVisible()
     expect(screen.getByTestId('run-map-stuck-count')).toHaveTextContent('1 stuck')
     expect(screen.getByRole('status')).toHaveTextContent('2 need you')

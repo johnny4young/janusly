@@ -23,6 +23,7 @@ type Feed = {
   runId: string
   listeners: Set<() => void>
   snapshot: RunMapSnapshot | null
+  failed: boolean
   inFlight: boolean
   again: boolean
   settle?: ReturnType<typeof setTimeout>
@@ -75,10 +76,15 @@ function load(feed: Feed) {
   }).then((map) => {
     if (feeds.get(feed.runId) !== feed) return
     feed.snapshot = { runId: feed.runId, map, receivedAt: Date.now() }
+    feed.failed = false
     lastSnapshot = feed.snapshot
     syncTick(feed)
     for (const listener of feed.listeners) listener()
-  }, () => undefined).finally(() => {
+  }, () => {
+    if (feeds.get(feed.runId) !== feed || feed.failed) return
+    feed.failed = true
+    for (const listener of feed.listeners) listener()
+  }).finally(() => {
     feed.inFlight = false
     if (feed.again && feeds.get(feed.runId) === feed) load(feed)
   })
@@ -94,6 +100,7 @@ function openFeed(runId: string): Feed {
     runId,
     listeners: new Set(),
     snapshot: lastSnapshot?.runId === runId ? lastSnapshot : null,
+    failed: false,
     inFlight: false,
     again: false,
     controller: new AbortController(),
@@ -130,6 +137,10 @@ export function readRunMap(runId: string): RunMapSnapshot | null {
   return feeds.get(runId)?.snapshot ?? (lastSnapshot?.runId === runId ? lastSnapshot : null)
 }
 
+function readRunMapFailed(runId: string): boolean {
+  return feeds.get(runId)?.failed ?? false
+}
+
 /** Refetch now, after an action changed the run. */
 export function refreshRunMap(runId: string) {
   const feed = feeds.get(runId)
@@ -138,7 +149,7 @@ export function refreshRunMap(runId: string) {
 
 const noop = () => undefined
 
-export function useRunMap(runId: string | null | undefined): RunMapSnapshot | null {
+function useRunMapFeed<T>(runId: string | null | undefined, select: (runId: string) => T, fallback: T): T {
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
   const subscribe = useCallback(
@@ -146,8 +157,17 @@ export function useRunMap(runId: string | null | undefined): RunMapSnapshot | nu
     [orgId, runId, userId],
   )
   const read = useCallback(
-    () => (runId && isCurrentIdentity(userId, orgId) ? readRunMap(runId) : null),
-    [orgId, runId, userId],
+    () => (runId && isCurrentIdentity(userId, orgId) ? select(runId) : fallback),
+    [fallback, orgId, runId, select, userId],
   )
   return useSyncExternalStore(subscribe, read, read)
+}
+
+export function useRunMap(runId: string | null | undefined): RunMapSnapshot | null {
+  return useRunMapFeed(runId, readRunMap, null)
+}
+
+/** True when the last read failed; the last map, if any, is still shown. */
+export function useRunMapFailed(runId: string | null | undefined): boolean {
+  return useRunMapFeed(runId, readRunMapFailed, false)
 }

@@ -2,7 +2,7 @@ import { useId, useMemo } from 'react'
 import { Activity, CheckCircle2, CircleX, Wrench } from 'lucide-react'
 
 import { formatCompactDuration } from '../constants'
-import { useRunMap } from '../hooks/useRunMap'
+import { useRunMap, useRunMapFailed } from '../hooks/useRunMap'
 import { useT } from '../i18n'
 import { projectAgentLanes, type LaneStepView } from '../run-map'
 import './RunAgentLanes.css'
@@ -19,9 +19,14 @@ export function RunAgentLanes({ runId }: { runId: string }) {
   const { t } = useT()
   const idPrefix = useId()
   const snapshot = useRunMap(runId)
+  const failed = useRunMapFailed(runId)
   const lanes = useMemo(() => projectAgentLanes(snapshot?.map.lanes ?? []), [snapshot])
 
-  if (!snapshot) return <p className="helper-text">{t('common.loading')}</p>
+  if (!snapshot) {
+    return failed
+      ? <p className="we-card helper-text" role="alert" data-testid="run-agent-lanes-failed">{t('runWorkspace.lanes.loadFailed')}</p>
+      : <p className="helper-text">{t('common.loading')}</p>
+  }
   if (lanes.length === 0) {
     return <p className="we-card helper-text" data-testid="run-agent-lanes-empty">{t('runWorkspace.lanes.empty')}</p>
   }
@@ -30,8 +35,8 @@ export function RunAgentLanes({ runId }: { runId: string }) {
     <div className="we-run-lanes" data-testid="run-agent-lanes">
       {lanes.map((lane, laneIndex) => {
         const headingId = `${idPrefix}-${laneIndex}`
-        const first = lane.tracks.flatMap(track => track.steps).find(view => view.step.at)
-        const startMs = first?.step.at ? Date.parse(first.step.at) : Number.NaN
+        const times = lane.tracks.flatMap(track => track.steps).map(view => (view.step.at ? Date.parse(view.step.at) : Number.NaN)).filter(Number.isFinite)
+        const startMs = times.length > 0 ? Math.min(...times) : Number.NaN
         return (
           <section key={lane.nodeId} className="we-card we-run-lane" aria-labelledby={headingId} data-testid={`run-lane-${lane.nodeId}`}>
             <header className="we-run-lane__head">

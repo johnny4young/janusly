@@ -3225,6 +3225,7 @@
   "runWorkspace.openFullTimeline": "Open full timeline",
   "runWorkspace.openFullAgents": "Open full agent view",
   "runWorkspace.lanes.empty": "No agent steps in this run.",
+  "runWorkspace.lanes.loadFailed": "Agent steps failed to load",
   "runWorkspace.lanes.kind.agent": "Agent",
   "runWorkspace.lanes.kind.multi_agent": "Agent team",
   "runWorkspace.lanes.team": "Team",
