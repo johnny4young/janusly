@@ -41,8 +41,8 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 	}
 
 	created := h.callWithHeaders("POST", "/agent-clients", body, "", as("editor"))
-	if created.status != 201 {
-		t.Fatalf("create: %d %v", created.status, created.body)
+	if created.status != 201 || created.headers.Get("Cache-Control") != "no-store" {
+		t.Fatalf("create: %d %v %v", created.status, created.headers, created.body)
 	}
 	token, _ := created.body["token"].(string)
 	client, _ := created.body["client"].(map[string]any)
@@ -67,7 +67,7 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 		}
 	}
 	rotated := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/rotate", map[string]any{"expiresInDays": 3}, "", as("editor"))
-	if rotated.status != 200 || rotated.body["token"] == token || !strings.HasPrefix(fmt.Sprint(rotated.body["token"]), "jly_agent_") {
+	if rotated.status != 200 || rotated.headers.Get("Cache-Control") != "no-store" || rotated.body["token"] == token || !strings.HasPrefix(fmt.Sprint(rotated.body["token"]), "jly_agent_") {
 		t.Fatalf("rotate: %d %v", rotated.status, rotated.body)
 	}
 	if res := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/revoke", nil, "", as("admin")); res.status != 200 ||

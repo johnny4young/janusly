@@ -1120,7 +1120,6 @@
   "workflowsDashboard.emptyReadOnlyHelper": "Este espacio aún no tiene flujos guardados. Un editor puede crear el primero.",
   "workflowsDashboard.openFlow": "Abrir flujo",
   "workflowsDashboard.pauseFlow": "Pausar",
-  "workflowsDashboard.pausedToast": "Workflow pausado",
   "workflowsDashboard.pauseFailed": "No se pudo pausar el workflow",
   "workflowsDashboard.paused": "Pausado",
   "workflowsDashboard.pausedByBreaker": "Cortocircuito",

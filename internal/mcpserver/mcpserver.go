@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -59,6 +60,8 @@ type Deps struct {
 	Transport string
 	// WebBaseURL prefixes the links tools hand to people.
 	WebBaseURL string
+	// Logger records internal tool failures; nil uses slog.Default().
+	Logger *slog.Logger
 
 	actor *callActor
 }
@@ -305,7 +308,7 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		// Agents pass the version they just published; accept it while it is
 		// still the latest, which is what a workflowId start runs.
 		if requestedVersionID != "" && requestedVersionID != latest.versionID {
-			return expected("workflowVersionId is not this workflow's latest version; omit it to run the latest, or use workflows.rollback")
+			return expected("workflowVersionId is not this workflow's latest version; omit it to run the latest, or read the latest with workflows.get")
 		}
 		document, requestedVersionID = latest.document, latest.versionID
 	}

@@ -249,6 +249,9 @@ func TestGateBlocksDefectsAndPassesSoundWorkflows(t *testing.T) {
 			if check.Status == "failed" && (check.Code == "" || check.Message == "") {
 				t.Fatalf("%s: a failed check without code or message: %+v", tc.name, check)
 			}
+			if strings.Contains(check.Path, ".") || strings.Contains(check.Path, "config/config") {
+				t.Errorf("%s: path %q is not a JSON Pointer into the document", tc.name, check.Path)
+			}
 		}
 	}
 	falseBlocks := []string{}

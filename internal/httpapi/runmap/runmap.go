@@ -17,6 +17,7 @@ import (
 
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/httpkit"
+	"github.com/johnny4young/janusly/internal/publishgate"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -105,14 +106,17 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 		totals["tokens"] = totals["tokens"].(int64) + cost.Tokens
 	}
 	typical := s.typicalDurations(r, rc, runID, nodes)
-	permissions := s.deciderPermissions(r, rc)
+	permissions := map[string]bool{}
+	if run.Status == "running" && !run.ReplayMode.Valid {
+		permissions = s.deciderPermissions(r, rc)
+	}
 	pending, err := q.ListPendingToolApprovalRequesters(ctx, store.ListPendingToolApprovalRequestersParams{OrgID: rc.OrgID, RunID: runID})
 	if err != nil {
 		return internalError()
 	}
 	requesters := map[string][]string{}
 	for _, row := range pending {
-		requesters[row.NodeID] = row.RequesterIds
+		requesters[row.NodeID] = append([]string{}, row.RequesterIds...)
 	}
 	now := s.now()
 	views := make([]map[string]any, 0, len(nodes))
@@ -132,6 +136,7 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	})
 }
 
+// typicalDurations holds a median only for steps with history.
 func (s *service) typicalDurations(r *http.Request, rc httpkit.Request, runID string, nodes []store.ListRunMapNodesRow) map[string]float64 {
 	workflowID, err := store.New(s.pool).GetRunWorkflowForOrg(r.Context(), store.GetRunWorkflowForOrgParams{OrgID: rc.OrgID, ID: runID})
 	out := map[string]float64{}
@@ -162,8 +167,10 @@ func (s *service) typicalDurations(r *http.Request, rc httpkit.Request, runID st
 func (s *service) nodeView(node store.ListRunMapNodesRow, nodeType string, cost store.ListRunNodeCostsRow,
 	typical map[string]float64, permissions map[string]bool, requesters []string, viewer string, now time.Time) map[string]any {
 	var state struct {
-		Waiting    map[string]any `json:"waiting"`
-		ChildRunID string         `json:"childRunId"`
+		Waiting     map[string]any `json:"waiting"`
+		Subworkflow struct {
+			ChildRunID string `json:"childRunId"`
+		} `json:"subworkflow"`
 	}
 	_ = json.Unmarshal(node.StateJson, &state)
 	view := map[string]any{
@@ -180,23 +187,26 @@ func (s *service) nodeView(node store.ListRunMapNodesRow, nodeType string, cost 
 		elapsed := end.Sub(*node.StartedAt)
 		view["elapsedMs"] = elapsed.Milliseconds()
 		if node.Status == "running" {
-			view["stuck"] = isStuck(elapsed, typical[node.NodeID])
+			median, ok := typical[node.NodeID]
+			view["stuck"] = isStuck(elapsed, median, ok)
 		}
 	}
 	if kind, _ := state.Waiting["kind"].(string); node.Status == "waiting" && kind != "" {
 		view["waitingKind"] = kind
-		view["needsYou"] = canDecide(kind, permissions, requesters, viewer)
+		view["needsYou"] = canDecide(kind, permissions, requesters, viewer) && formResumable(kind, state.Waiting, now)
 	}
 	if childRunID, _ := state.Waiting["childRunId"].(string); childRunID != "" {
 		view["childRunId"] = childRunID
-	} else if state.ChildRunID != "" {
-		view["childRunId"] = state.ChildRunID
+	} else if state.Subworkflow.ChildRunID != "" {
+		view["childRunId"] = state.Subworkflow.ChildRunID
+	} else if node.FailedChildRunID != "" {
+		view["childRunId"] = node.FailedChildRunID
 	}
 	return view
 }
 
-func isStuck(elapsed time.Duration, medianMs float64) bool {
-	if medianMs <= 0 {
+func isStuck(elapsed time.Duration, medianMs float64, hasHistory bool) bool {
+	if !hasHistory {
 		return elapsed > stuckNoHistory
 	}
 	limit := max(time.Duration(medianMs*stuckFactor)*time.Millisecond, stuckFloor)
@@ -204,7 +214,8 @@ func isStuck(elapsed time.Duration, medianMs float64) bool {
 }
 
 // canDecide mirrors the decision routes: person steps need runs.start, and a
-// tool approval also refuses the people who caused the call.
+// tool approval needs a live request and refuses the people who caused the call.
+// requesters is nil when the step has no live request.
 func canDecide(kind string, permissions map[string]bool, requesters []string, viewer string) bool {
 	if !permissions["runs.start"] {
 		return false
@@ -213,13 +224,24 @@ func canDecide(kind string, permissions map[string]bool, requesters []string, vi
 	case "approval", "human_form":
 		return true
 	case "tool_approval":
-		return !slices.Contains(requesters, viewer)
+		return requesters != nil && !slices.Contains(requesters, viewer)
 	}
 	return false
 }
 
+// formResumable is false once a form's resume token has expired: nothing
+// re-issues it, so the resume route refuses every submission.
+func formResumable(kind string, waiting map[string]any, now time.Time) bool {
+	if kind != "human_form" {
+		return true
+	}
+	raw, _ := waiting["resumeTokenExpiresAt"].(string)
+	expiresAt, err := time.Parse(time.RFC3339, raw)
+	return err == nil && now.Before(expiresAt)
+}
+
 func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types map[string]string) ([]map[string]any, error) {
-	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID})
+	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID, PerNode: maxLaneEvents})
 	if err != nil {
 		return nil, err
 	}
@@ -228,9 +250,6 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 	for _, event := range events {
 		if _, seen := byNode[event.NodeID]; !seen {
 			order = append(order, event.NodeID)
-		}
-		if len(byNode[event.NodeID]) >= maxLaneEvents {
-			continue
 		}
 		byNode[event.NodeID] = append(byNode[event.NodeID], laneStep(event))
 	}
@@ -242,23 +261,20 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 }
 
 // laneStep keeps only typed payload fields, so a malformed event cannot widen
-// the wire. Crew lifecycle events name their agent as "name".
+// the wire.
 func laneStep(event store.ListRunAgentEventsRow) map[string]any {
 	var payload map[string]any
 	_ = json.Unmarshal(event.Payload, &payload)
 	step := map[string]any{"type": event.Type, "at": optionalTime(event.CreatedAt)}
-	for _, key := range []string{"tool", "status", "agent"} {
+	for _, key := range []string{"tool", "status", "agent", "name"} {
 		if value, ok := payload[key].(string); ok && value != "" {
 			step[key] = value
 		}
 	}
-	if _, ok := step["agent"]; !ok {
-		if name, ok := payload["name"].(string); ok && name != "" {
-			step["agent"] = name
+	for _, key := range []string{"iteration", "index"} {
+		if value, ok := payload[key].(float64); ok && value >= 0 && value == float64(int64(value)) {
+			step[key] = int64(value)
 		}
-	}
-	if iteration, ok := payload["iteration"].(float64); ok && iteration >= 0 && iteration == float64(int64(iteration)) {
-		step["iteration"] = int64(iteration)
 	}
 	return step
 }
@@ -289,14 +305,11 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 	permissions := s.deciderPermissions(r, rc)
 	items := []map[string]any{}
 	if permissions["runs.start"] {
-		approvals, err := q.ListPendingToolApprovalsForOrg(ctx, rc.OrgID)
+		approvals, err := q.ListPendingToolApprovalsForOrg(ctx, store.ListPendingToolApprovalsForOrgParams{OrgID: rc.OrgID, Viewer: rc.UserID})
 		if err != nil {
 			return internalError()
 		}
 		for _, row := range approvals {
-			if slices.Contains(row.RequesterIds, rc.UserID) {
-				continue
-			}
 			items = append(items, map[string]any{"kind": "tool_approval", "id": row.ID, "runId": row.RunID,
 				"nodeId": row.NodeID, "workflowId": row.WorkflowID, "tool": row.Tool,
 				"expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
@@ -311,7 +324,7 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 		}
 	}
 	if permissions["workflows.write"] {
-		requests, err := q.ListPublishRequests(ctx, store.ListPublishRequestsParams{OrgID: rc.OrgID, FilterStatus: pendingStatus()})
+		requests, err := q.ListPublishRequests(ctx, store.ListPublishRequestsParams{OrgID: rc.OrgID, FilterStatus: publishgate.OptionalText("pending")})
 		if err != nil {
 			return internalError()
 		}
@@ -385,5 +398,3 @@ func optionalTime(at *time.Time) any {
 func internalError() httpkit.Result {
 	return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
-
-func pendingStatus() pgtype.Text { return pgtype.Text{String: "pending", Valid: true} }

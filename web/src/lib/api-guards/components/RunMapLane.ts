@@ -13,7 +13,9 @@ export function isRunMapLane(value: unknown): value is Api.RunMapLane {
       type: isString,
     }, {
       agent: isString,
+      index: isInteger,
       iteration: isInteger,
+      name: isString,
       status: isString,
       tool: isString,
     })),

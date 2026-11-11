@@ -104,11 +104,14 @@ export type AgentLaneView = { nodeId: string; kind: string; stepCount: number; t
 // `multi_agent.agent.<n>.started`; keep one.
 const INNER_LIFECYCLE = /^multi_agent\.agent\.\d+\.(started|completed)$/
 
+// Crew lifecycle events name their agent as `name`.
+const laneAgent = (step: RunMapLaneStep) => step.agent ?? step.name
+
 /** Catalog key and params for one lane step; the caller translates. */
 export function laneStepLabel(step: RunMapLaneStep): LaneStepLabel {
   const type = step.type
   const tool = step.tool ?? ''
-  const name = step.agent ?? ''
+  const name = laneAgent(step) ?? ''
   if (type === 'multi_agent.started') return { key: 'runWorkspace.lanes.step.teamStarted', params: {} }
   if (type === 'multi_agent.completed') return { key: 'multiAgent.teamCompleted', params: {} }
   if (type === 'multi_agent.agent.started') return { key: 'multiAgent.agentStarted', params: { name } }
@@ -141,7 +144,7 @@ export function projectAgentLanes(lanes: readonly RunMapLane[]): AgentLaneView[]
     let stepCount = 0
     lane.steps.forEach((step, index) => {
       if (INNER_LIFECYCLE.test(step.type)) return
-      const agent = lane.kind === 'multi_agent' && step.type.startsWith('multi_agent.agent') ? step.agent ?? null : null
+      const agent = lane.kind === 'multi_agent' && step.type.startsWith('multi_agent.agent') ? laneAgent(step) ?? null : null
       const track = tracks.get(agent) ?? []
       track.push({ key: `${index}:${step.type}`, step, label: laneStepLabel(step), tone: laneTone(step) })
       tracks.set(agent, track)

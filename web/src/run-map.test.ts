@@ -102,10 +102,10 @@ describe('projectAgentLanes', () => {
       ] },
       { nodeId: 'crew', kind: 'multi_agent', steps: [
         { type: 'multi_agent.started', at: null },
-        { type: 'multi_agent.agent.started', at: null, agent: 'researcher' },
+        { type: 'multi_agent.agent.started', at: null, name: 'researcher', index: 0 },
         { type: 'multi_agent.agent.0.started', at: null, agent: 'researcher' },
         { type: 'multi_agent.agent.0.tool.started', at: null, agent: 'researcher', tool: 'search' },
-        { type: 'multi_agent.agent.failed', at: null, agent: 'writer', status: 'failed' },
+        { type: 'multi_agent.agent.failed', at: null, name: 'writer', index: 1, status: 'failed' },
         { type: 'multi_agent.completed', at: null },
       ] },
     ])
@@ -121,7 +121,7 @@ describe('projectAgentLanes', () => {
     expect(laneStepLabel({ type: 'agent.step.started', at: null, iteration: 1 })).toEqual({ key: 'multiAgent.stepStarted', params: { step: 2 } })
     expect(laneStepLabel({ type: 'agent.tool.started', at: null, tool: 'crm.lookup' })).toEqual({ key: 'multiAgent.toolStarted', params: { tool: 'crm.lookup' } })
     expect(laneStepLabel({ type: 'agent.tool.started', at: null }).key).toBe('multiAgent.legend.tool')
-    expect(laneStepLabel({ type: 'multi_agent.agent.completed', at: null, agent: 'writer' })).toEqual({ key: 'multiAgent.agentCompleted', params: { name: 'writer' } })
+    expect(laneStepLabel({ type: 'multi_agent.agent.completed', at: null, name: 'writer' })).toEqual({ key: 'multiAgent.agentCompleted', params: { name: 'writer' } })
     expect(laneStepLabel({ type: 'agent.memory.recalled', at: null }).key).toBe('runWorkspace.lanes.step.memory')
     expect(laneStepLabel({ type: 'agent.custom', at: null })).toEqual({ key: 'runWorkspace.lanes.step.other', params: { type: 'agent.custom' } })
   })

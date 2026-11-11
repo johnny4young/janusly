@@ -90,7 +90,9 @@ On every call, before any business query:
    that organization. A removed creator disables the client; a demoted
    creator shrinks it.
 3. Effective permissions = capability permissions ∩ creator permissions.
-4. The tool's guard checks the effective set, the scope, the per-client rate
+4. The tool must belong to one of the client's capabilities. Permissions alone
+   never admit a tool, because capabilities share permissions.
+5. The tool's guard checks the effective set, the scope, the per-client rate
    limit, the existing per-organization per-tool limits, and, for business
    writes, `JANUSLY_MCP_WRITES_ENABLED` plus tenant `mcp.writeConsent`.
 
@@ -102,8 +104,10 @@ in the server instance, so one server serves every client.
 
 A scoped client sees only workflows whose id is listed or whose tags
 (`workflow_metadata.tags`) intersect its tags, and the runs, dead letters and
-recovery cases of those workflows. Lists filter; a direct read, write or start
-outside the scope returns `not_found`, the same answer as for a missing id.
+recovery cases of those workflows, and the drafts, qualifications and publish
+requests for them. `operations.brief` spans the organization, so a scoped
+client is refused it. Lists filter; a direct read, write or start outside the
+scope returns `not_found`, the same answer as for a missing id.
 A scoped client may create a workflow only if its scope has a tag; the new
 workflow receives the first tag, so it stays in scope.
 
@@ -186,8 +190,9 @@ schema violations that name the tool and the violation.
   `cursor` from the previous `nextCursor`; a malformed cursor or limit is an
   error, never page one.
 - **Idempotency.** Every write accepts `idempotencyKey`, keyed per
-  organization, client and tool. A retry returns the first result with
-  `replayed: true`; the same key with different arguments is
+  organization, client and tool, so an agent's `runs.start` key does not
+  share the HTTP start's per-organization key space. A retry returns the
+  first result with `replayed: true`; the same key with different arguments is
   `idempotency_mismatch`. `drafts.save` of a document identical to the
   client's latest draft returns that draft with `unchanged: true`.
 - **Secrets by reference.** Documents name credentials (`credential: NAME`,
@@ -211,7 +216,7 @@ schema violations that name the tool and the violation.
 |---|---|---|
 | `agent.info` | `read` | Section above |
 | `drafts.save` | `propose` | Stores an immutable draft for an existing workflow in scope, or for a new one; returns `draftId`, digest and the validation report |
-| `drafts.get`, `drafts.list` | `read` | Read the organization's drafts |
+| `drafts.get`, `drafts.list` | `read` | Read drafts within the client's scope |
 | `credentials.request` | `propose` | Returns a setup link for a named credential; the value is entered by a person in Janusly |
 | `workflows.test` | `test` | Runs a draft as a draft-test validation run (writes suppressed, stand-ins allowed); returns the run id |
 | `workflows.qualify` | `test` | Starts the publish gate checks for a draft; returns a qualification id to poll |
@@ -239,23 +244,26 @@ public listener, before `webdist`:
   also requires an `https` `JANUSLY_WEB_BASE_URL`.
 - **Authentication.** `Authorization: Bearer jly_agent_…` only. Browser
   sessions, Supabase tokens, the service token and development headers are
-  refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`
-  and one fixed message for every token failure.
-- **No tokens in URLs.** A request with `access_token`, `token`, `api_key` or
-  `key` in the query string is refused with 400 before authentication; the
-  parameter name is logged, never its value.
-- **Rebinding and cross-origin.** Requests whose `Host` is not loopback or the host of
-  `JANUSLY_WEB_BASE_URL` are refused. This allowlist replaces the SDK's
-  localhost check, which would refuse a reverse proxy on the same host.
+  refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`;
+  a token store failure answers 500 with fixed text.
+- **No tokens in URLs.** A request with `access_token`, `token`, `api_key`,
+  `key`, `auth` or `authorization` in the query string, or `jly_agent_`
+  anywhere in it, is refused with 400 before authentication; the parameter
+  name is logged, never its value.
+- **Rebinding and cross-origin.** Requests whose `Host` is not loopback, the
+  host of `JANUSLY_WEB_BASE_URL` or one in `JANUSLY_MCP_ALLOWED_HOSTS` are
+  refused. This allowlist replaces the SDK's localhost check, which would
+  refuse a reverse proxy on the same host.
   Browsers are not supported callers: a request with an `Origin` header is
   refused (native clients send none), and `http.CrossOriginProtection` wraps
-  the handler. JSON-RPC batches are refused.
-- **Bounds.** 256 KB request bodies (the SDK limit and the existing request
-  guard), the existing 256000-byte response gate, and the per-client limit
-  after authentication. Failed authentications are not limited per address:
-  a malformed token never reaches the database, an unknown one costs one index
-  lookup, and behind a proxy a shared limit would let one client lock out the
-  rest.
+  the handler. Authenticated JSON-RPC batches and `subscriptions/listen`
+  streams are refused.
+- **Bounds.** 256000-byte request bodies (set on the SDK handler, matching
+  the existing request guard), the existing 256000-byte response gate, and the
+  per-client limit after authentication. Failed authentications are not
+  limited per address: a malformed token never reaches the database, an
+  unknown one costs one index lookup, and behind a proxy a shared limit would
+  let one client lock out the rest.
 - **No token forwarding.** The general resolver rejects any `jly_agent_`
   bearer without sending it to Supabase, so a misdirected agent token never
   reaches a third party.
@@ -313,8 +321,9 @@ described in `mcp-server.md`):
    rate limited per client and workflow so an agent cannot spin on the gate.
 4. **Publish.** `workflows.publish` takes the draft and a passing receipt,
    revalidates under the workflow's version lock, and then:
-   - publishes directly when the workflow has no write effects, already has a
-     published version, and the draft adds no effect beyond that version;
+   - publishes directly when every step is pure (no write, no outbound
+     call, no trigger), the workflow already has a published version, and no
+     other workflow calls it;
    - otherwise opens a publish request and returns `approval_required` with a
      link. A person with `workflows.write` reviews the diff against
      production, the receipt and the effect list, and approves or rejects.
@@ -460,9 +469,9 @@ the gate.
 | Cross-organization access | Organization from the token only; foreign ids answer as missing; negative test matrix over every tool |
 | Privilege escalation | Ceiling ∩ creator's live permissions on every call; grants limited to the creator's own permissions |
 | Agent approving its own work | No approval tool; decide routes refuse agent and service tokens; creator counts as requester for tool approvals |
-| Gate bypass through `workflows.save` | Not in any capability; production changes from agents only by publication |
+| Gate bypass through `workflows.save` | Not in any capability, and the guard admits only capability tools; production changes from agents only by publication |
 | Prompt injection through workflow data | Documents and outputs are untrusted data for the agent; scrubbing and size bounds; writes still need the gate and consent |
-| DNS rebinding and browser CSRF | Host allowlist, SDK localhost check, Origin refusal, cross-origin protection |
+| DNS rebinding and browser CSRF | Host allowlist, Origin refusal, cross-origin protection |
 | Token in URLs, logs or third parties | Query tokens refused; Authorization never logged; agent bearers never sent to Supabase |
 | Hook replay or forgery | HMAC with timestamp window and event-id deduplication |
 | Resource exhaustion | Body and response bounds, rate limits on calls, failed auth, qualify and gates; gate polling without held goroutines |
@@ -479,8 +488,8 @@ from the id. Options: (a) key workflows by organization and id and move public
 callbacks to opaque per-trigger tokens, which changes every registered
 callback URL; (b) keep global ids but let the server assign them for new
 workflows, with a per-organization slug for people. *Decided: (b).*
-Agents never choose a global id, so the agent surface has no oracle, and no
-public URL changes. Revisit (a) only if people need to choose ids.
+Agents will never choose a global id, so the agent surface has no oracle, and
+no public URL changes. Revisit (a) only if people need to choose ids.
 
 **D2. Loopback by default with development headers.** When development
 headers are active (no identity provider, not production) and

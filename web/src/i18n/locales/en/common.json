@@ -1120,7 +1120,6 @@
   "workflowsDashboard.emptyReadOnlyHelper": "This workspace has no saved flows. An editor can create the first one.",
   "workflowsDashboard.openFlow": "Open flow",
   "workflowsDashboard.pauseFlow": "Pause",
-  "workflowsDashboard.pausedToast": "Workflow paused",
   "workflowsDashboard.pauseFailed": "Could not pause the workflow",
   "workflowsDashboard.paused": "Paused",
   "workflowsDashboard.pausedByBreaker": "Breaker",

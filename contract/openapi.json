@@ -4158,9 +4158,16 @@
                     "null"
                   ]
                 },
+                "index": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "iteration": {
                   "minimum": 0,
                   "type": "integer"
+                },
+                "name": {
+                  "type": "string"
                 },
                 "status": {
                   "type": "string"

@@ -118,11 +118,16 @@ func TestRemoteMCPServesAgentClientsOverStreamableHTTP(t *testing.T) {
 		t.Fatalf("remote call audit transport: %q %v", transport, err)
 	}
 
+	unissued, _, _, err := agentclient.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Every credential failure reads the same, with the bearer challenge.
 	for label, headers := range map[string]map[string]string{
 		"missing":       {},
 		"malformed":     {"Authorization": "Bearer jly_agent_short"},
 		"unknown":       {"Authorization": "Bearer " + strings.Repeat("A", 10)},
+		"unissued":      {"Authorization": "Bearer " + unissued},
 		"service token": {"Authorization": "Bearer svc", "x-org-id": tenant.org, "x-user-id": tenant.creator},
 		"dev headers":   {"x-org-id": tenant.org, "x-user-id": tenant.creator},
 	} {

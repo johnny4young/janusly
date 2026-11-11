@@ -38,13 +38,7 @@ func (d Deps) agentInfo(ctx context.Context) (*mcp.CallToolResult, any, error) {
 		tools = append(tools, tool)
 	}
 	slices.Sort(tools)
-	missing := []string{}
-	for permission := range agentclient.CeilingPermissions(principal.Capabilities) {
-		if !principal.Permissions[permission] {
-			missing = append(missing, permission)
-		}
-	}
-	slices.Sort(missing)
+	missing := agentclient.MissingPermissions(principal.Capabilities, principal.Permissions)
 	return ok(map[string]any{
 		"kind": "agent", "clientId": principal.ClientID, "name": principal.Name,
 		"organizationId":     principal.OrgID,

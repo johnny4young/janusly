@@ -3,6 +3,7 @@ package config
 import (
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 func loadMCPHTTP(getenv func(string) string, production bool, problems []string) (MCPHTTP, []string) {
@@ -41,11 +42,5 @@ func loadMCPHTTP(getenv func(string) string, production bool, problems []string)
 }
 
 func splitList(raw string) []string {
-	values := []string{}
-	for _, value := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
-		if value = strings.TrimSpace(value); value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
+	return strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
 }

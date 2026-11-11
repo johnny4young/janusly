@@ -951,7 +951,9 @@ export type RunMapLane = {
   "steps": ({
     "agent"?: string
     "at": string | null
+    "index"?: number
     "iteration"?: number
+    "name"?: string
     "status"?: string
     "tool"?: string
     "type": string

@@ -73,7 +73,7 @@ WHERE actor IS NOT NULL AND actor <> ''
 SELECT f.actor FROM found f
 UNION
 SELECT ac.created_by FROM found f
-JOIN agent_clients ac ON f.actor = 'agent:' || ac.id
+JOIN agent_clients ac ON f.actor LIKE 'agent:%' AND ac.id = substr(f.actor, 7)
   AND ac.org_id = (SELECT r.org_id FROM runs r WHERE r.id = sqlc.arg(run_id))
 ORDER BY actor;
 

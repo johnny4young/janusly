@@ -512,6 +512,8 @@ function useWorkflowsDashboardController({
             ? { ...w, status: prior.status, pausedReason: prior.pausedReason }
             : w)),
         )
+        // A refused resume can still move a manual pause to an upstream pause.
+        bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
         addToast(tApiError(err) || t('workflowsDashboard.resumeFailed'), 'error')
       } finally {
         recoveryBusyRef.current.delete(workflowId)
@@ -537,7 +539,7 @@ function useWorkflowsDashboardController({
       try {
         await contractApi('POST /workflows/{id}/pause', `/workflows/${encodeURIComponent(workflowId)}/pause`, {},
           { guard: isPostWorkflowsIdPauseResponse })
-        addToast(t('workflowsDashboard.pausedToast'), 'success')
+        addToast(t('workflowsDashboard.paused'), 'success')
         bumpPlatformVersion(WORKFLOW_MUTATION_TAGS)
       } catch (err) {
         setWorkflows((prev) =>
