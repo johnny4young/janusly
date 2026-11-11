@@ -402,12 +402,17 @@ func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
 		t.Fatalf("an agent ran an unsaved document in production: %q", resultText(res))
 	}
 
-	pinned, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": tenant.versionID})
+	pinned, pinnedPayload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": tenant.versionID})
 	if pinned.IsError {
 		t.Fatalf("starting by workflowId with its latest version refused: %q", resultText(pinned))
 	}
-	if stale, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": "not-the-latest"}); !stale.IsError {
-		t.Fatal("a version that is not the latest ran by workflowId")
+	var pinnedVersion string
+	if err := pool.QueryRow(t.Context(), `SELECT workflow_version_id FROM runs WHERE id = $1`, pinnedPayload["runId"]).Scan(&pinnedVersion); err != nil || pinnedVersion != tenant.versionID {
+		t.Fatalf("pinned start ran %q, want %q: %v", pinnedVersion, tenant.versionID, err)
+	}
+	if stale, _ := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID, "workflowVersionId": "not-the-latest"}); !stale.IsError ||
+		!strings.Contains(resultText(stale), "not this workflow's latest version") {
+		t.Fatalf("a version that is not the latest ran by workflowId: %q", resultText(stale))
 	}
 	started, payload := callTool(t, session, "runs.start", map[string]any{"workflowId": tenant.workflowID})
 	if started.IsError {

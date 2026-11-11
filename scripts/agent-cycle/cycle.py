@@ -15,7 +15,7 @@ DB = shlex.split(os.environ.get("CYCLE_PSQL", "psql postgres://janusly:janusly-l
     "-At", "-v", "ON_ERROR_STOP=1"]
 SIM_PORT = int(os.environ.get("CYCLE_SIM_PORT", "23490"))
 CLIENT = os.environ.get("CYCLE_CLIENT", "codex")
-STAMP = time.strftime("%H%M%S")
+STAMP = time.strftime("%Y%m%d%H%M%S")
 active_orgs = set()
 approvals = []
 
@@ -45,7 +45,7 @@ def api(method, path, org, user, body=None):
 
 
 def new_org(task):
-    org, owner = f"t{task}-{STAMP}", f"owner-{task}"
+    org, owner = f"t{task}-{STAMP}-{uuid.uuid4().hex[:6]}", f"owner-{task}"
     token = "jly_agent_" + base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
     digest = hashlib.sha256(token.encode()).hexdigest()
     sql(f"""INSERT INTO org_members (id, org_id, user_id, role) VALUES (%s, %s, %s, 'admin');
@@ -114,7 +114,9 @@ def approvable(proposed):
     """The harness approves only what the tasks need: pure steps and a
     schedule. Anything that reaches out stays unapproved, so a session cannot
     point the local stack at the operator's network."""
-    for node in (proposed or {}).get("nodes", []):
+    if not isinstance(proposed, dict) or not proposed.get("nodes"):
+        return False
+    for node in proposed["nodes"]:
         kind, config = node.get("type"), node.get("config") or {}
         if kind == "tool" and config.get("tool") in PURE_TOOLS:
             continue
@@ -126,14 +128,23 @@ def approvable(proposed):
 def approver(stop):
     while not stop.is_set():
         for org, owner in list(active_orgs):
-            status, body = api("GET", "/publish-requests?status=pending", org, owner)
-            for request in (body or {}).get("requests", []) if status == 200 else []:
-                _, detail = api("GET", f"/publish-requests/{request['id']}", org, owner)
-                verb = "approve" if approvable((detail or {}).get("proposed")) else "reject"
-                code, result = api("POST", f"/publish-requests/{request['id']}/{verb}", org, owner)
-                approvals.append({"org": org, "request": request["id"], "reasons": request["reasons"], "decision": verb, "status": code,
-                                  "result": (result or {}).get("code") or (result or {}).get("request", {}).get("status")})
+            try:
+                review(org, owner)
+            except Exception as err:  # one failed poll must not stop the person for every later task
+                approvals.append({"org": org, "error": repr(err)})
         stop.wait(2)
+
+
+def review(org, owner):
+    status, body = api("GET", "/publish-requests?status=pending", org, owner)
+    for request in (body or {}).get("requests", []) if status == 200 else []:
+        code, detail = api("GET", f"/publish-requests/{request['id']}", org, owner)
+        if code != 200 or not isinstance((detail or {}).get("proposed"), dict):
+            continue  # never approve a draft the harness could not inspect
+        verb = "approve" if approvable(detail["proposed"]) else "reject"
+        code, result = api("POST", f"/publish-requests/{request['id']}/{verb}", org, owner)
+        approvals.append({"org": org, "request": request["id"], "reasons": request.get("reasons"), "decision": verb, "status": code,
+                          "result": (result or {}).get("code") or (result or {}).get("request", {}).get("status")})
 
 
 # --- tasks -----------------------------------------------------------------
@@ -331,9 +342,15 @@ def operator_servers():
     """Every MCP server the operator configured, to switch off for a blank session."""
     out = subprocess.run(["codex", "mcp", "list", "--json", "-c", "features.plugins=false"], capture_output=True, text=True)
     try:
-        return [server["name"] for server in json.loads(out.stdout) if server.get("name") != "janusly"]
+        names = [server["name"] for server in json.loads(out.stdout)]
     except (ValueError, KeyError, TypeError):
         raise SystemExit("cannot list Codex MCP servers to disable them; refusing to run a session that is not blank")
+    # The harness's janusly entry would merge into an operator's one, and -c
+    # cannot address a dotted name.
+    unsafe = [name for name in names if name == "janusly" or "." in name]
+    if unsafe:
+        raise SystemExit(f"Codex MCP servers {unsafe} cannot be isolated; remove or rename them before a cycle")
+    return names
 
 
 def run_agent(prompt, token, workdir, log):
@@ -419,19 +436,23 @@ def main():
     for index in selected:
         lang, label, setup, check = TASKS[index - 1]
         org, owner, token = new_org(index)
-        prompt = setup(org, owner)
-        workdir = os.path.join(HERE, "blank", f"t{index}-{STAMP}")
+        workdir = os.path.join(HERE, "blank", org)
         os.makedirs(workdir, exist_ok=True)
-        run = run_agent(prompt, token, workdir, os.path.join(HERE, f"t{index}-{STAMP}.jsonl"))
-        passed = check(org, run["answer"])
+        try:
+            prompt = setup(org, owner)
+            run = run_agent(prompt, token, workdir, os.path.join(HERE, f"{org}.jsonl"))
+            passed = check(org, run["answer"])
+        except Exception as err:  # a stuck or broken task fails alone; the others keep their results
+            run = {"exit": None, "answer": "", "calls": [], "toolErrors": 0, "tokens": 0, "seconds": 0, "error": repr(err)}
+            passed = False
         result = {"task": index, "client": CLIENT, "lang": lang, "label": label, "org": org, "passed": passed,
                   "approvals": [a for a in approvals if a["org"] == org], **run}
         results.append(result)
-        print(json.dumps({k: result[k] for k in ("task", "lang", "passed", "seconds", "toolErrors", "tokens")}), flush=True)
+        with open(os.path.join(HERE, f"results-{STAMP}.json"), "w") as out:
+            json.dump(results, out, indent=2)
+        print(json.dumps({k: result.get(k) for k in ("task", "lang", "passed", "seconds", "toolErrors", "tokens", "error")}), flush=True)
         print("  calls:", len(run["calls"]), "answer:", run["answer"][:300].replace("\n", " "), flush=True)
     stop.set()
-    with open(os.path.join(HERE, f"results-{STAMP}.json"), "w") as out:
-        json.dump(results, out, indent=2)
     print(f"passed {sum(r['passed'] for r in results)}/{len(results)}")
 
 
