@@ -133,3 +133,111 @@ describe('useRunMap', () => {
     view.unmount()
   })
 })
+
+describe('run map identity isolation', () => {
+  const identity = (userId: string, orgId: string) => {
+    useWorkflowStore.getState().setAuth({ session: null, user: null, userId, orgId })
+  }
+
+  it.each([
+    ['workspace', 'user-a', 'org-b'],
+    ['user', 'user-b', 'org-a'],
+  ])('discards the cached map when the %s changes', async (_change, userId, orgId) => {
+    act(() => identity('user-a', 'org-a'))
+    vi.mocked(api).mockResolvedValue(runMap('private-run', 'succeeded'))
+    const first = renderHook(() => useRunMap('private-run'))
+    await flush()
+    expect(first.result.current?.map.run.id).toBe('private-run')
+    first.unmount()
+
+    act(() => identity(userId, orgId))
+    vi.mocked(api).mockRejectedValue(new Error('run not found'))
+    const second = renderHook(() => useRunMap('private-run'))
+    expect(second.result.current).toBeNull()
+    await flush()
+    expect(second.result.current).toBeNull()
+    second.unmount()
+  })
+
+  it('ignores an old response and restarts the mounted feed under the new identity', async () => {
+    act(() => identity('user-a', 'org-a'))
+    let release: (value: RunMap) => void = () => undefined
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => useRunMap('late-private-run'))
+    const oldSignal = vi.mocked(api).mock.calls[0]![1]!.signal
+    vi.mocked(api).mockRejectedValue(new Error('run not found'))
+    act(() => identity('user-a', 'org-b'))
+    expect(oldSignal?.aborted).toBe(true)
+    expect(mapCalls()).toBe(2)
+    await act(async () => { release(runMap('late-private-run')) })
+    await flush()
+    view.rerender()
+    expect(view.result.current).toBeNull()
+    const later = renderHook(() => useRunMap('late-private-run'))
+    expect(later.result.current).toBeNull()
+    later.unmount()
+    view.unmount()
+  })
+
+  it('does not refetch a retired feed when a queued reload finishes', async () => {
+    act(() => identity('user-a', 'org-a'))
+    let release: (value: RunMap) => void = () => undefined
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => useRunMap('queued-run'))
+    refreshRunMap('queued-run')
+    vi.mocked(api).mockImplementation(() => new Promise(() => undefined))
+    act(() => identity('user-a', 'org-b'))
+    const calls = mapCalls()
+    await act(async () => { release(runMap('queued-run')) })
+    await flush()
+    expect(mapCalls()).toBe(calls)
+    view.unmount()
+  })
+
+  it('clears a cached map on sign-out even when the same identity signs in again', async () => {
+    act(() => identity('user-a', 'org-a'))
+    vi.mocked(api).mockResolvedValue(runMap('signed-out-run', 'succeeded'))
+    const first = renderHook(() => useRunMap('signed-out-run'))
+    await flush()
+    first.unmount()
+    act(() => useWorkflowStore.getState().clearAuth())
+    act(() => identity('user-a', 'org-a'))
+    vi.mocked(api).mockRejectedValue(new Error('run not found'))
+    const next = renderHook(() => useRunMap('signed-out-run'))
+    expect(next.result.current).toBeNull()
+    await flush()
+    expect(next.result.current).toBeNull()
+    next.unmount()
+  })
+
+  it('retires mounted snapshots and keeps the replacement feed polling', async () => {
+    act(() => identity('user-a', 'org-a'))
+    vi.mocked(api).mockResolvedValue(runMap('mounted-run'))
+    const first = renderHook(() => useRunMap('mounted-run'))
+    const second = renderHook(() => useRunMap('mounted-run'))
+    await flush()
+    vi.mocked(api).mockRejectedValue(new Error('run not found'))
+    act(() => identity('user-a', 'org-b'))
+    expect(first.result.current).toBeNull()
+    expect(second.result.current).toBeNull()
+    await flush()
+    expect(mapCalls()).toBe(2)
+    first.unmount()
+    await act(async () => { vi.advanceTimersByTime(RUN_MAP_TICK_MS) })
+    await flush()
+    expect(mapCalls()).toBe(3)
+    second.unmount()
+  })
+
+  it('does not reset a feed when the same identity is refreshed', async () => {
+    act(() => identity('user-a', 'org-a'))
+    vi.mocked(api).mockResolvedValue(runMap('same-identity'))
+    const view = renderHook(() => useRunMap('same-identity'))
+    await flush()
+    const snapshot = view.result.current
+    act(() => identity('user-a', 'org-a'))
+    expect(view.result.current).toBe(snapshot)
+    expect(mapCalls()).toBe(1)
+    view.unmount()
+  })
+})
