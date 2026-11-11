@@ -17,20 +17,20 @@ func TestRunListNeverShowsAnotherOrganizationsWorkflowName(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	foreignOrg := "foreign-" + suffix
 	sharedID := "shared-wf-" + suffix
-	foreign := map[string]any{"id": sharedID, "name": "Foreign Payroll " + suffix, "dslVersion": "1.0",
-		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
-	if res := h.call("POST", "/workflows/save", foreign, foreignOrg); res.status != 200 {
+	doc := func(name string) map[string]any {
+		return map[string]any{"id": sharedID, "name": name, "dslVersion": "1.0",
+			"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
+	}
+	if res := h.call("POST", "/workflows/save", doc("Foreign Payroll "+suffix), foreignOrg); res.status != 200 {
 		t.Fatalf("foreign save: %d %v", res.status, res.body)
 	}
-	mine := map[string]any{"id": sharedID, "name": "Mine " + suffix, "dslVersion": "1.0",
-		"nodes": []any{map[string]any{"id": "n", "type": "noop", "config": map[string]any{}}}, "edges": []any{}}
-	started := h.call("POST", "/v1/start", map[string]any{"workflow": mine}, "")
+	started := h.call("POST", "/v1/start", map[string]any{"workflow": doc("Mine " + suffix)}, "")
 	if started.status != 200 && started.status != 202 {
 		t.Fatalf("ad-hoc start: %d %v", started.status, started.body)
 	}
 	runID := started.body["data"].(map[string]any)["runId"].(string)
 
-	for _, path := range []string{"/v1/runs?limit=100", "/runs?limit=100"} {
+	for _, path := range []string{"/v1/runs?workflowId=" + sharedID, "/runs?workflowId=" + sharedID} {
 		res, raw := h.rawGet(t, path)
 		if res.StatusCode != 200 {
 			t.Fatalf("%s: %d %s", path, res.StatusCode, raw)
@@ -44,20 +44,14 @@ func TestRunListNeverShowsAnotherOrganizationsWorkflowName(t *testing.T) {
 		} else if err := json.Unmarshal(raw, &rows); err != nil {
 			t.Fatalf("%s: unexpected body %s", path, raw)
 		}
-		var name *string
-		for _, row := range rows {
-			if row["id"] == runID {
-				value := fmt.Sprint(row["workflowName"])
-				name = &value
-			}
-		}
-		switch {
-		case name == nil:
+		if len(rows) != 1 || rows[0]["id"] != runID {
 			t.Fatalf("%s lost the run: %s", path, raw)
-		case strings.Contains(*name, "Foreign Payroll"):
-			t.Fatalf("%s leaked another organization's workflow name: %q", path, *name)
-		case *name != "Mine "+suffix:
-			t.Fatalf("%s: workflowName = %q, want the run's own document name", path, *name)
+		}
+		switch name := fmt.Sprint(rows[0]["workflowName"]); {
+		case strings.Contains(name, "Foreign Payroll"):
+			t.Fatalf("%s leaked another organization's workflow name: %q", path, name)
+		case name != "Mine "+suffix:
+			t.Fatalf("%s: workflowName = %q, want the run's own document name", path, name)
 		}
 	}
 }

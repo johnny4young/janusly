@@ -1450,7 +1450,10 @@ func TestMcpRunsListNeverShowsAnotherOrganizationsWorkflowName(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("start: %+v", res.Content)
 	}
-	_, page := callTool(t, session, "runs.list", map[string]any{"workflowId": sharedID})
+	listed, page := callTool(t, session, "runs.list", map[string]any{"workflowId": sharedID})
+	if listed.IsError {
+		t.Fatalf("runs.list: %+v", listed.Content)
+	}
 	runs, _ := page["runs"].([]any)
 	if len(runs) != 1 {
 		t.Fatalf("runs.list lost the run %v: %+v", started["runId"], page)
