@@ -2,7 +2,8 @@
 
 `cmd/mcp` and `internal/mcpserver` expose a stable catalog for external agents.
 The catalog order, schemas, risk annotations, and write-capability flags are
-part of the public contract.
+part of the public contract. Agent identity, the remote transport and the publish
+gate are designed in `agent-platform.md`.
 
 Every tool is tenant-scoped in process and passes the same authority envelope:
 
