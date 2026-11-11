@@ -295,7 +295,10 @@ func run() error {
 
 	var mcpHandler http.Handler
 	if cfg.MCPHTTP.Enabled {
-		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{})
+		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
+		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
+			OnError: mcpTracker.RecordError, OnSuccess: mcpTracker.RecordRecovery,
+		})
 		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
 			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,

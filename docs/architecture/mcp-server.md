@@ -50,8 +50,8 @@ An agent client is an organization's credential for one external agent,
 created by a member through `POST /agent-clients` (`agents.write`) and listed
 with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
 once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
-is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator or an
-admin may rotate or revoke, and service tokens can manage none.
+is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator may
+rotate, the creator or an admin may revoke, and service tokens can manage none.
 
 A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,
 `operate`, `report`; `read` is always included), an optional scope of workflow
@@ -156,13 +156,14 @@ mode: no session is kept, so any instance answers any request, and `GET` and
 
 - Only `Authorization: Bearer jly_agent_…` authenticates. Browser sessions,
   identity provider tokens, the service token and development headers are
-  refused; every failure is a 401 with `WWW-Authenticate: Bearer`. The token
-  is resolved on every request, so revocation applies to the next one.
+  refused; every credential failure is a 401 with `WWW-Authenticate: Bearer`,
+  and a token store failure is a 500 with fixed text. The token is resolved on
+  every request, so revocation applies to the next one.
 - A token-like query parameter (`access_token`, `token`, `api_key`, `key`,
-  `auth`, `authorization`, or any value starting `jly_agent_`) is refused with
-  400 before authentication, and only its name is logged. In production behind
-  `JANUSLY_TRUSTED_PROXY`, a request the proxy marks `X-Forwarded-Proto: http`
-  is refused, so a token never travels in clear.
+  `auth`, `authorization`), or `jly_agent_` anywhere in the query string, is
+  refused with 400 before authentication, and only the parameter name is
+  logged. In production behind `JANUSLY_TRUSTED_PROXY`, a request with `http`
+  in any `X-Forwarded-Proto` hop is refused, so a token never travels in clear.
 - A `Host` other than loopback, the `JANUSLY_WEB_BASE_URL` host or one in
   `JANUSLY_MCP_ALLOWED_HOSTS` is refused, which defeats DNS rebinding. This
   allowlist replaces the SDK's localhost check, which would refuse a reverse
@@ -170,8 +171,10 @@ mode: no session is kept, so any instance answers any request, and `GET` and
   carrying an `Origin` is refused, and `http.CrossOriginProtection` wraps the
   handler.
 - Request bodies are capped at 256000 bytes (413 beyond), the same as the
-  per-call request guard. JSON-RPC batches are refused with 400, because one
-  request would otherwise fan out into thousands of concurrent, audited calls.
+  per-call request guard. Authenticated JSON-RPC batches are refused with 400,
+  because one request would otherwise fan out into thousands of concurrent,
+  audited calls. `subscriptions/listen` is refused, so no stream outlives the
+  token check made when its request started.
 - A tool's internal error is logged and answered with fixed text; database
   and connection details never reach the client.
 - Audit rows record `transport: http`.
@@ -245,7 +248,8 @@ document, so one call shows every problem.
 
 `runs.start` accepts either a document or a `workflowId`. A `workflowId` runs
 the active workflow's latest immutable version, bound exactly as if that
-document had been sent. `idempotencyKey` shares the HTTP start's per-tenant key
+document had been sent. A `workflowVersionId` passed with it must be that
+latest version; any other is refused, never run. `idempotencyKey` shares the HTTP start's per-tenant key
 space: a retry with the same key returns the first run with `replayed: true`.
 
 `workflows.save` calls the same canonical atomic engine append as HTTP. It does
