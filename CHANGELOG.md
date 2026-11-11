@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The runs list no longer shows another organization's workflow name. A run
+  whose document reused a workflow id saved in a different organization took
+  that workflow's name, in the API and in the MCP `runs.list`; the name now
+  comes only from the run's own organization.
 - External agents get their own credentials. A member creates an agent client
   for Claude Code, Codex or another agent with a capability ceiling (read,
   operate, and the propose, test, publish and report capabilities that later
