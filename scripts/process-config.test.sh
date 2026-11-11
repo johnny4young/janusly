@@ -63,4 +63,10 @@ done
 JANUSLY_AUTHORING_EXPERIENCE_ENABLED='' JANUSLY_AUTHORING_EXPERIENCE_MODE='' render |
   jq -e '.services.janusly.environment |
     .JANUSLY_AUTHORING_EXPERIENCE_ENABLED == "false" and .JANUSLY_AUTHORING_EXPERIENCE_MODE == "off"' >/dev/null
+# The wildcard acknowledgement holds only while the API port stays on host loopback.
+render | jq -e '.services.janusly |
+  .environment.JANUSLY_HTTP_HOST == "0.0.0.0" and
+  .environment.ALLOW_DEV_AUTH_HEADERS_ON_NETWORK == "true" and
+  all(.ports[] | select(.target == 3001); .host_ip == "127.0.0.1") and
+  any(.ports[]; .target == 3001)' >/dev/null
 printf 'Process configuration forwarding passed\n'

@@ -184,7 +184,7 @@ func Load(getenv func(string) string) (Config, error) {
 	default:
 		problems = append(problems, "JANUSLY_HTTP_HOST must be empty, 127.0.0.1, 0.0.0.0, ::1, or ::")
 	}
-	if DevAuthHeadersActive(strings.TrimSpace(getenv("SUPABASE_URL")) != "", production, getenv("ALLOW_DEV_AUTH_HEADERS") == "true") {
+	if DevAuthHeadersActive(getenv("SUPABASE_URL") != "", production, getenv("ALLOW_DEV_AUTH_HEADERS") == "true") {
 		switch cfg.HTTPHost {
 		case "":
 			cfg.HTTPHost = "127.0.0.1"

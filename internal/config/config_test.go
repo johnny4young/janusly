@@ -249,6 +249,7 @@ func TestDevAuthHeadersKeepTheListenerOnLoopback(t *testing.T) {
 		{"local defaults", map[string]string{}, "127.0.0.1", false},
 		{"explicit dev headers in production", map[string]string{"JANUSLY_ENV": "production", "ALLOW_DEV_AUTH_HEADERS": "true"}, "127.0.0.1", false},
 		{"identity provider", map[string]string{"SUPABASE_URL": "https://auth.example.test"}, "", false},
+		{"blank identity provider, as the resolver reads it", map[string]string{"SUPABASE_URL": " "}, "", false},
 		{"production with identity provider", map[string]string{"JANUSLY_ENV": "production", "SUPABASE_URL": "https://auth.example.test"}, "", false},
 		{"loopback kept", map[string]string{"JANUSLY_HTTP_HOST": "::1"}, "::1", false},
 		{"wildcard refused", map[string]string{"JANUSLY_HTTP_HOST": "0.0.0.0"}, "", true},
