@@ -158,7 +158,9 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 	defer func() {
 		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key)
 	}()
-	_ = q.ExpirePublishRequest(ctx, store.ExpirePublishRequestParams{OrgID: rc.OrgID, ID: id})
+	if err := q.ExpirePublishRequest(ctx, store.ExpirePublishRequestParams{OrgID: rc.OrgID, ID: id}); err != nil {
+		return internalError()
+	}
 	request, err := q.GetPublishRequest(ctx, store.GetPublishRequestParams{OrgID: rc.OrgID, ID: id})
 	if err != nil {
 		return internalError()
@@ -201,6 +203,10 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 			"the workflow changed since the agent drafted this; reject it and let the agent draft again", nil)
 	case errors.Is(err, engine.ErrWorkflowSaveRolloutActive):
 		return httpkit.Error(http.StatusConflict, "workflow_rollout_active", "finish the active rollout before publishing", nil)
+	case errors.Is(err, engine.ErrWorkflowSaveConflict):
+		return httpkit.Error(http.StatusConflict, "workflow_save_conflict", "a concurrent save changed the workflow; try again", nil)
+	case errors.Is(err, engine.ErrWorkflowSaveNotFound), errors.Is(err, engine.ErrWorkflowSaveIDTaken):
+		return httpkit.Error(http.StatusConflict, "workflow_unavailable", "the workflow no longer exists; reject this request", nil)
 	case err != nil:
 		return internalError()
 	}
@@ -240,12 +246,22 @@ func (s *service) secondPerson(ctx context.Context, rc httpkit.Request, request 
 		return &result
 	}
 	var required bool
-	if json.Unmarshal(raw, &required) != nil || !required {
+	if json.Unmarshal(raw, &required) != nil {
+		result := httpkit.Error(http.StatusServiceUnavailable, "publish_request_policy_unavailable",
+			"the approval policy cannot be read; try again", nil)
+		return &result
+	}
+	if !required {
 		return nil
 	}
 	accountable := map[string]bool{request.OnBehalfOf: true}
 	if clientID, ok := strings.CutPrefix(request.DraftedBy, "agent:"); ok {
 		client, err := store.New(s.pool).GetAgentClient(ctx, store.GetAgentClientParams{OrgID: rc.OrgID, ID: clientID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			result := httpkit.Error(http.StatusConflict, "publish_request_creator_unknown",
+				"the drafting agent client no longer exists, so a second person cannot be confirmed; reject this request", nil)
+			return &result
+		}
 		if err != nil {
 			result := internalError()
 			return &result
