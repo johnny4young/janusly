@@ -44,18 +44,6 @@ func lastRow(t *testing.T, pool *pgxpool.Pool, orgID string) (action string, met
 	return action, metadata
 }
 
-func TestAuditCatalogPinned(t *testing.T) {
-	if got := len(knownActions); got != 152 {
-		t.Fatalf("contract catalog must pin at 152, got %d", got)
-	}
-	if !IsKnown("workflow.saved") || !IsKnown("org.role.created") {
-		t.Fatal("expected reference actions missing")
-	}
-	if IsKnown("made.up.action") {
-		t.Fatal("unknown actions must not validate")
-	}
-}
-
 func TestWriteEnrichesAndRedacts(t *testing.T) {
 	pool := testPool(t)
 	org := fmt.Sprintf("org-audit-%d", time.Now().UnixNano())

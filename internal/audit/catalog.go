@@ -1,5 +1,5 @@
 // The closed audit-action catalog, extracted mechanically from the
-// reference (the API contract AuditAction union — 147 actions).
+// reference (the API contract AuditAction union).
 // Action is a distinct type and every write validates membership, so a
 // typo'd action is a test failure here and can never land as a silent
 // unfilterable row. Runtime-own actions (documented in the plan registry)
