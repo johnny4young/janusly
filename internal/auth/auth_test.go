@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,7 +209,7 @@ func TestAgentTokenIsRefusedBeforeEveryProvider(t *testing.T) {
 		t.Fatal("agent token reached the identity provider")
 		return "", "", false
 	}
-	for _, header := range []string{"Bearer " + agentToken, "Bearer  " + agentToken, "bearer " + agentToken, "Bearer \t" + agentToken} {
+	for _, header := range []string{"Bearer " + agentToken, "Bearer  " + agentToken, "bearer " + agentToken, "Bearer \t" + agentToken, "Bearer " + strings.ToUpper(agentToken)} {
 		if p := principalFor(t, rv, map[string]string{
 			"Authorization": header, "x-org-id": "org-a", "x-user-id": "u1",
 		}); p != nil {

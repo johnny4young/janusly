@@ -50,8 +50,8 @@ An agent client is an organization's credential for one external agent,
 created by a member through `POST /agent-clients` (`agents.write`) and listed
 with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
 once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
-is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator or an
-admin may rotate or revoke, and service tokens can manage none.
+is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator may
+rotate, the creator or an admin may revoke, and service tokens can manage none.
 
 A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,
 `operate`, `report`; `read` is always included), an optional scope of workflow
