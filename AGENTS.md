@@ -95,6 +95,8 @@ Read the relevant document before changing a feature:
 - Integrations: `docs/architecture/integrations.md`
 - MCP: `docs/architecture/mcp-client.md` and
   `docs/architecture/mcp-server.md`
+- External agents (identity, remote MCP, publish gate, run map):
+  `docs/architecture/agent-platform.md`
 - Frontend: `docs/architecture/web-frontend.md`
 - Observability: `docs/architecture/platform-services.md`
 
