@@ -9,6 +9,10 @@
   any user, and before this change an unset `JANUSLY_HTTP_HOST` exposed them on
   every interface. Docker Compose sets both values for its container, whose
   port is published on the host's loopback only.
+- The runs list no longer shows another organization's workflow name. A run
+  whose document reused a workflow id saved in a different organization took
+  that workflow's name, in the API and in the MCP `runs.list`; the name now
+  comes only from the run's own organization.
 - Cancelling a run while an operator applies a semantic recovery decision to
   it no longer fails one of the two with a database deadlock error. The
   decision and the cancellation now take turns: whichever starts first
