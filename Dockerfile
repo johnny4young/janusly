@@ -17,7 +17,7 @@ RUN JANUSLY_BUILD_ID="${JANUSLY_BUILD_ID}" \
     VITE_DOCS_URL="${VITE_DOCS_URL}" \
     pnpm build
 
-FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS go-build
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,id=janusly-mod,target=/go/pkg/mod go mod download
