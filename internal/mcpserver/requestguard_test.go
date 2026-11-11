@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 func TestInternalToolErrorsNeverReachTheClient(t *testing.T) {
 	failing := &mcp.CallToolResult{}
 	failing.SetError(errors.New("failed to connect to user=janusly database=janusly host=10.0.0.5"))
-	replaced, ok := withoutInternalError("runs.status", failing).(*mcp.CallToolResult)
+	replaced, ok := withoutInternalError(slog.Default(), "runs.status", failing).(*mcp.CallToolResult)
 	if !ok || !replaced.IsError || replaced.GetError() != nil {
 		t.Fatalf("internal error kept: %+v", replaced)
 	}
@@ -20,7 +21,7 @@ func TestInternalToolErrorsNeverReachTheClient(t *testing.T) {
 		t.Fatalf("leaked or unhelpful text: %q", text)
 	}
 	business, _, _ := expected("run not found")
-	if withoutInternalError("runs.status", business) != business {
+	if withoutInternalError(slog.Default(), "runs.status", business) != business {
 		t.Fatal("an expected failure was rewritten")
 	}
 }
