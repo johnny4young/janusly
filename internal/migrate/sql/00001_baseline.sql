@@ -3727,4 +3727,66 @@ CREATE TABLE public.publish_requests (
 CREATE UNIQUE INDEX publish_requests_live_idx ON public.publish_requests (org_id, workflow_id) WHERE status = 'pending';
 CREATE INDEX publish_requests_org_created_idx ON public.publish_requests (org_id, created_at DESC, id DESC);
 
+-- An external agent's session observed through the hooks bridge. Only ids,
+-- tool names, timing and Janusly references are kept; never paths,
+-- transcripts or tool inputs.
+CREATE TABLE public.agent_sessions (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    external_session_id text NOT NULL,
+    runtime text NOT NULL,
+    project text,
+    runtime_version text,
+    model text,
+    status text DEFAULT 'running'::text NOT NULL,
+    end_status text,
+    truncated boolean DEFAULT false NOT NULL,
+    event_count integer DEFAULT 0 NOT NULL,
+    last_seq bigint DEFAULT 0 NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    last_event_at timestamp with time zone NOT NULL,
+    ended_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_sessions_runtime_check CHECK (runtime IN ('claude-code', 'codex')),
+    CONSTRAINT agent_sessions_status_check CHECK (status IN ('running', 'ended')),
+    CONSTRAINT agent_sessions_ended_check CHECK ((status = 'ended') = (ended_at IS NOT NULL)),
+    CONSTRAINT agent_sessions_external_check CHECK (char_length(external_session_id) BETWEEN 1 AND 200),
+    CONSTRAINT agent_sessions_counts_check CHECK (event_count >= 0 AND last_seq >= 0)
+);
+CREATE UNIQUE INDEX agent_sessions_external_idx ON public.agent_sessions (org_id, agent_client_id, external_session_id);
+CREATE INDEX agent_sessions_org_recent_idx ON public.agent_sessions (org_id, last_event_at DESC, id DESC);
+CREATE INDEX agent_sessions_client_live_idx ON public.agent_sessions (agent_client_id, last_event_at) WHERE status = 'running';
+CREATE INDEX agent_sessions_last_event_idx ON public.agent_sessions (last_event_at);
+
+-- One receipt per (client, event id): a retried hook is stored once. seq is
+-- the server's order inside the session; a stale event has none.
+CREATE TABLE public.agent_session_events (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+    event_id text NOT NULL,
+    seq bigint,
+    outcome text NOT NULL,
+    type text NOT NULL,
+    agent_id text,
+    parent_agent_id text,
+    agent_type text,
+    tool_use_id text,
+    tool text,
+    tool_kind text,
+    mcp_server text,
+    status text,
+    duration_ms bigint,
+    janusly_refs jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_events_outcome_check CHECK ((outcome = 'applied') = (seq IS NOT NULL) AND outcome IN ('applied', 'stale')),
+    CONSTRAINT agent_session_events_id_check CHECK (event_id ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT agent_session_events_duration_check CHECK (duration_ms IS NULL OR duration_ms >= 0)
+);
+CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_events (agent_client_id, event_id);
+CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events (session_id, seq);
+
 -- +goose StatementEnd

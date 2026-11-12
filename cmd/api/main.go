@@ -28,7 +28,9 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/httpapi"
+	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
@@ -293,23 +295,32 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
-	var mcpHandler http.Handler
+	var mcpHandler, hookHandler http.Handler
 	if cfg.MCPHTTP.Enabled {
 		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
 		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
 			OnError: mcpTracker.RecordError, OnSuccess: mcpTracker.RecordRecovery,
 		})
+		agentHTTP := mcpserver.HTTPOptions{
+			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
+		}
 		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
 			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,
 			WebBaseURL: os.Getenv("JANUSLY_WEB_BASE_URL"),
-		}, mcpserver.HTTPOptions{
-			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
-		})
-		logger.Info("remote mcp enabled", "path", "/mcp", "allowedHosts", cfg.MCPHTTP.AllowedHosts)
+		}, agentHTTP)
+		// The hooks bridge is the same remote agent surface: same switch,
+		// transport rules and token checks.
+		hookHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(mcpserver.Deps{
+			Audit: auditWriter, Pool: pool, Limiter: mcpLimiter, Transport: "hooks", Logger: logger,
+		}, agentsessions.Ingest(agentsessions.IngestDeps{
+			Pool: pool, Limiter: mcpLimiter, Logger: logger, NewID: uuid.NewString,
+		})), agentHTTP)
+		logger.Info("remote mcp enabled", "path", "/mcp", "hooksPath", hookwire.Path, "allowedHosts", cfg.MCPHTTP.AllowedHosts)
 	}
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
 		MCPHandler:                  mcpHandler,
+		AgentHookHandler:            hookHandler,
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
 		Audit:                       auditWriter,

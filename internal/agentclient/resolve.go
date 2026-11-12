@@ -3,12 +3,14 @@ package agentclient
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -60,10 +62,21 @@ type Principal struct {
 	Permissions map[string]bool
 	// Tools is the set of MCP tools the ceiling reaches.
 	Tools map[string]bool
+
+	digest []byte
 }
+
+// HookSigningKey is the hooks bridge HMAC key, derived from the stored token
+// digest. It is never logged or returned.
+func (p *Principal) HookSigningKey() string { return hookwire.SigningKeyFromDigest(p.digest) }
 
 // ActorID is the identity recorded in audit rows, runs and versions.
 func (p *Principal) ActorID() string { return "agent:" + p.ClientID }
+
+// Has reports whether the ceiling includes capability.
+func (p *Principal) Has(capability Capability) bool {
+	return slices.Contains(p.Capabilities, capability)
+}
 
 // Scoped reports whether the client is limited to some workflows.
 func (p *Principal) Scoped() bool {
@@ -129,6 +142,7 @@ func (r Resolver) Resolve(ctx context.Context, token string) (*Principal, error)
 		ScopeWorkflowIDs: row.ScopeWorkflowIds, ScopeTags: row.ScopeTags,
 		RateLimitPerMinute: int(row.RateLimitPerMinute), ExpiresAt: row.ExpiresAt,
 		Permissions: permissions, Tools: CeilingTools(capabilities),
+		digest: row.TokenDigest,
 	}, nil
 }
 

@@ -118,6 +118,7 @@ func TestScrubSecretShapes(t *testing.T) {
 		{"auth Bearer abcdefghijklmnop.qrstuvwxyz done", "auth [redacted] done"},
 		{"jwt eyJ" + strings.Repeat("a", 12) + "." + strings.Repeat("b", 12) + "." + strings.Repeat("c", 12), "jwt [redacted]"},
 		{"slack xoxb-1234567890-abc", "slack [redacted]"},
+		{"agent jly_agent_" + strings.Repeat("A", 43) + " here", "agent [redacted] here"},
 		{"clean message, no tokens", "clean message, no tokens"},
 	}
 	for _, tc := range cases {

@@ -30,6 +30,49 @@ type AgentClient struct {
 	LastUsedAt         *time.Time
 }
 
+type AgentSession struct {
+	ID                string
+	OrgID             string
+	AgentClientID     string
+	ExternalSessionID string
+	Runtime           string
+	Project           pgtype.Text
+	RuntimeVersion    pgtype.Text
+	Model             pgtype.Text
+	Status            string
+	EndStatus         pgtype.Text
+	Truncated         bool
+	EventCount        int32
+	LastSeq           int64
+	StartedAt         time.Time
+	LastEventAt       time.Time
+	EndedAt           *time.Time
+	CreatedAt         time.Time
+}
+
+type AgentSessionEvent struct {
+	ID            string
+	OrgID         string
+	AgentClientID string
+	SessionID     string
+	EventID       string
+	Seq           pgtype.Int8
+	Outcome       string
+	Type          string
+	AgentID       pgtype.Text
+	ParentAgentID pgtype.Text
+	AgentType     pgtype.Text
+	ToolUseID     pgtype.Text
+	Tool          pgtype.Text
+	ToolKind      pgtype.Text
+	McpServer     pgtype.Text
+	Status        pgtype.Text
+	DurationMs    pgtype.Int8
+	JanuslyRefs   json.RawMessage
+	OccurredAt    time.Time
+	ReceivedAt    time.Time
+}
+
 type AlertDispatch struct {
 	ID             string
 	OrgID          string
