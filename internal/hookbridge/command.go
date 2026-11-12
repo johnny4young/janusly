@@ -38,7 +38,7 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 			return 0
 		}
 	}
-	Run(ctx, stdin, stderr, ConfigFromEnv(getenv, args))
+	Run(ctx, stdin, stdout, stderr, ConfigFromEnv(getenv, args))
 	return 0
 }
 
@@ -95,10 +95,14 @@ func printConfig(stdout, stderr io.Writer, args []string) int {
 	}
 	hooks := map[string]any{}
 	for _, event := range events {
-		// The bridge gives up after two seconds; SessionEnd runs with a short budget.
+		// The bridge gives up after two seconds; SessionEnd runs with a short
+		// budget, and PreToolUse may hold a gated call for a person.
 		timeout := 5
-		if event == "SessionEnd" {
+		switch event {
+		case "SessionEnd":
 			timeout = 3
+		case "PreToolUse":
+			timeout = int((DefaultGateWait + gateTimeoutSlack).Seconds())
 		}
 		hooks[event] = []any{map[string]any{"hooks": []any{map[string]any{
 			"type": "command", "command": "janusly hook " + runtime, "timeout": timeout,

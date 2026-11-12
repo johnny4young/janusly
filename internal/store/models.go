@@ -28,6 +28,8 @@ type AgentClient struct {
 	RevokedAt          *time.Time
 	RevokedBy          pgtype.Text
 	LastUsedAt         *time.Time
+	GateTools          []string
+	CaptureContent     bool
 }
 
 type AgentSession struct {
@@ -71,6 +73,24 @@ type AgentSessionEvent struct {
 	JanuslyRefs   json.RawMessage
 	OccurredAt    time.Time
 	ReceivedAt    time.Time
+}
+
+type AgentSessionGate struct {
+	ID            string
+	OrgID         string
+	AgentClientID string
+	SessionID     string
+	ToolUseID     string
+	Tool          string
+	McpServer     pgtype.Text
+	AgentID       pgtype.Text
+	Content       json.RawMessage
+	Status        string
+	DecidedBy     pgtype.Text
+	DecidedAt     *time.Time
+	Reason        pgtype.Text
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
 }
 
 type AlertDispatch struct {

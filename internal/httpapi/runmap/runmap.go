@@ -400,6 +400,25 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 				"reasons": reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
 		}
 	}
+	if permissions["agents.write"] && permissions["agents.read"] {
+		gates, err := q.ListPendingAgentGatesForOrg(ctx, store.ListPendingAgentGatesForOrgParams{OrgID: rc.OrgID, Now: s.now().UTC()})
+		if err != nil {
+			return internalError()
+		}
+		secondPerson := len(gates) > 0
+		if secondPerson {
+			if secondPerson, err = s.secondPersonRequired(r, rc); err != nil {
+				secondPerson = true
+			}
+		}
+		for _, gate := range gates {
+			if secondPerson && gate.ClientCreatedBy == rc.UserID {
+				continue
+			}
+			items = append(items, map[string]any{"kind": "agent_gate", "id": gate.ID, "sessionId": gate.SessionID,
+				"tool": gate.Tool, "agentClientName": gate.AgentClientName, "expiresAt": gate.ExpiresAt.UTC().Format(time.RFC3339)})
+		}
+	}
 	return httpkit.OK(map[string]any{"items": items})
 }
 

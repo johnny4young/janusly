@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/agentsession"
+	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/store"
@@ -26,19 +27,21 @@ const (
 
 // Deps are the shared API dependencies of the read routes.
 type Deps struct {
+	Audit  audit.Writer
 	Pool   *pgxpool.Pool
 	Routes httpkit.Registrar
 	Now    func() time.Time
 }
 
 type service struct {
-	pool *pgxpool.Pool
-	now  func() time.Time
+	audit audit.Writer
+	pool  *pgxpool.Pool
+	now   func() time.Time
 }
 
 // Mount registers the observed-session read routes for people with runs.read.
 func Mount(mux *http.ServeMux, deps Deps) {
-	s := &service{pool: deps.Pool, now: deps.Now}
+	s := &service{audit: deps.Audit, pool: deps.Pool, now: deps.Now}
 	if s.now == nil {
 		s.now = time.Now
 	}
@@ -54,6 +57,13 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	deps.Routes.Route(mux, "GET /agent-sessions/{sessionId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
 		httpkit.WriteUnversioned(w, s.sessionMap(r, rc))
 	})
+	decide := httpkit.Gate{Role: auth.RoleEditor, Permission: "agents.write"}
+	deps.Routes.Route(mux, "POST /agent-sessions/gates/{gateId}/decide", decide, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.decide(r, rc))
+	})
+	deps.Routes.Route(mux, "POST /v1/agent-sessions/gates/{gateId}/decide", decide, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.decide(r, rc))
+	})
 	deps.Routes.Route(mux, "GET /v1/agent-sessions/{sessionId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
 		httpkit.WriteVersioned(w, rc.ID, s.sessionMap(r, rc))
 	})
@@ -63,15 +73,15 @@ func internalError() httpkit.Result {
 	return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
-// holds reports whether the viewer's live grant includes permission, resolved
-// the way the route gate resolves it.
-func holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission string) bool {
+// holds reports whether the viewer's live grant includes permission at the
+// given rank, resolved the way the route gate resolves it.
+func holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission string, rank auth.Role) bool {
 	if rc.Auth == nil {
 		return false
 	}
 	q := store.New(pool)
 	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
-	if err != nil || role == nil {
+	if err != nil || role == nil || auth.Rank[role.InheritsFrom] < auth.Rank[rank] {
 		return false
 	}
 	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
@@ -83,7 +93,7 @@ func forbidden() httpkit.Result {
 }
 
 func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
-	if !holds(r, s.pool, rc, "agents.read") {
+	if !holds(r, s.pool, rc, "agents.read", auth.RoleViewer) {
 		return forbidden()
 	}
 	limit := defaultPage
@@ -123,7 +133,7 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 }
 
 func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result {
-	if !holds(r, s.pool, rc, "agents.read") {
+	if !holds(r, s.pool, rc, "agents.read", auth.RoleViewer) {
 		return forbidden()
 	}
 	q := store.New(s.pool)
@@ -162,9 +172,13 @@ func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result
 		return internalError()
 	}
 	graph.Refs.RunIDs = append([]string{}, verified...)
+	gates, err := s.pendingGates(r, rc, row.ID, row.ClientCreatedBy)
+	if err != nil {
+		return internalError()
+	}
 	return httpkit.OK(map[string]any{
 		"session": sessionView(row, s.now()), "lanes": graph.Lanes, "totals": graph.Totals,
-		"liveSubagents": graph.LiveSubagents, "refs": graph.Refs,
+		"liveSubagents": graph.LiveSubagents, "refs": graph.Refs, "gates": gates,
 	})
 }
 

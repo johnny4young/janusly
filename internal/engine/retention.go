@@ -152,6 +152,17 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		} else if purged > 0 {
 			logger.Info("retention purged agent sessions", "count", purged)
 		}
+		// Captured gate input is kept for a shorter window than its session.
+		gateNow := e.now().UTC()
+		if _, err := store.New(e.pool).ExpireAgentGates(ctx, gateNow); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).ClearExpiredAgentGateContent(ctx, gateNow.Add(-agentsession.GateContentRetention)); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("agent gate content retention failed", "error", err)
+			}
+		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
 		e.runDataRetention(ctx, logger)
 		// Weekly digests ride the same cadence; the state-row claim keeps

@@ -75,6 +75,53 @@
       "AgentSessionMap": {
         "additionalProperties": false,
         "properties": {
+          "gates": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "contentCaptured": {
+                  "type": "boolean"
+                },
+                "expiresAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "input": {},
+                "mcpServer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "needsYou": {
+                  "type": "boolean"
+                },
+                "tool": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "tool",
+                "mcpServer",
+                "agentId",
+                "contentCaptured",
+                "input",
+                "expiresAt",
+                "needsYou"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "lanes": {
             "items": {
               "additionalProperties": false,
@@ -224,7 +271,8 @@
           "lanes",
           "totals",
           "liveSubagents",
-          "refs"
+          "refs",
+          "gates"
         ],
         "type": "object"
       },
@@ -1993,6 +2041,38 @@
               "workflowId",
               "reasons",
               "requestedBy",
+              "expiresAt"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "agentClientName": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "agent_gate"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "sessionId",
+              "tool",
+              "agentClientName",
               "expiresAt"
             ],
             "type": "object"
@@ -7162,6 +7242,98 @@
           }
         },
         "summary": "External agent sessions observed through the hooks bridge, newest first"
+      }
+    },
+    "/agent-sessions/gates/{gateId}/decide": {
+      "post": {
+        "operationId": "post_v1_agent-sessions_gates_gateId_decide",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "approve",
+                      "deny"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "decision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "gate": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "approved",
+                                    "denied"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "status"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "gate"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Approve or deny a tool call an agent's hook is holding"
       }
     },
     "/agent-sessions/{sessionId}/map": {

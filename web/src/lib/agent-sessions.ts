@@ -2,6 +2,7 @@
 import { contractApi } from '../api'
 import { isGetAgentSessionsResponse } from './api-guards/operations/GetAgentSessions'
 import { isGetAgentSessionsSessionIdMapResponse } from './api-guards/operations/GetAgentSessionsSessionIdMap'
+import { isPostAgentSessionsGatesGateIdDecideResponse } from './api-guards/operations/PostAgentSessionsGatesGateIdDecide'
 import type { ApiResponse } from './api-types.generated'
 
 export type AgentSessionPage = ApiResponse<'GET /agent-sessions'>
@@ -17,6 +18,13 @@ export function getAgentSessionMap(id: string, signal?: AbortSignal): Promise<Ag
   return contractApi('GET /agent-sessions/{sessionId}/map', `/v1/agent-sessions/${encodeURIComponent(id)}/map`, undefined, {
     signal, guard: isGetAgentSessionsSessionIdMapResponse,
   })
+}
+
+export type AgentSessionGate = AgentSessionMap['gates'][number]
+
+export function decideAgentGate(id: string, decision: 'approve' | 'deny') {
+  return contractApi('POST /agent-sessions/gates/{gateId}/decide', `/v1/agent-sessions/gates/${encodeURIComponent(id)}/decide`,
+    { decision }, { guard: isPostAgentSessionsGatesGateIdDecideResponse })
 }
 
 export function runtimeLabel(runtime: string): string {

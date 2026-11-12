@@ -167,9 +167,12 @@ CREATE TABLE public.agent_clients (
     revoked_at timestamp with time zone,
     revoked_by text,
     last_used_at timestamp with time zone,
+    gate_tools text[] DEFAULT '{}'::text[] NOT NULL,
+    capture_content boolean DEFAULT false NOT NULL,
     CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
     CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
     CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '2160:00:00'::interval)))),
+    CONSTRAINT agent_clients_gate_check CHECK (((cardinality(gate_tools) <= 20) AND ((NOT capture_content) OR (cardinality(gate_tools) > 0)))),
     CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
     CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
     CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
@@ -205,6 +208,32 @@ CREATE TABLE public.agent_session_events (
     CONSTRAINT agent_session_events_duration_check CHECK (((duration_ms IS NULL) OR (duration_ms >= 0))),
     CONSTRAINT agent_session_events_id_check CHECK ((event_id ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT agent_session_events_outcome_check CHECK ((((outcome = 'applied'::text) = (seq IS NOT NULL)) AND (outcome = ANY (ARRAY['applied'::text, 'stale'::text]))))
+);
+
+
+--
+-- Name: agent_session_gates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_session_gates (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL,
+    tool_use_id text NOT NULL,
+    tool text NOT NULL,
+    mcp_server text,
+    agent_id text,
+    content jsonb,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    reason text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_gates_decision_check CHECK (((status = ANY (ARRAY['approved'::text, 'denied'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
+    CONSTRAINT agent_session_gates_reason_check CHECK (((reason IS NULL) OR (char_length(reason) <= 500))),
+    CONSTRAINT agent_session_gates_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text, 'expired'::text])))
 );
 
 
@@ -1957,6 +1986,14 @@ ALTER TABLE ONLY public.agent_session_events
 
 
 --
+-- Name: agent_session_gates agent_session_gates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_gates
+    ADD CONSTRAINT agent_session_gates_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: agent_sessions agent_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2725,6 +2762,34 @@ CREATE INDEX agent_session_events_run_idx ON public.agent_session_events USING b
 --
 
 CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events USING btree (session_id, seq);
+
+
+--
+-- Name: agent_session_gates_call_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_session_gates_call_idx ON public.agent_session_gates USING btree (session_id, tool_use_id);
+
+
+--
+-- Name: agent_session_gates_client_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_client_pending_idx ON public.agent_session_gates USING btree (agent_client_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: agent_session_gates_content_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_content_idx ON public.agent_session_gates USING btree (created_at) WHERE (content IS NOT NULL);
+
+
+--
+-- Name: agent_session_gates_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_pending_idx ON public.agent_session_gates USING btree (org_id, created_at) WHERE (status = 'pending'::text);
 
 
 --
@@ -4105,6 +4170,14 @@ CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH RO
 
 ALTER TABLE ONLY public.agent_session_events
     ADD CONSTRAINT agent_session_events_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: agent_session_gates agent_session_gates_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_gates
+    ADD CONSTRAINT agent_session_gates_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
 
 
 --

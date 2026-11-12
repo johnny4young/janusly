@@ -29,6 +29,7 @@ const detail: AgentSessionMap = {
   totals: { events: 6, toolCalls: 3, mcpCalls: 2, errors: 1 },
   liveSubagents: 1,
   refs: { workflowIds: [], draftIds: [], runIds: ['run_8c1'] },
+  gates: [],
 }
 
 beforeEach(() => {
@@ -99,5 +100,26 @@ describe('<AgentSessionsPanel />', () => {
     vi.mocked(api).mockRejectedValueOnce(new Error('down'))
     render(<AgentSessionsPanel />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent sessions could not be loaded.')
+  })
+
+  it('shows a held tool call with its captured input and sends the decision', async () => {
+    window.history.replaceState(null, '', '/#/multiAgent/sessions/sess-1')
+    const gates = [
+      { id: 'gate-1', tool: 'mcp__stripe__create_refund', mcpServer: 'stripe', agentId: null, contentCaptured: true,
+        input: { charge: 'ch_1' }, expiresAt: '2026-11-12T10:15:00Z', needsYou: true },
+      { id: 'gate-2', tool: 'Bash', mcpServer: null, agentId: null, contentCaptured: false,
+        input: null, expiresAt: '2026-11-12T10:15:00Z', needsYou: false },
+    ]
+    vi.mocked(api).mockImplementation(async (path: string) =>
+      path.includes('/decide') ? { gate: { id: 'gate-1', status: 'approved' } } : { ...detail, gates })
+    render(<AgentSessionsPanel />)
+    const cards = await screen.findAllByTestId('agent-session-gate')
+    expect(within(cards[0]!).getByText(/"charge": "ch_1"/)).toBeVisible()
+    expect(within(cards[1]!).getByText('Arguments were not captured for this call.')).toBeVisible()
+    expect(within(cards[1]!).getByText('Someone else has to decide this call.')).toBeVisible()
+    expect(within(cards[1]!).queryByRole('button')).toBeNull()
+    fireEvent.click(within(cards[0]!).getByRole('button', { name: 'Approve' }))
+    await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([path, init]) =>
+      path === '/v1/agent-sessions/gates/gate-1/decide' && String((init as RequestInit).body).includes('"approve"'))).toBe(true))
   })
 })

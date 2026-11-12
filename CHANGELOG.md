@@ -11,6 +11,10 @@
   configuration. The Agent activity tab lists the observed sessions and shows
   each one's agents and subagents as lanes; a run started from a session links
   to it.
+- An agent client can list `gateTools`. `janusly hook` then holds those tool
+  calls until a person approves or denies them from the session map; with no
+  answer the agent's own permission prompt decides, never an automatic allow.
+  `captureContent` lets the decider see the held call's arguments.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the

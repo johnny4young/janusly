@@ -537,11 +537,44 @@ live in the Agent activity tab (`#/multiAgent/sessions/<id>`), loaded on
 demand; a running session refreshes every 5 seconds by polling, since no run
 stream carries it.
 
-- **Gate from the map.** For tools the client lists in `gateTools`, a
-  `PreToolUse` event opens a gate request and the bridge long-polls its
-  decision in 25-second windows, up to the hook timeout. A person approves or
-  denies from the map; the bridge prints the hook's allow or deny decision.
-  No goroutine is held per gate, and an agent token cannot decide one.
+**Gate from the map.** An agent client lists `gateTools`: exact tool names or
+prefixes ending in `*` (`mcp__stripe__*`), at most 20, with the `report`
+capability.
+
+1. The ingest answers a matching `tool.requested` with `gate: true`.
+2. The bridge opens a gate with `POST /agent-sessions/gates` (same bearer and
+   signature) and long-polls `GET /agent-sessions/gates/{id}/decision?wait=25`
+   (the signature covers the path) until its wait runs out
+   (`JANUSLY_HOOK_GATE_SECONDS`, 120 by default).
+3. A person decides with `POST /v1/agent-sessions/gates/{id}/decide` from the
+   session map; `/needs-you` lists the gate as `agent_gate`.
+4. The bridge prints the runtime's `PreToolUse` decision.
+
+Rules:
+
+- **Who decides.** A signed-in person with editor rank and `agents.write`;
+  agent and service tokens never. The client's creator may decide (it is their
+  agent on their machine), unless the organization sets
+  `agents.publishRequiresSecondPerson`; then the route refuses them and
+  `/needs-you` does not offer it.
+- **No answer is `ask`.** A gate lives 10 minutes. Expired, unanswered within
+  the bridge's wait, refused, unreachable, or past 20 open gates per client:
+  the bridge prints `ask` and the person decides in their terminal. Nothing
+  defaults to `allow`.
+- **Codex.** Its hooks have no `ask` and no documented plain `allow`, so the
+  bridge prints only denials there; an approval or an unanswered gate leaves
+  the call to Codex's own approval policy.
+- **Content.** Without `captureContent` the decider sees the tool, server,
+  agent and session, not the arguments, and the card says so.
+  `captureContent` applies only to `gateTools`: the bridge then sends the
+  gated call's input, scrubbed on both sides and cut to 8000 bytes; a client
+  without it that sends content is refused. Only people of the deciding role
+  read the captured input; a viewer sees that it exists. It is cleared after 7
+  days and never enters audit rows (`agent_gate.decided` records the tool,
+  session, client and decision).
+- A gate belongs to its client: another client, or another organization, gets
+  `404` reading or opening it. The poll holds nothing beyond its own request.
+
 - **Save as workflow.** An observed session converts into a draft: subagents
   become `agent` nodes, overlapping ones run in parallel. It enters the
   publish gate like any agent draft; it is a starting point, not a replay.

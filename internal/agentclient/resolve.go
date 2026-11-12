@@ -62,6 +62,10 @@ type Principal struct {
 	Permissions map[string]bool
 	// Tools is the set of MCP tools the ceiling reaches.
 	Tools map[string]bool
+	// GateTools are the tool patterns the hooks bridge holds for a decision.
+	GateTools []string
+	// CaptureContent keeps gated tool inputs for the decider.
+	CaptureContent bool
 
 	digest []byte
 }
@@ -142,6 +146,7 @@ func (r Resolver) Resolve(ctx context.Context, token string) (*Principal, error)
 		ScopeWorkflowIDs: row.ScopeWorkflowIds, ScopeTags: row.ScopeTags,
 		RateLimitPerMinute: int(row.RateLimitPerMinute), ExpiresAt: row.ExpiresAt,
 		Permissions: permissions, Tools: CeilingTools(capabilities),
+		GateTools: row.GateTools, CaptureContent: row.CaptureContent,
 		digest: row.TokenDigest,
 	}, nil
 }
