@@ -24,6 +24,7 @@ export const panelLoaders = {
   reasoning: () => import('./ReasoningPanel'),
   multiAgent: () => import('../MultiAgentTimeline'),
   reports: () => import('./ReportsPanel'),
+  publishRequests: () => import('./PublishRequestsPanel'),
 } satisfies Partial<Record<ActiveTab, () => Promise<unknown>>>
 
 /** The connection dialogs open from both Connections and a pack's checklist. */

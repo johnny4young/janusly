@@ -55,6 +55,7 @@ const RunsPanel = lazy(() => panelLoaders.runs().then((m) => ({ default: m.RunsP
 const RecoveryCasePanel = lazy(() => panelLoaders.recoveryCase().then((m) => ({ default: m.RecoveryCasePanel })))
 const ReasoningPanel = lazy(() => panelLoaders.reasoning().then((m) => ({ default: m.ReasoningPanel })))
 const ReportsPanel = lazy(() => panelLoaders.reports().then((m) => ({ default: m.ReportsPanel })))
+const PublishRequestsPanel = lazy(() => panelLoaders.publishRequests().then((m) => ({ default: m.PublishRequestsPanel })))
 const AiStudioPanel = lazy(() => panelLoaders['ai-studio']().then((m) => ({ default: m.AiStudioPanel })))
 const AuthoringPanel = lazy(() => panelLoaders.inspector().then((m) => ({ default: m.AuthoringPanel })))
 import { api, contractApi } from '../api'
@@ -266,6 +267,16 @@ function RightPanelRouter(props: RightPanelProps) {
         permissions={props.permissions}
         onOpenTab={navigation.onOpenTab}
         onOpenRun={onOpenRun}
+      />
+    </PanelChrome>
+  )
+  if (props.tab === 'publishRequests') return (
+    <PanelChrome title={t('workspace.section.publishRequests.label')} description={t('workspace.section.publishRequests.helper')}>
+      <PublishRequestsPanel
+        canReadMembers={can('members.read')}
+        onOpenWorkflow={catalog.onOpenWorkflow}
+        onOpenWorkflowVersion={catalog.onOpenWorkflowVersion}
+        onOpenRun={execution.onOpenRun}
       />
     </PanelChrome>
   )

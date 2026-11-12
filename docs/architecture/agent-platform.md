@@ -351,6 +351,24 @@ described in `mcp-server.md`):
    a rollout. Audit records the agent as requester and the person as
    approver.
 
+   People decide in Activity > Publish requests (`#/publishRequests/<id>`),
+   filtered by state or by "Waiting for you", the requests the person may
+   decide now. The pending list refreshes every ten seconds while visible.
+   A request reads in the order of the decision: the steps that keep it from
+   publishing alone, with the host each calls and the credentials it names
+   (names only), the reasons, what it removes from production (`changes`)
+   with a diff against the live version (an empty workflow on a first
+   publish), and the receipt's checks and fixture runs. Each request carries
+   `viewer.canDecide` and the refusal the decide route would give
+   (`permission`, `requester`, `second_person`, `creator_unknown`,
+   `policy_unavailable`, `settled`; the detail adds `stale` for an expired
+   receipt and `stale_base` when the live version moved), so the screen
+   offers only what the API allows and still shows a refusal it returns.
+   Approve and reject take a reason of at most 500 characters, stored on the
+   request and returned by `publish.status`; the screen asks for one before
+   a rejection. A pending request past its expiry reads and filters as
+   expired.
+
 A passing gate proves the contracts and fixtures held, not that production
 will behave. Product copy says "qualified", never "verified"; verification
 remains the job of outcome qualification, rollout guardrails and semantic

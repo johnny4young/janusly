@@ -23,6 +23,7 @@ describe('workspace locations', () => {
       reasoning: 'activity',
       multiAgent: 'activity',
       reports: 'activity',
+      publishRequests: 'activity',
       recoveryCase: 'activity',
       operations: 'settings',
       credentials: 'settings',
@@ -64,6 +65,7 @@ describe('workspace locations', () => {
       'recover',
       'multiAgent',
       'reports',
+      'publishRequests',
     ])
     expect(listWorkspaceSections('activity', ['runs.read']).map((section) => section.tab)).toEqual(['runs'])
   })

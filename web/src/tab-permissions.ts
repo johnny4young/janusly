@@ -20,13 +20,14 @@ export const TAB_PERMISSION: Partial<Record<ActiveTab, string>> = {
   recoveryCase: 'recovery.read',
   credentials: 'credentials.read',
   members: 'members.read',
+  publishRequests: 'workflows.read',
 }
 
 export const TAB_FALLBACK_ORDER: ActiveTab[] = [
   'home',
   'workflows', 'ai-studio', 'inspector', 'templates', 'packs', 'experiments',
   'runs', 'recover', 'reasoning', 'multiAgent', 'reports',
-  'operations', 'credentials', 'members', 'marketplace',
+  'operations', 'credentials', 'members', 'marketplace', 'publishRequests',
 ]
 
 export function canOpenTab(tab: ActiveTab, permissions: readonly string[]): boolean {

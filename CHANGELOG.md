@@ -10,6 +10,15 @@
   takes away (`changes`) and says, in `message`, why it waits; the live version
   keeps running until a person approves. Purely additive read-only changes
   still publish at once.
+- Publish requests have a screen. Activity > Publish requests lists them by
+  state, with a "Waiting for you" filter and count, and picks up a request an
+  agent opens without a reload. A request shows, in order, what it does
+  outside Janusly (each step, the host it calls and the credentials it names),
+  why it waits for a person, what it removes from production with a diff, and
+  the qualification evidence. People who may decide approve or reject it with
+  a reason; everyone else sees why not, including a creator held back by the
+  second-person rule and a qualification that expired. The agent reads the
+  reason in `publish.status`. The routes are now in the v1 contract.
 - The person who created an agent client can no longer approve a recovery fix
   that agent prepared, over stdio or remote MCP. Another member approves it;
   the approve route answers `403 recovery_self_approval` to the creator.

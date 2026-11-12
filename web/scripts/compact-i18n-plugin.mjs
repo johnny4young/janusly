@@ -46,6 +46,7 @@ const WORKSPACE_PREFIXES = [
   'operations.',
   'permissions.',
   'problems.',
+  'publishRequests.',
   'readiness.',
   'recoveryCase.',
   'recoveryDialog.',

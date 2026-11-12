@@ -157,7 +157,8 @@ creators of the requesting and the drafting agents may approve unless the
 organization sets `agents.publishRequiresSecondPerson`; a setting that cannot
 be read refuses. Approval re-checks the receipt and the base version and
 appends the version as the approver, tagging a new workflow with the scoped
-client's tag; `publish.status` reports the outcome to the agent. `credentials.request` returns the link where
+client's tag; `publish.status` reports the outcome to the agent, with the
+person's `reason` when they gave one. `credentials.request` returns the link where
 a person creates a credential; no tool accepts a secret value.
 
 ## Remote transport

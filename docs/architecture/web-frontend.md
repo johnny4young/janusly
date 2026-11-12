@@ -261,7 +261,8 @@ visible inside tables that scroll.
 The workspace URL is a hash route owned by `src/lib/route.ts`: `#/<tab>` for
 a tab, `#/recoveryCase/<id>` for one case, `#/runs/dlq[/<deadLetterId>]` for
 the recovery queue (heading or one failure), `#/runs/day/<YYYY-MM-DD>` for a
-day filter and `#/operations/<section>` for an Operations sub-section. Hash
+day filter, `#/operations/<section>` for an Operations sub-section and
+`#/publishRequests/<id>` for one agent publish request. Hash
 routing keeps the served bundle one static document, so no server rewrite and
 no API path can shadow it. The store writes the route when a tab or case
 opens (`setActiveTab`, `openRecoveryCase`) and never clobbers a richer route
@@ -295,6 +296,14 @@ sections, which `recovery.read` allows: fixed at 30 days (90 for the heatmap),
 with no window control and no exports. Model calibration and AI spend
 are not windowed: their endpoints have no window parameter. A heatmap day opens
 Recover through `#/recover/day/<YYYY-MM-DD>`.
+
+Activity also lists Publish requests (`#/publishRequests`, `workflows.read`), a
+lazy panel over the `/v1/publish-requests` routes; one request's detail is a
+second chunk. Whether the viewer may decide comes from each request's `viewer`
+field, never from client-side role rules. The pending list polls every ten
+seconds while the page is visible, so a request an agent opens appears without
+a reload. The detail reads with its own abort signal: a reload right after a
+refused decision must not get the request dedup's copy of the previous read.
 
 Estimated AI cost in Reports reads `GET /v1/usage/costs` behind `runs.read`, the
 permission of `/run/usage`, and hides without it; an operator without `dlq.read`
