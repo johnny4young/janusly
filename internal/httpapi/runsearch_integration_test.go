@@ -21,7 +21,7 @@ import (
 func TestSemanticRunSearchRoute(t *testing.T) {
 	t.Setenv("ALLOW_PRIVATE_HTTP_TARGETS", "true")
 	t.Setenv("JANUSLY_MEMORY_ENABLED", "true")
-	h := newAPIHarness(t)
+	h := frozenClockHarness(t, true)
 	pool := testPool(t)
 	ctx := t.Context()
 

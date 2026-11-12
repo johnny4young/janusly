@@ -15,7 +15,8 @@ names. It distinguishes strict boot validation from feature-specific fallbacks.
 | `JANUSLY_DATABASE_URL` | local `janusly` PostgreSQL URL on `127.0.0.1:15473` | PostgreSQL 18 connection string. Containers use the private `postgres:5432` endpoint. |
 | `JANUSLY_ENV` | development | Set to `production` to enable the production security and readiness posture. |
 | `JANUSLY_PORT` | `3001` | Public API and React listener. |
-| `JANUSLY_HTTP_HOST` | every interface | Public listener bind address; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. Use `127.0.0.1` for a host-local process that trusts development auth headers. |
+| `JANUSLY_HTTP_HOST` | every interface; `127.0.0.1` while development auth headers are accepted | Public listener bind address; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. While development auth headers are accepted, a wildcard bind also needs `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true`. |
+| `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK` | `false` | Exact `true` lets a process that accepts development auth headers listen on `0.0.0.0` or `::`. Only for a container whose port is published on host loopback. |
 | `JANUSLY_INTERNAL_HOST` | `127.0.0.1` | Internal metrics listener; only loopback (`127.0.0.1`, `::1`) or wildcard (`0.0.0.0`, `::`) is accepted. |
 | `JANUSLY_INTERNAL_PORT` | `9464` | Internal metrics and diagnostics port. |
 | `JANUSLY_LOG_LEVEL` | `info` | Floor for the structured log (`debug`, `info`, `warn`, `error`); unknown values keep `info`. |
