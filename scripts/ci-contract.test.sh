@@ -26,6 +26,7 @@ check_paths() {
 check_paths 'web=true go=false website=false product=true ' web/src/read.ts
 check_paths 'web=false go=true website=false product=true ' internal/engine/worker.go
 check_paths 'web=false go=false website=false product=false ' docs/guide.md README.md
+check_paths 'web=false go=false website=false product=false ' scripts/agent-cycle/cycle.py scripts/agent-cycle/fakes/claude
 check_paths 'web=false go=false website=true product=false ' website/src/content/about.md
 check_paths 'web=false go=false website=true product=false ' .github/workflows/website-check.yml
 check_paths 'web=false go=false website=true product=false ' .github/workflows/deploy-website.yml

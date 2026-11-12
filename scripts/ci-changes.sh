@@ -19,6 +19,8 @@ else
     case "$path" in
       website/*|.github/workflows/deploy-website.yml|.github/workflows/website-check.yml) website=true ;;
       docs/*|*.md) ;;
+      # The Changed paths job runs the agent cycle self-test on every change.
+      scripts/agent-cycle/*) ;;
       web/*) web=true ;;
       contract/*|internal/contract/*) web=true; go=true ;;
       cmd/*|internal/*|e2e/*|go.mod|go.sum|schema.sql|sqlc.yaml|.golangci.yml) go=true ;;
