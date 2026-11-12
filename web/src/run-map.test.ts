@@ -20,7 +20,7 @@ function snapshot(nodes: MapNode[], status: RunMap['run']['status'] = 'running',
     receivedAt: 1_000,
     map: {
       run: { id: 'run-1', status, workflowVersionId: 'v1', parentRunId: null },
-      nodes, lanes, totals: { costUsd: 0, tokens: 0 },
+      nodes, lanes, totals: { costUsd: 0, tokens: 0 }, sessions: [],
     },
   }
 }

@@ -35,7 +35,7 @@ var capabilityTools = map[Capability][]string{
 		"dlq.list", "operations.brief", "recovery.cases.inspect",
 		"drafts.get", "drafts.list", "qualifications.get", "publish.status",
 	},
-	CapabilityPropose: {"drafts.save", "credentials.request"},
+	CapabilityPropose: {"drafts.save", "credentials.request", "sessions.to_draft"},
 	CapabilityTest:    {"workflows.test", "workflows.qualify"},
 	CapabilityPublish: {"workflows.publish"},
 	CapabilityOperate: {

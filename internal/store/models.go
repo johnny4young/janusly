@@ -28,6 +28,72 @@ type AgentClient struct {
 	RevokedAt          *time.Time
 	RevokedBy          pgtype.Text
 	LastUsedAt         *time.Time
+	GateTools          []string
+	CaptureContent     bool
+	OauthClientID      pgtype.Text
+	AccessExpiresAt    *time.Time
+	RefreshDigest      []byte
+}
+
+type AgentSession struct {
+	ID                string
+	OrgID             string
+	AgentClientID     string
+	ExternalSessionID string
+	Runtime           string
+	Project           pgtype.Text
+	RuntimeVersion    pgtype.Text
+	Model             pgtype.Text
+	Status            string
+	EndStatus         pgtype.Text
+	Truncated         bool
+	EventCount        int32
+	LastSeq           int64
+	StartedAt         time.Time
+	LastEventAt       time.Time
+	EndedAt           *time.Time
+	CreatedAt         time.Time
+}
+
+type AgentSessionEvent struct {
+	ID            string
+	OrgID         string
+	AgentClientID string
+	SessionID     string
+	EventID       string
+	Seq           pgtype.Int8
+	Outcome       string
+	Type          string
+	AgentID       pgtype.Text
+	ParentAgentID pgtype.Text
+	AgentType     pgtype.Text
+	ToolUseID     pgtype.Text
+	Tool          pgtype.Text
+	ToolKind      pgtype.Text
+	McpServer     pgtype.Text
+	Status        pgtype.Text
+	DurationMs    pgtype.Int8
+	JanuslyRefs   json.RawMessage
+	OccurredAt    time.Time
+	ReceivedAt    time.Time
+}
+
+type AgentSessionGate struct {
+	ID            string
+	OrgID         string
+	AgentClientID string
+	SessionID     string
+	ToolUseID     string
+	Tool          string
+	McpServer     pgtype.Text
+	AgentID       pgtype.Text
+	Content       json.RawMessage
+	Status        string
+	DecidedBy     pgtype.Text
+	DecidedAt     *time.Time
+	Reason        pgtype.Text
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
 }
 
 type AlertDispatch struct {
@@ -408,6 +474,40 @@ type MemoryEntry struct {
 	CreatedAt          time.Time
 	RetainUntil        time.Time
 	HoldUntil          *time.Time
+}
+
+type OauthAuthorizationRequest struct {
+	ID            string
+	OauthClientID string
+	RedirectUri   string
+	CodeChallenge string
+	Scopes        []string
+	State         string
+	Resource      string
+	Status        string
+	OrgID         pgtype.Text
+	DecidedBy     pgtype.Text
+	AgentClientID pgtype.Text
+	CodeDigest    []byte
+	CodeExpiresAt *time.Time
+	CodeUsedAt    *time.Time
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+}
+
+type OauthClient struct {
+	ID             string
+	ClientName     string
+	RedirectUris   []string
+	RegisteredFrom string
+	CreatedAt      time.Time
+	LastUsedAt     *time.Time
+}
+
+type OauthRefreshHistory struct {
+	Digest        []byte
+	AgentClientID string
+	RotatedAt     time.Time
 }
 
 type OnboardingProgress struct {
@@ -1126,6 +1226,7 @@ type WorkflowDraft struct {
 	Digest        string
 	CreatedBy     string
 	CreatedAt     time.Time
+	Origin        json.RawMessage
 }
 
 type WorkflowImprovement struct {

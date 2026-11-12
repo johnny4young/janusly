@@ -1,0 +1,21 @@
+{
+  "session_id": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3",
+  "transcript_path": null,
+  "cwd": "/home/sam/repos/notion-sync",
+  "model": "gpt-5.5-codex",
+  "hook_event_name": "PostToolUse",
+  "turn_id": "turn-1",
+  "tool_name": "mcp__notion__search",
+  "tool_use_id": "call_a1",
+  "tool_input": {
+    "query": "roadmap"
+  },
+  "tool_response": {
+    "results": [
+      {
+        "id": "page-1",
+        "title": "Roadmap"
+      }
+    ]
+  }
+}

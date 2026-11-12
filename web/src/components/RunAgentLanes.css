@@ -61,3 +61,15 @@
 .we-run-lane__step[data-tone="success"] svg { color: var(--we-success); }
 .we-run-lane__step[data-tone="error"] svg { color: var(--we-danger); }
 .we-run-lane__step[data-tone="info"] svg { color: var(--we-muted); }
+
+.we-run-lane[data-depth="1"] { margin-inline-start: 16px; }
+.we-run-lane[data-depth="2"] { margin-inline-start: 32px; }
+.we-run-lane[data-depth="3"],
+.we-run-lane[data-depth="4"] { margin-inline-start: 48px; }
+
+.we-run-lanes__sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}

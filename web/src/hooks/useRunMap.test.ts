@@ -17,7 +17,7 @@ function runMap(runId: string, status: RunMap['run']['status'] = 'running'): Run
     run: { id: runId, status, workflowVersionId: 'v1', parentRunId: null },
     nodes: [],
     lanes: [],
-    totals: { costUsd: 0.5, tokens: 10 },
+    totals: { costUsd: 0.5, tokens: 10 }, sessions: [],
   }
 }
 

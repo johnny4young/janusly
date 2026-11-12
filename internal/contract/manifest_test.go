@@ -136,6 +136,7 @@ const workflowDocumentReason = "the domain workflow parser strips unknown keys, 
 // undescribed. Shared fragments are keyed by name so one entry covers every
 // route that embeds them; route-local entries use "METHOD PATH request|response#...".
 var openSchemaAllowlist = map[string]string{
+	"GET /v1/agent-sessions/{sessionId}/map response#/properties/gates/items/properties/input": "the captured input of a held tool call is whatever JSON that tool takes; it is shown, never interpreted",
 	"workflowDoc#":                workflowDocumentReason,
 	"workflowNodeDoc#":            workflowDocumentReason,
 	"workflowEdgeDoc#":            workflowDocumentReason,

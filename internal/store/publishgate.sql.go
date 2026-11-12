@@ -191,7 +191,7 @@ func (q *Queries) GetPublishRequest(ctx context.Context, arg GetPublishRequestPa
 }
 
 const getWorkflowDraft = `-- name: GetWorkflowDraft :one
-SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at FROM workflow_drafts WHERE org_id = $1 AND id = $2
+SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at, origin FROM workflow_drafts WHERE org_id = $1 AND id = $2
 `
 
 type GetWorkflowDraftParams struct {
@@ -212,12 +212,13 @@ func (q *Queries) GetWorkflowDraft(ctx context.Context, arg GetWorkflowDraftPara
 		&i.Digest,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Origin,
 	)
 	return i, err
 }
 
 const getWorkflowDraftByDigest = `-- name: GetWorkflowDraftByDigest :one
-SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at FROM workflow_drafts
+SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at, origin FROM workflow_drafts
 WHERE org_id = $1 AND workflow_id = $2 AND created_by = $3 AND digest = $4
 `
 
@@ -246,6 +247,40 @@ func (q *Queries) GetWorkflowDraftByDigest(ctx context.Context, arg GetWorkflowD
 		&i.Digest,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Origin,
+	)
+	return i, err
+}
+
+const getWorkflowDraftByOrigin = `-- name: GetWorkflowDraftByOrigin :one
+SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at, origin FROM workflow_drafts
+WHERE org_id = $1 AND created_by = $2
+  AND origin->>'sessionId' = $3::text
+ORDER BY created_at
+LIMIT 1
+`
+
+type GetWorkflowDraftByOriginParams struct {
+	OrgID     string
+	CreatedBy string
+	SessionID string
+}
+
+// The draft a person or agent already made from an observed session.
+func (q *Queries) GetWorkflowDraftByOrigin(ctx context.Context, arg GetWorkflowDraftByOriginParams) (WorkflowDraft, error) {
+	row := q.db.QueryRow(ctx, getWorkflowDraftByOrigin, arg.OrgID, arg.CreatedBy, arg.SessionID)
+	var i WorkflowDraft
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaseVersionID,
+		&i.Document,
+		&i.Fixtures,
+		&i.Digest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Origin,
 	)
 	return i, err
 }
@@ -358,11 +393,11 @@ func (q *Queries) InsertPublishRequest(ctx context.Context, arg InsertPublishReq
 }
 
 const insertWorkflowDraft = `-- name: InsertWorkflowDraft :one
-INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by)
+INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, origin)
 VALUES ($1, $2, $3, $4,
-        $5, $6, $7, $8)
+        $5, $6, $7, $8, $9)
 ON CONFLICT (org_id, workflow_id, created_by, digest) DO NOTHING
-RETURNING id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at
+RETURNING id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at, origin
 `
 
 type InsertWorkflowDraftParams struct {
@@ -374,6 +409,7 @@ type InsertWorkflowDraftParams struct {
 	Fixtures      json.RawMessage
 	Digest        string
 	CreatedBy     string
+	Origin        json.RawMessage
 }
 
 func (q *Queries) InsertWorkflowDraft(ctx context.Context, arg InsertWorkflowDraftParams) (WorkflowDraft, error) {
@@ -386,6 +422,7 @@ func (q *Queries) InsertWorkflowDraft(ctx context.Context, arg InsertWorkflowDra
 		arg.Fixtures,
 		arg.Digest,
 		arg.CreatedBy,
+		arg.Origin,
 	)
 	var i WorkflowDraft
 	err := row.Scan(
@@ -398,6 +435,7 @@ func (q *Queries) InsertWorkflowDraft(ctx context.Context, arg InsertWorkflowDra
 		&i.Digest,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Origin,
 	)
 	return i, err
 }

@@ -208,6 +208,10 @@ func TestAgentClientCannotReachAnotherOrganization(t *testing.T) {
 			map[string]any{"caseId": foreign.caseID, "expectedRevision": 1, "candidateArtifactId": "candidate", "validationArtifactId": "validation"},
 			map[string]any{"caseId": missing, "expectedRevision": 1, "candidateArtifactId": "candidate", "validationArtifactId": "validation"}),
 	}
+	foreignClient := issueAgentClient(t, pool, foreign, agentclient.IssueInput{Capabilities: []string{"report"}})
+	cases["sessions.to_draft"] = byID(
+		map[string]any{"sessionId": seedObservedSession(t, pool, foreign.org, foreignClient.Client.ID)},
+		map[string]any{"sessionId": uuid.NewString()})
 	// Tools without a resource id are checked by what their results leak.
 	noForeignInput := map[string]bool{
 		"agent.info": true, "catalog.describe": true, "workflows.validate": true, "operations.brief": true,

@@ -185,6 +185,11 @@ func StaticChecks(wf *domain.Workflow, document map[string]any, fixtures []Fixtu
 		checks = append(checks, failed("fixtures_missing", "/fixtures",
 			"the draft has no behaviour fixtures", "Add at least one fixture with an input and the output it must produce."))
 	}
+	for _, path := range placeholderPaths(document, "") {
+		checks = append(checks, failed("observed_placeholder", path,
+			"this value was left open when the draft was made from an observed session",
+			"Replace it with the real value; a session shows what ran, not what it was for."))
+	}
 	for _, path := range secretLiteralPaths(document, "") {
 		checks = append(checks, failed("secret_literal", path,
 			"a value looks like a secret written in clear", "Reference a credential instead; credentials.request returns a link for a person."))
@@ -246,6 +251,39 @@ func nodePath(nodeID string) string {
 		return ""
 	}
 	return "/nodes/" + nodeID
+}
+
+// ObservedPlaceholderPrefix marks a value a draft made from an observed
+// session leaves for a person or agent to fill in.
+const ObservedPlaceholderPrefix = "observed_placeholder:"
+
+// placeholderPaths names every open placeholder; steps are addressed by id.
+func placeholderPaths(value any, path string) []string {
+	switch typed := value.(type) {
+	case string:
+		if strings.Contains(strings.ToLower(typed), ObservedPlaceholderPrefix) {
+			return []string{path}
+		}
+	case []any:
+		paths := []string{}
+		for index, item := range typed {
+			segment := fmt.Sprint(index)
+			if node, ok := item.(map[string]any); ok && path == "/nodes" {
+				if id, ok := node["id"].(string); ok && id != "" {
+					segment = id
+				}
+			}
+			paths = append(paths, placeholderPaths(item, path+"/"+segment)...)
+		}
+		return paths
+	case map[string]any:
+		paths := []string{}
+		for _, key := range sortedKeys(typed) {
+			paths = append(paths, placeholderPaths(typed[key], path+"/"+key)...)
+		}
+		return paths
+	}
+	return nil
 }
 
 func secretLiteralPaths(value any, path string) []string {

@@ -1,0 +1,11 @@
+/* Styles for AgentActivityPanel.tsx, shipped with its lazy chunk. */
+
+.agent-activity {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-activity__switch {
+  display: flex;
+  gap: 4px;
+}

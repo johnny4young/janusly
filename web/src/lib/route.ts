@@ -11,6 +11,7 @@
  *   #/recover/day/<YYYY-MM-DD>    the same filter, opening the Recover tab
  *   #/operations/<section>        one Operations sub-section
  *   #/publishRequests/<id>        one agent publish request
+ *   #/multiAgent/sessions[/<id>]  observed agent sessions, or one of them
  *
  * Hash routing keeps the served bundle a single static document: no server
  * rewrite, no path the API could shadow. `?deadLetterId=` from alert
@@ -37,6 +38,8 @@ export type WorkspaceRoute = {
   focusDay?: string
   opsSection?: string
   publishRequestId?: string
+  agentSessions?: boolean
+  agentSessionId?: string
 }
 
 /** Fired after this module writes the route, so mounted consumers see
@@ -86,6 +89,11 @@ export function parseRoute(hash: string): WorkspaceRoute | null {
     const day = segment(rest[0])
     return day && DAY.test(day) ? { tab, focusDay: day } : null
   }
+  if (tab === 'multiAgent' && kind === 'sessions') {
+    if (rest.length === 0) return { tab, agentSessions: true }
+    const id = rest.length === 1 ? segment(rest[0]) : null
+    return id ? { tab, agentSessions: true, agentSessionId: id } : null
+  }
   if (tab === 'operations' && rest.length === 0) {
     const section = segment(kind)
     return section ? { tab, opsSection: section } : null
@@ -102,6 +110,9 @@ export function formatRoute(route: WorkspaceRoute): string {
   if (route.tab === 'runs' && route.deadLetterId) return `#/runs/dlq/${encodeURIComponent(route.deadLetterId)}`
   if (route.tab === 'runs' && route.queueFocus) return '#/runs/dlq'
   if ((route.tab === 'runs' || route.tab === 'recover') && route.focusDay) return `#/${route.tab}/day/${route.focusDay}`
+  if (route.tab === 'multiAgent' && route.agentSessions) {
+    return route.agentSessionId ? `#/multiAgent/sessions/${encodeURIComponent(route.agentSessionId)}` : '#/multiAgent/sessions'
+  }
   if (route.tab === 'operations' && route.opsSection) return `#/operations/${encodeURIComponent(route.opsSection)}`
   if (route.tab === 'publishRequests' && route.publishRequestId) return `#/publishRequests/${encodeURIComponent(route.publishRequestId)}`
   return `#/${route.tab}`

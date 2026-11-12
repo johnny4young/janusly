@@ -1,0 +1,14 @@
+{
+  "session_id": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+  "transcript_path": "/Users/alex/.claude/projects/-Users-alex-work-billing/3f6c1a2e.jsonl",
+  "cwd": "/Users/alex/work/billing-automation",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "mcp__stripe__create_refund",
+  "tool_input": {
+    "charge": "ch_123",
+    "amount": 4200
+  },
+  "tool_use_id": "toolu_01",
+  "prompt_id": "p-1"
+}

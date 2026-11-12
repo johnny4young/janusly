@@ -1,9 +1,17 @@
 -- name: InsertWorkflowDraft :one
-INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by)
+INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, origin)
 VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(workflow_id), sqlc.narg(base_version_id),
-        sqlc.arg(document), sqlc.arg(fixtures), sqlc.arg(digest), sqlc.arg(created_by))
+        sqlc.arg(document), sqlc.arg(fixtures), sqlc.arg(digest), sqlc.arg(created_by), sqlc.narg(origin))
 ON CONFLICT (org_id, workflow_id, created_by, digest) DO NOTHING
 RETURNING *;
+
+-- The draft a person or agent already made from an observed session.
+-- name: GetWorkflowDraftByOrigin :one
+SELECT * FROM workflow_drafts
+WHERE org_id = sqlc.arg(org_id) AND created_by = sqlc.arg(created_by)
+  AND origin->>'sessionId' = sqlc.arg(session_id)::text
+ORDER BY created_at
+LIMIT 1;
 
 -- name: GetWorkflowDraftByDigest :one
 SELECT * FROM workflow_drafts

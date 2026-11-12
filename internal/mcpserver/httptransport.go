@@ -28,6 +28,9 @@ type HTTPOptions struct {
 	// HTTP, so a bearer token never travels in clear in production.
 	RefuseForwardedHTTP bool
 	Logger              *slog.Logger
+	// ResourceMetadataURL, when set, is named in every 401 so an OAuth client
+	// can discover the authorization server.
+	ResourceMetadataURL string
 }
 
 const principalExtraKey = "janusly.principal"
@@ -70,7 +73,7 @@ func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 			Extra: map[string]any{principalExtraKey: principal},
 		}, nil
 	}
-	authenticated := challenge(authGate(deps, resolver, opts.Logger,
+	authenticated := challenge(opts.ResourceMetadataURL, authGate(deps, resolver, opts.Logger,
 		sdkauth.RequireBearerToken(verify, nil)(refuseBatches(streamable))))
 	protected := http.NewCrossOriginProtection().Handler(authenticated)
 	return guardHTTP(protected, opts)
@@ -103,17 +106,24 @@ var errVerificationUnavailable = errors.New("token verification is temporarily u
 
 // challenge adds the bearer challenge to every 401, which the SDK omits
 // without OAuth metadata.
-func challenge(next http.Handler) http.Handler {
+func challenge(resourceMetadataURL string, next http.Handler) http.Handler {
+	header := `Bearer realm="janusly"`
+	if resourceMetadataURL != "" {
+		header += `, resource_metadata="` + resourceMetadataURL + `"`
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
+		next.ServeHTTP(&challengeWriter{ResponseWriter: w, header: header}, r)
 	})
 }
 
-type challengeWriter struct{ http.ResponseWriter }
+type challengeWriter struct {
+	http.ResponseWriter
+	header string
+}
 
 func (w *challengeWriter) WriteHeader(status int) {
 	if status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="janusly"`)
+		w.Header().Set("WWW-Authenticate", w.header)
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
@@ -126,6 +136,11 @@ func (w *challengeWriter) Flush() {
 	}
 }
 
+// GuardAgentHTTP applies the transport rules every agent-token endpoint
+// shares: no credentials in the URL, https behind a proxy, an allowed Host and
+// no browser origins.
+func GuardAgentHTTP(next http.Handler, opts HTTPOptions) http.Handler { return guardHTTP(next, opts) }
+
 func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	hosts := map[string]bool{}
 	for _, host := range opts.AllowedHosts {
@@ -134,13 +149,13 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if name, found := tokenInQuery(r); found {
 			if opts.Logger != nil {
-				opts.Logger.Warn("mcp request refused: credential in query string", "param", name)
+				opts.Logger.Warn("agent request refused: credential in query string", "param", name)
 			}
 			http.Error(w, "credentials belong in the Authorization header, never in the URL", http.StatusBadRequest)
 			return
 		}
 		if opts.RefuseForwardedHTTP && forwardedPlainHTTP(r) {
-			http.Error(w, "remote MCP requires https", http.StatusForbidden)
+			http.Error(w, "agent endpoints require https", http.StatusForbidden)
 			return
 		}
 		if !hostAllowed(r.Host, hosts) {
