@@ -111,7 +111,14 @@ UPDATE workflows SET deleted_at = NULL
 WHERE id = $1 AND org_id = $2 AND deleted_at IS NOT NULL;
 
 -- name: GetWorkflowOwnerState :one
-SELECT org_id, deleted_at FROM workflows WHERE id = $1;
+SELECT deleted_at FROM workflows WHERE org_id = $1 AND id = $2;
+
+-- Workflow ids are global keys: a conflict with another organization's id
+-- inserts nothing, and the caller reports the id as taken.
+-- name: InsertWorkflowIfAbsent :execrows
+INSERT INTO workflows (id, org_id, name, created_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
 
 -- The trash list: the same list-row shape with deletedAt populated,
 -- ordered by (deleted_at, id) DESC with its own keyset.
@@ -187,7 +194,12 @@ ORDER BY version DESC
 LIMIT 1;
 
 -- name: GetWorkflowIngestState :one
-SELECT org_id, status, deleted_at FROM workflows WHERE id = $1;
+SELECT status, deleted_at FROM workflows WHERE org_id = $1 AND id = $2;
+
+-- A signed public callback names only its workflow, so the workflow's
+-- organization comes from its global id.
+-- name: ResolvePublicCallbackWorkflowOrg :one
+SELECT org_id FROM workflows WHERE id = $1 AND deleted_at IS NULL;
 
 -- Per-org retention: the sweep resolves each org's catalog window and
 -- purges with an org-scoped cutoff.

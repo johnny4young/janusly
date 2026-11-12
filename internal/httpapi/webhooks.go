@@ -199,14 +199,14 @@ func (s *V1Server) ingestTriggerEventCore(ctx context.Context, in triggerIngestR
 	// Unknown, cross-org, and tombstoned workflows are indistinguishable
 	// from "no matching trigger" — a caller learns nothing about what
 	// exists outside its scope.
-	ownerState, err := q.GetWorkflowIngestState(ctx, in.workflowID)
+	ownerState, err := q.GetWorkflowIngestState(ctx, store.GetWorkflowIngestStateParams{OrgID: in.orgID, ID: in.workflowID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return in.noMatch
 		}
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	if ownerState.OrgID != in.orgID || ownerState.DeletedAt != nil {
+	if ownerState.DeletedAt != nil {
 		return in.noMatch
 	}
 	triggerEventID := in.eventID

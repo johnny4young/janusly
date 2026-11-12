@@ -119,24 +119,19 @@ func (e *Engine) saveWorkflowVersionAttempt(
 			return SaveWorkflowVersionResult{}, err
 		}
 	case errors.Is(err, pgx.ErrNoRows):
-		owner, ownerErr := q.GetWorkflowOwnerState(ctx, input.Workflow.ID)
-		if ownerErr == nil {
-			if owner.OrgID == input.OrgID && owner.DeletedAt != nil {
-				return SaveWorkflowVersionResult{}, ErrWorkflowSaveNotFound
-			}
-			if owner.OrgID != input.OrgID {
-				return SaveWorkflowVersionResult{}, ErrWorkflowSaveIDTaken
-			}
-			return SaveWorkflowVersionResult{}, errWorkflowSaveRetry
-		}
-		if !errors.Is(ownerErr, pgx.ErrNoRows) {
-			return SaveWorkflowVersionResult{}, ownerErr
-		}
-		if err := q.InsertWorkflow(ctx, store.InsertWorkflowParams{
+		inserted, err := q.InsertWorkflowIfAbsent(ctx, store.InsertWorkflowIfAbsentParams{
 			ID: input.Workflow.ID, OrgID: input.OrgID, Name: input.Workflow.Name,
 			CreatedBy: pgtype.Text{String: input.UserID, Valid: input.UserID != ""},
-		}); err != nil {
+		})
+		if err != nil {
 			return SaveWorkflowVersionResult{}, err
+		}
+		if inserted == 0 {
+			// The id exists: this organization's (tombstoned or concurrent) or another's.
+			if err := ownedWorkflowAbsent(ctx, q, input.OrgID, input.Workflow.ID); err != nil {
+				return SaveWorkflowVersionResult{}, err
+			}
+			return SaveWorkflowVersionResult{}, ErrWorkflowSaveIDTaken
 		}
 	default:
 		return SaveWorkflowVersionResult{}, err
@@ -212,4 +207,20 @@ func retryableWorkflowSave(err error) bool {
 	}
 	return postgresError.ConstraintName == "workflow_versions_org_workflow_version_idx" ||
 		postgresError.ConstraintName == "workflows_pkey"
+}
+
+// ownedWorkflowAbsent is nil when the organization has no row for the id: a
+// tombstoned row answers not found, and a live one a concurrent create to retry.
+func ownedWorkflowAbsent(ctx context.Context, q *store.Queries, orgID, workflowID string) error {
+	deletedAt, err := q.GetWorkflowOwnerState(ctx, store.GetWorkflowOwnerStateParams{OrgID: orgID, ID: workflowID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case deletedAt != nil:
+		return ErrWorkflowSaveNotFound
+	default:
+		return errWorkflowSaveRetry
+	}
 }

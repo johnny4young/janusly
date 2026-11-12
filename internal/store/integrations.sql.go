@@ -71,7 +71,7 @@ func (q *Queries) ClaimDueUpstreamHealthSources(ctx context.Context, rowLimit in
 const countBufferedTriggerEvents = `-- name: CountBufferedTriggerEvents :one
 SELECT count(*) FROM trigger_events te
 WHERE te.org_id = $1 AND te.workflow_id = $2 AND te.status = 'buffered'
-  AND te.backfill_claim_token IS NULL
+  AND (te.backfill_claim_token IS NULL OR te.backfill_claimed_at < now() - interval '5 minutes')
 `
 
 type CountBufferedTriggerEventsParams struct {

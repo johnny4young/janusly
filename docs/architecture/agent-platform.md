@@ -36,7 +36,7 @@ creates in Settings or through `POST /agent-clients`:
 | `name` | Shown in audit, approvals and the run map |
 | `capabilities` | The ceiling: any of `read`, `propose`, `test`, `publish`, `operate`, `report` |
 | `scope` | Optional workflow ids and workflow tags; empty means the whole organization |
-| `expiresAt` | Required, at most 90 days ahead; default 30 days |
+| `expiresAt` | Required, at most 90 days (2160 hours) ahead; default 30 days |
 | `rateLimitPerMinute` | Calls per minute across every tool; default 120, at most 600 |
 | `createdBy` | The person the client acts for |
 | `revokedAt` | Set by revoke; effective on the next request |
@@ -46,7 +46,9 @@ once at creation or rotation. The database keeps only its SHA-256 digest and
 last four characters; lookup is by digest, so no comparison runs on the
 plaintext. The fixed prefix lets secret scanners recognise a leaked token.
 Rotation replaces the token immediately and keeps the client id, so audit
-history stays continuous. Only the creator rotates: the new token acts with
+history stays continuous. An expired client ends like a revoked one: rotating
+it is refused with `agent_client_expired`, and the person creates a new
+client. Only the creator rotates: the new token acts with
 the creator's authority, so nobody else may hold it.
 
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
@@ -384,7 +386,8 @@ requests (with `workflows.write`, and not to the people a second-person rule
 excludes). Both are in the versioned contract (`/v1/runs/{runId}/map`,
 `/v1/needs-you`). A lane step carries only its type, time and the string or
 integer fields `tool`, `status`, `agent` (a crew agent's `name`) and
-`iteration`.
+`iteration`. A lane keeps its latest 200 events; `truncated` says it dropped
+older ones, and the Agents tab says so.
 
 The canvas reads the map through one shared feed per run
 (`web/src/hooks/useRunMap.ts`): it refetches 400 ms after the run projection
@@ -396,7 +399,9 @@ browser from the moment the map arrived. A decision is offered only while the
 live step still waits and its binding is complete: a tool approval posts its
 approval id and parameter digest to `POST /runs/tool-approvals/decide`, an
 approval step resumes through `POST /resume` (there is no reject route for an
-approval step), and a form opens the existing form dialog. Rerun uses the
+approval step), and a form opens the existing form dialog bound to the
+step's resume token: the dialog closes when the step stops waiting or its
+token changes, and never reopens by itself. Rerun uses the
 existing preview and side-effect acknowledgement. The Agents tab reads the
 same feed. Not built yet: expanding a child run inline (the node links to
 it), the MCP activity lane, and recovery approvals and publish requests on

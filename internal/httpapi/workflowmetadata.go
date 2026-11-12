@@ -91,8 +91,8 @@ func validateMetadataBody(body *workflowMetadataBody) string {
 }
 
 func (s *V1Server) ownsActiveWorkflow(r *http.Request, orgID, workflowID string) bool {
-	owner, err := store.New(s.pool).GetWorkflowIngestState(r.Context(), workflowID)
-	return err == nil && owner.OrgID == orgID && owner.DeletedAt == nil
+	owner, err := store.New(s.pool).GetWorkflowIngestState(r.Context(), store.GetWorkflowIngestStateParams{OrgID: orgID, ID: workflowID})
+	return err == nil && owner.DeletedAt == nil
 }
 
 func (s *V1Server) mountWorkflowMetadataRoutes(mux *http.ServeMux) {

@@ -48,9 +48,12 @@ does not maintain another task store.
 
 An agent client is an organization's credential for one external agent,
 created by a member through `POST /agent-clients` (`agents.write`) and listed
-with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
+with `GET /agent-clients` (`agents.read`), newest first, up to `limit` (at
+most and by default 200) per page; `nextCursor` is the opaque `cursor` for the
+next page. The token (`jly_agent_…`) is shown
 once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
-is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator may
+is stored. `POST /agent-clients/{id}/revoke` ends it, and so does expiry: an
+expired client cannot be rotated. Only the creator may
 rotate, the creator or an admin may revoke, and service tokens can manage none.
 
 A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,
@@ -305,7 +308,8 @@ recovery tools keep their withheld projections.
 `runs.cancel` (`runs.cancel`) call the same engine operations as the HTTP
 rollback, pause, resume, trash, restore and cancel routes. They are
 business writes, so they also need write consent, and deactivate and cancel are
-annotated destructive.
+annotated destructive. A pause reason over 500 characters is refused with
+`invalid_argument` at `/reason`, as the HTTP route refuses it.
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.

@@ -357,3 +357,23 @@ func TestReplayCampaignWaitsForAPausedWorkflow(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 }
+
+// A reason that sanitizes to nothing is audited as no reason.
+func TestWorkflowPauseBlankReasonIsNotAudited(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	workflowID := fmt.Sprintf("pause-blank-%d", time.Now().UnixNano())
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(workflowID, "pause-blank"), ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{"reason": " \t\u0007\n "}, ""); res.status != 200 {
+		t.Fatalf("pause: %d %+v", res.status, res.body)
+	}
+	var hasReason bool
+	if err := testPool(t).QueryRow(context.Background(), `SELECT (metadata->>'hasReason')::boolean FROM audit_logs
+		WHERE org_id = $1 AND target_id = $2 AND action = 'workflow.paused'`, h.org, workflowID).Scan(&hasReason); err != nil {
+		t.Fatal(err)
+	}
+	if hasReason {
+		t.Fatal("a blank reason was audited as present")
+	}
+}

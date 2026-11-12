@@ -6,6 +6,7 @@ package runmap
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -246,7 +247,8 @@ func formResumable(kind string, waiting map[string]any, now time.Time) bool {
 }
 
 func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types map[string]string) ([]map[string]any, error) {
-	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID, PerNode: maxLaneEvents})
+	// One event past the bound tells a full lane from a truncated one.
+	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID, PerNode: maxLaneEvents + 1})
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +262,12 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 	}
 	lanes := make([]map[string]any, 0, len(order))
 	for _, nodeID := range order {
-		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": byNode[nodeID]})
+		steps := byNode[nodeID]
+		truncated := len(steps) > maxLaneEvents
+		if truncated {
+			steps = steps[len(steps)-maxLaneEvents:]
+		}
+		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": steps, "truncated": truncated})
 	}
 	return lanes, nil
 }
@@ -344,12 +351,16 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 		if err != nil {
 			secondPerson = true
 		}
+		var creators map[string]string
+		if secondPerson {
+			creators = s.agentCreators(r, rc, requests)
+		}
 		now := s.now()
 		for _, row := range requests {
 			if row.RequestedBy == rc.UserID || !now.Before(row.ExpiresAt) {
 				continue
 			}
-			if secondPerson && s.accountableFor(r, rc, row) {
+			if secondPerson && accountableFor(rc.UserID, row, creators) {
 				continue
 			}
 			reasons := row.Reasons
@@ -377,16 +388,41 @@ func (s *service) secondPersonRequired(r *http.Request, rc httpkit.Request) (boo
 	return json.Unmarshal(raw, &required) == nil && required, nil
 }
 
-func (s *service) accountableFor(r *http.Request, rc httpkit.Request, row store.PublishRequest) bool {
-	if row.OnBehalfOf == rc.UserID || row.DraftedBy == rc.UserID {
+// accountableFor fails closed: a drafting agent whose creator is unknown
+// counts as the viewer's.
+func accountableFor(viewer string, row store.PublishRequest, creators map[string]string) bool {
+	if row.OnBehalfOf == viewer || row.DraftedBy == viewer {
 		return true
 	}
 	clientID, ok := strings.CutPrefix(row.DraftedBy, "agent:")
 	if !ok {
 		return false
 	}
-	client, err := store.New(s.pool).GetAgentClient(r.Context(), store.GetAgentClientParams{OrgID: rc.OrgID, ID: clientID})
-	return err != nil || client.CreatedBy == rc.UserID
+	creator, known := creators[clientID]
+	return !known || creator == viewer
+}
+
+// agentCreators reads the creators of every drafting agent in one query.
+func (s *service) agentCreators(r *http.Request, rc httpkit.Request, requests []store.PublishRequest) map[string]string {
+	seen := map[string]struct{}{}
+	for _, row := range requests {
+		if clientID, ok := strings.CutPrefix(row.DraftedBy, "agent:"); ok {
+			seen[clientID] = struct{}{}
+		}
+	}
+	creators := map[string]string{}
+	if len(seen) == 0 {
+		return creators
+	}
+	ids := slices.Collect(maps.Keys(seen))
+	rows, err := store.New(s.pool).ListAgentClientCreators(r.Context(), store.ListAgentClientCreatorsParams{OrgID: rc.OrgID, Ids: ids})
+	if err != nil {
+		return creators
+	}
+	for _, row := range rows {
+		creators[row.ID] = row.CreatedBy
+	}
+	return creators
 }
 
 // secondPersonKey is publishrequests.SecondPersonKey; feature packages do not

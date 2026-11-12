@@ -197,33 +197,33 @@ const MaxPauseReasonRunes = 500
 // PauseWorkflow stops new runs without touching versions, schedule entries or
 // rollouts: schedule ticks are dropped and trigger events are buffered until
 // ResumeWorkflow. A manual pause replaces a system pause so that no automatic
-// resume lifts it. It returns the status it replaced; pausing an already
-// manually paused workflow changes nothing.
-func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason string) (string, error) {
+// resume lifts it. It returns the status it replaced and the reason it stored
+// after sanitizing; pausing an already manually paused workflow changes nothing.
+func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason string) (string, string, error) {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 	status, err := q.LockWorkflowPauseState(ctx, store.LockWorkflowPauseStateParams{OrgID: orgID, ID: workflowID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrWorkflowLifecycleNotFound
+			return "", "", ErrWorkflowLifecycleNotFound
 		}
-		return "", err
+		return "", "", err
 	}
 	if status == WorkflowStatusPausedManual {
-		return status, nil
+		return status, "", nil
 	}
 	reason = sanitizePauseReason(reason)
 	if err := q.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
 		OrgID: orgID, ID: workflowID, Status: WorkflowStatusPausedManual,
 		PausedReason: pgtype.Text{String: reason, Valid: reason != ""},
 	}); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return status, tx.Commit(ctx)
+	return status, reason, tx.Commit(ctx)
 }
 
 // sanitizePauseReason keeps the reason one bounded line without secret-shaped

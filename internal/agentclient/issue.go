@@ -103,7 +103,8 @@ func Issue(ctx context.Context, q *store.Queries, id string, now time.Time, in I
 	return Issued{Client: row, Token: token}, nil
 }
 
-// Rotate replaces the token at once and restarts its lifetime.
+// Rotate replaces the token at once and restarts its lifetime. A revoked or
+// expired client is not rotated: the store answers no row.
 func Rotate(ctx context.Context, q *store.Queries, orgID, id string, now time.Time, expiresInDays int) (Issued, error) {
 	expiresAt, err := expiry(now, expiresInDays)
 	if err != nil {

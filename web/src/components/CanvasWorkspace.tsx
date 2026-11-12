@@ -141,7 +141,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
   )
 
   const [pendingNodeId, setPendingNodeId] = useState<string | null>(null)
-  const [form, setForm] = useState<{ nodeId: string; errors: string[]; submitting: boolean } | null>(null)
+  const [form, setForm] = useState<{ nodeId: string; resumeToken: string; errors: string[]; submitting: boolean } | null>(null)
   const [rerunNodeId, setRerunNodeId] = useState<string | null>(null)
   // App rebuilds `execution` every render; depend on its stable callbacks only.
   const onApproveNode = execution?.onApproveNode
@@ -161,7 +161,10 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
         refreshRunMap(runId)
       })
     },
-    openForm: nodeId => setForm({ nodeId, errors: [], submitting: false }),
+    openForm: (nodeId) => {
+      const decision = overlays.get(nodeId)?.decision
+      if (decision?.kind === 'human_form') setForm({ nodeId, resumeToken: decision.resumeToken, errors: [], submitting: false })
+    },
     rerun: setRerunNodeId,
     openRun: (childRunId) => { void onOpenRun(childRunId) },
   } : null, [onApproveNode, onOpenRun, overlays, pendingNodeId, runId])
@@ -170,7 +173,10 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
     [overlays, snapshot],
   )
   const formNode = form ? runNodes.find(node => node.nodeId === form.nodeId) : undefined
-  const formWaiting = formNode ? readHumanFormWaiting(formNode) : null
+  const liveForm = formNode ? readHumanFormWaiting(formNode) : null
+  // A form is bound to the token it opened with; a new token is a new form.
+  const formWaiting = liveForm && liveForm.resumeToken === form?.resumeToken ? liveForm : null
+  if (form && !form.submitting && !formWaiting) setForm(null)
 
   if (!graph) return <div data-layout="contextual">{panel}</div>
 
@@ -197,7 +203,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
       {onSubmitHumanForm && form && formWaiting && (
         <Suspense fallback={null}>
           <HumanFormDialog
-            key={form.nodeId}
+            key={form.resumeToken}
             title={formWaiting.title}
             description={formWaiting.description}
             schema={formWaiting.schema}
@@ -206,15 +212,15 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
             submitting={form.submitting}
             onCancel={() => setForm(null)}
             onSubmit={async (input) => {
-              const { nodeId } = form
-              setForm({ nodeId, errors: [], submitting: true })
+              const { nodeId, resumeToken } = form
+              setForm({ ...form, errors: [], submitting: true })
               let errors: string[] | undefined
               try {
-                errors = await onSubmitHumanForm(nodeId, input, formWaiting.resumeToken)
+                errors = await onSubmitHumanForm(nodeId, input, resumeToken)
               } finally {
                 refreshRunMap(runId)
                 // A cancel during the submit closed the dialog; keep it closed.
-                setForm(current => current?.nodeId !== nodeId ? current : errors && errors.length > 0 ? { nodeId, errors, submitting: false } : null)
+                setForm(current => current?.resumeToken !== resumeToken ? current : errors && errors.length > 0 ? { ...current, errors, submitting: false } : null)
               }
             }}
           />

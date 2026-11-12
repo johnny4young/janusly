@@ -216,7 +216,7 @@ UPDATE trigger_events SET backfill_claim_token = sqlc.arg(claim_token), backfill
 WHERE trigger_events.id IN (
   SELECT te.id FROM trigger_events te
   WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
-    AND te.backfill_claim_token IS NULL
+    AND (te.backfill_claim_token IS NULL OR te.backfill_claimed_at < now() - interval '5 minutes')
     AND EXISTS (SELECT 1 FROM workflows w WHERE w.org_id = te.org_id AND w.id = te.workflow_id
                 AND w.status = 'active' AND w.deleted_at IS NULL)
   ORDER BY te.created_at ASC
@@ -225,6 +225,19 @@ WHERE trigger_events.id IN (
 )
 RETURNING trigger_events.id, trigger_events.node_id, trigger_events.payload_json, trigger_events.created_at,
           trigger_events.workflow_version_id, trigger_events.workflow_rollout_id, trigger_events.workflow_rollout_variant;
+
+-- Returns events a backfill page did not start to the buffer; the token keeps
+-- a late releaser from clearing a newer claim.
+-- name: ReleaseBufferedTriggerEventClaims :exec
+UPDATE trigger_events SET backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = sqlc.arg(org_id) AND status = 'buffered'
+  AND backfill_claim_token = sqlc.arg(claim_token) AND id = ANY(sqlc.arg(ids)::text[]);
+
+-- name: FailClaimedTriggerEvent :exec
+UPDATE trigger_events
+SET status = 'failed', skipped_reason = sqlc.arg(reason)::text, backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'buffered'
+  AND backfill_claim_token = sqlc.arg(claim_token);
 
 -- name: ClaimDueParentNotifications :many
 UPDATE runs SET parent_notification_after = sqlc.arg(lease_until)

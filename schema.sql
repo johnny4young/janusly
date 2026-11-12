@@ -169,7 +169,7 @@ CREATE TABLE public.agent_clients (
     last_used_at timestamp with time zone,
     CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
     CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
-    CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '90 days'::interval)))),
+    CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '2160:00:00'::interval)))),
     CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
     CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
     CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
@@ -3705,6 +3705,13 @@ CREATE UNIQUE INDEX sso_state_nonces_org_nonce_idx ON public.sso_state_nonces US
 --
 
 CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requests USING btree (run_id, node_id) WHERE (consumed_at IS NULL);
+
+
+--
+-- Name: tool_approval_requests_org_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_approval_requests_org_pending_idx ON public.tool_approval_requests USING btree (org_id, created_at) WHERE ((status = 'pending'::text) AND (consumed_at IS NULL));
 
 
 --

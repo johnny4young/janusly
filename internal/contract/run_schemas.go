@@ -65,7 +65,8 @@ var runMapLane = closedObj(map[string]any{
 		"type": str(), "at": nullableString(), "tool": str(), "status": str(), "agent": str(), "name": str(),
 		"iteration": countT(), "index": countT(),
 	}, "type", "at")),
-}, "nodeId", "kind", "steps")
+	"truncated": boolT(),
+}, "nodeId", "kind", "steps", "truncated")
 
 var runMap = closedObj(map[string]any{
 	"run": closedObj(map[string]any{

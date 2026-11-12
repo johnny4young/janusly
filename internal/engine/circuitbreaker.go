@@ -265,77 +265,134 @@ func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID, userID s
 func (e *Engine) backfillBufferedTriggerEvents(ctx context.Context, orgID, workflowID, userID string) BackfillOutcome {
 	outcome := BackfillOutcome{}
 	q := store.New(e.pool)
+	claimToken := pgtype.Text{String: e.newID(), Valid: true}
 	claimed, err := q.ClaimBufferedTriggerEvents(ctx, store.ClaimBufferedTriggerEventsParams{
 		OrgID: orgID, WorkflowID: pgtype.Text{String: workflowID, Valid: true},
-		ClaimToken: pgtype.Text{String: e.newID(), Valid: true},
+		ClaimToken: claimToken,
 		PageLimit:  backfillPageLimit,
 	})
 	if err != nil {
 		return outcome
 	}
-	// The workflow snapshot: latest version of the workflow.
-	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
-		WorkflowID: workflowID, OrgID: orgID,
-	})
-	if err != nil {
-		outcome.Failed = len(claimed)
-		return outcome
-	}
-	wf, issues := domain.Parse(version.DagJson)
-	if wf == nil {
-		slog.Warn("[circuit-breaker] backfill snapshot invalid", "workflowId", workflowID, "issues", issues)
-		outcome.Failed = len(claimed)
-		return outcome
-	}
-	for _, event := range claimed {
-		// The persisted anchor wraps the inbound event as {"event": {...}};
-		// unwrap so the backfilled run's input matches the ordinary ingest
-		// shape exactly ({triggeredBy, triggerEventId, event}).
-		var envelope struct {
-			Event map[string]any `json:"event"`
-		}
-		_ = json.Unmarshal(event.PayloadJson, &envelope)
-		input := map[string]any{
-			"triggeredBy": "webhook_received", "triggerEventId": event.ID,
-			"event":      envelope.Event,
-			"backfilled": true,
-		}
-		// A buffered event that captured a rollout assignment at ACCEPT
-		// time keeps it: the backfilled run executes the CAPTURED variant
-		// snapshot, never a version the mutable rollout points at today.
-		eventWorkflow, eventVersionID := wf, version.ID
-		start := StartInput{
-			OrgID: orgID, Workflow: eventWorkflow, WorkflowVersionID: eventVersionID,
-			Input: input, CreatedBy: userID, TriggerEventID: event.ID,
-		}
-		if event.WorkflowRolloutID.Valid && event.WorkflowRolloutVariant.Valid {
-			if captured, err := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
-				ID: event.WorkflowVersionID, OrgID: orgID,
-			}); err == nil {
-				if capturedWf, _ := domain.Parse(captured.DagJson); capturedWf != nil {
-					start.Workflow = capturedWf
-					start.WorkflowVersionID = event.WorkflowVersionID
-					start.WorkflowRolloutID = event.WorkflowRolloutID.String
-					start.WorkflowRolloutVariant = event.WorkflowRolloutVariant.String
-				}
-			}
-		}
-		_, err := e.StartRun(ctx, start)
-		if err != nil {
-			var conflict *TriggerEventStartConflictError
-			if errors.As(err, &conflict) {
-				// Another actor consumed the event — not a failure.
-				continue
-			}
-			outcome.Failed++
-			continue
-		}
-		outcome.Backfilled++
-	}
+	page := backfillPage{q: q, orgID: orgID, workflowID: workflowID, claimToken: claimToken}
+	outcome = e.startBackfillPage(ctx, page, userID, claimed)
 	if remaining, err := q.CountBufferedTriggerEvents(ctx, store.CountBufferedTriggerEventsParams{
 		OrgID: orgID, WorkflowID: pgtype.Text{String: workflowID, Valid: true},
 	}); err == nil {
 		outcome.Remaining = int(remaining)
 	}
 	return outcome
+}
+
+type backfillPage struct {
+	q          *store.Queries
+	orgID      string
+	workflowID string
+	claimToken pgtype.Text
+}
+
+// release returns events this page did not start to the buffer, so a later
+// resume retries them.
+func (p backfillPage) release(ctx context.Context, events []store.ClaimBufferedTriggerEventsRow) {
+	if len(events) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, event.ID)
+	}
+	// A cancelled resume request still returns its claims.
+	if err := p.q.ReleaseBufferedTriggerEventClaims(context.WithoutCancel(ctx), store.ReleaseBufferedTriggerEventClaimsParams{
+		OrgID: p.orgID, ClaimToken: p.claimToken, Ids: ids,
+	}); err != nil {
+		slog.Warn("[circuit-breaker] backfill claim release failed", "workflowId", p.workflowID, "error", err)
+	}
+}
+
+func (e *Engine) startBackfillPage(ctx context.Context, page backfillPage, userID string, claimed []store.ClaimBufferedTriggerEventsRow) BackfillOutcome {
+	outcome := BackfillOutcome{}
+	q, orgID, workflowID := page.q, page.orgID, page.workflowID
+	// The workflow snapshot: latest version of the workflow.
+	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
+		WorkflowID: workflowID, OrgID: orgID,
+	})
+	if err != nil {
+		page.release(ctx, claimed)
+		outcome.Failed = len(claimed)
+		return outcome
+	}
+	wf, issues := domain.Parse(version.DagJson)
+	if wf == nil {
+		slog.Warn("[circuit-breaker] backfill snapshot invalid", "workflowId", workflowID, "issues", issues)
+		page.release(ctx, claimed)
+		outcome.Failed = len(claimed)
+		return outcome
+	}
+	for index, event := range claimed {
+		// A pause that lands mid-page holds the rest of the page.
+		status, err := q.GetWorkflowBreakerStatus(ctx, store.GetWorkflowBreakerStatusParams{OrgID: orgID, ID: workflowID})
+		if err != nil || status != "active" {
+			page.release(ctx, claimed[index:])
+			break
+		}
+		start := backfillStart(ctx, q, orgID, userID, wf, version.ID, event)
+		if _, err := e.StartRun(ctx, start); err != nil {
+			var conflict *TriggerEventStartConflictError
+			if errors.As(err, &conflict) {
+				// Another actor consumed the event — not a failure.
+				continue
+			}
+			outcome.Failed++
+			// An input the workflow rejects never starts; back in the buffer it
+			// would block newer events on every resume.
+			var invalid *InputValidationError
+			if errors.As(err, &invalid) {
+				if err := q.FailClaimedTriggerEvent(context.WithoutCancel(ctx), store.FailClaimedTriggerEventParams{
+					OrgID: orgID, ID: event.ID, ClaimToken: page.claimToken, Reason: "input_invalid",
+				}); err == nil {
+					continue
+				}
+			}
+			page.release(ctx, claimed[index:index+1])
+			continue
+		}
+		outcome.Backfilled++
+	}
+	return outcome
+}
+
+func backfillStart(ctx context.Context, q *store.Queries, orgID, userID string, wf *domain.Workflow, versionID string,
+	event store.ClaimBufferedTriggerEventsRow) StartInput {
+	// The persisted anchor wraps the inbound event as {"event": {...}};
+	// unwrap so the backfilled run's input matches the ordinary ingest
+	// shape exactly ({triggeredBy, triggerEventId, event}).
+	var envelope struct {
+		Event map[string]any `json:"event"`
+	}
+	_ = json.Unmarshal(event.PayloadJson, &envelope)
+	input := map[string]any{
+		"triggeredBy": "webhook_received", "triggerEventId": event.ID,
+		"event":      envelope.Event,
+		"backfilled": true,
+	}
+	start := StartInput{
+		OrgID: orgID, Workflow: wf, WorkflowVersionID: versionID,
+		Input: input, CreatedBy: userID, TriggerEventID: event.ID,
+	}
+	// A buffered event that captured a rollout assignment at ACCEPT
+	// time keeps it: the backfilled run executes the CAPTURED variant
+	// snapshot, never a version the mutable rollout points at today.
+	if event.WorkflowRolloutID.Valid && event.WorkflowRolloutVariant.Valid {
+		if captured, err := q.GetWorkflowVersionAnyWorkflow(ctx, store.GetWorkflowVersionAnyWorkflowParams{
+			ID: event.WorkflowVersionID, OrgID: orgID,
+		}); err == nil {
+			if capturedWf, _ := domain.Parse(captured.DagJson); capturedWf != nil {
+				start.Workflow = capturedWf
+				start.WorkflowVersionID = event.WorkflowVersionID
+				start.WorkflowRolloutID = event.WorkflowRolloutID.String
+				start.WorkflowRolloutVariant = event.WorkflowRolloutVariant.String
+			}
+		}
+	}
+	return start
 }

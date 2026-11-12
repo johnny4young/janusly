@@ -2,7 +2,7 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isInteger, isShape, isString, nullable, shape } from "../../guards"
+import { arrayOf, isBoolean, isInteger, isShape, isString, nullable, shape } from "../../guards"
 
 export function isRunMapLane(value: unknown): value is Api.RunMapLane {
   return isShape(value, {
@@ -19,5 +19,6 @@ export function isRunMapLane(value: unknown): value is Api.RunMapLane {
       status: isString,
       tool: isString,
     })),
+    truncated: isBoolean,
   })
 }

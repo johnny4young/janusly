@@ -82,7 +82,14 @@ func TestSubworkflowParentSettlesWhenAHumanStepEndsTheChild(t *testing.T) {
 				time.Sleep(30 * time.Millisecond)
 				_ = pool.QueryRow(ctx, `SELECT status FROM runs WHERE id = $1`, parentRunID).Scan(&parentStatus)
 			}
-			_ = pool.QueryRow(ctx, `SELECT parent_notification_after FROM runs WHERE id = $1`, childRunID).Scan(&marker)
+			// The parent settles before the handoff clears the child's marker in a
+			// separate write, so wait for the clear.
+			for deadline = time.Now().Add(5 * time.Second); ; time.Sleep(30 * time.Millisecond) {
+				_ = pool.QueryRow(ctx, `SELECT parent_notification_after FROM runs WHERE id = $1`, childRunID).Scan(&marker)
+				if marker == nil || time.Now().After(deadline) {
+					break
+				}
+			}
 			_ = pool.QueryRow(ctx, `SELECT state_json::text FROM run_nodes WHERE run_id = $1 AND node_id = 'call'`, parentRunID).Scan(&callState)
 			if marker != nil {
 				t.Fatalf("handoff marker still armed: %v", marker)
