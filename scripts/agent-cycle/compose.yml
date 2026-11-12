@@ -1,0 +1,42 @@
+# Overlay for the official agent cycle run; see docs/development.md. The cycle
+# shares the server's network namespace so the redrive simulator on its
+# loopback is reachable, and it mounts nothing but the results directory.
+services:
+  postgres:
+    ports: !reset []
+
+  janusly:
+    ports: !reset []
+    environment:
+      JANUSLY_MCP_HTTP_ENABLED: "true"
+      JANUSLY_MCP_WRITES_ENABLED: "true"
+      ALLOW_PRIVATE_HTTP_TARGETS: "true"
+      ALLOW_DEV_AUTH_HEADERS: "true"
+      # The measured client's key never reaches the server.
+      ANTHROPIC_API_KEY: ""
+
+  cycle:
+    profiles: ["cycle"]
+    build:
+      context: scripts/agent-cycle
+    network_mode: "service:janusly"
+    depends_on:
+      janusly:
+        condition: service_healthy
+    environment:
+      CYCLE_CLIENT: ${CYCLE_CLIENT:-claude}
+      CYCLE_MODE: ${CYCLE_MODE:-approved}
+      CYCLE_REPEAT: ${CYCLE_REPEAT:-3}
+      CYCLE_MODEL: ${CYCLE_MODEL:?set CYCLE_MODEL to the full model id}
+      CYCLE_CLIENT_VERSION: ${CYCLE_CLIENT_VERSION:?set CYCLE_CLIENT_VERSION to the pinned client version}
+      CYCLE_MAX_BUDGET_USD: ${CYCLE_MAX_BUDGET_USD:-}
+      CYCLE_PSQL: psql
+      PGHOST: postgres
+      PGUSER: janusly
+      PGDATABASE: janusly
+      PGPASSWORD: janusly-local
+      CYCLE_PASS_ENV: ANTHROPIC_API_KEY,CODEX_API_KEY
+      ANTHROPIC_API_KEY: ${CYCLE_ANTHROPIC_API_KEY:-}
+      CODEX_API_KEY: ${CYCLE_CODEX_API_KEY:-}
+    volumes:
+      - ./output/agent-cycle:/out
