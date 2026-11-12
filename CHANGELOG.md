@@ -13,6 +13,10 @@
   whose document reused a workflow id saved in a different organization took
   that workflow's name, in the API and in the MCP `runs.list`; the name now
   comes only from the run's own organization.
+- Two read models for the run map: `GET /runs/{runId}/map` gives each step's
+  status, time, AI cost, a stuck signal, whether it needs the viewer, and
+  agent lanes; `GET /needs-you` lists the tool approvals, approval and form
+  steps and agent publish requests the signed-in person can decide.
 - Agents publish through a gate. An agent saves a draft with behaviour
   fixtures, tests it with writes suppressed, and qualifies it: Janusly checks
   structure, readiness, declared outputs, a recovery contract when the
