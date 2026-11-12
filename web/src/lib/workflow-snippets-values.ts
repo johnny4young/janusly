@@ -39,7 +39,7 @@ const DEFAULT_ID_LENGTH = 8
  */
 export function generateNodeId(length = DEFAULT_ID_LENGTH): string {
   const bytes = new Uint8Array(length)
-  // `crypto` is a global in Node 24 and every modern browser.
+  // `crypto` is a global in Node and every modern browser.
   crypto.getRandomValues(bytes)
   let out = ''
   for (let i = 0; i < length; i += 1) {

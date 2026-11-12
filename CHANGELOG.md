@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The JavaScript toolchain requires Node.js 26 LTS (26.13.1 or newer). Node 26
+  no longer bundles corepack, so install it before `corepack enable`.
 - Agent access is tighter. The "needs you" feed (`GET /needs-you`,
   `GET /v1/needs-you`) lists approval, form and tool-approval steps only to
   people who also hold `runs.read`, so a custom role with only `runs.start` no
