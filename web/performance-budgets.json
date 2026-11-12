@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 640.9,
+  "artifactGzipKiB": 650.5,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 593.8
+    "maxGzipKiB": 602.5
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -129,6 +129,9 @@
     "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,
     "PlaybookPromotionCard.js": 1.25,
+    "PublishRequestDetail.js": 3.43,
+    "PublishRequestsPanel.css": 0.85,
+    "PublishRequestsPanel.js": 2.75,
     "react-vendor.js": 55.23,
     "ReasoningPanel.css": 1.64,
     "ReasoningPanel.js": 5.99,
@@ -162,7 +165,7 @@
     "SlackInteractionsPanel.js": 2.56,
     "SnippetInsertMenu.js": 3.92,
     "SolutionPacksPanel.css": 0.43,
-    "SolutionPacksPanel.js": 2.33,
+    "SolutionPacksPanel.js": 2.57,
     "supabase-runtime.js": 21.13,
     "ToolInputFields.js": 1.51,
     "UpstreamHealthPanel.js": 2.39,
