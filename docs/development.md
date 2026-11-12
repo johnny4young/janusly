@@ -250,28 +250,99 @@ Reference numbers (p95 / p99 ms, 20-minute measured phases):
 `scripts/agent-cycle/cycle.py` measures how far a real agent gets alone: ten
 English and Spanish tasks (create, gate, publish and run; diagnose; a missing
 credential; change a published workflow; schedule; pause and resume; cancel;
-redrive; CSV), each from a blank Codex or Claude Code session connected only
+redrive; CSV), each from a blank Claude Code or Codex session connected only
 to `/mcp`. The script creates one organization and agent client per task,
 seeds what the task needs, and scores each task from the database and the
-agent's final answer. It plays the only person in two ways: it approves
-publish requests whose draft uses only pure steps and a schedule (anything
-that reaches out is rejected, because the redrive simulator needs
-`ALLOW_PRIVATE_HTTP_TARGETS=true`), and it approves the Janusly tool calls a
-client asks a person about, such as the destructive ones, and no other
-server's.
+agent's final answer. It plays the only person: it approves publish requests
+whose draft uses only pure steps and a schedule (anything that reaches out is
+rejected, because the redrive simulator needs `ALLOW_PRIVATE_HTTP_TARGETS=true`),
+and in `approved` mode it says yes to the Janusly tool calls a client asks a
+person about, and to no other server's. In `strict` mode nobody answers them.
+
+### Blank sessions
+
+Each client process, the preflight's and the run's, gets:
+
+- a new empty `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, XDG directories,
+  `TMPDIR` and working directory under the system temp directory (`CYCLE_TMP`
+  moves it), deleted when the process ends;
+- only `PATH`, `LANG`, `TERM`, those directories, its agent token and the
+  variables named in `CYCLE_PASS_ENV`. The model key comes from there:
+  `ANTHROPIC_API_KEY` for Claude Code, `CODEX_API_KEY` for Codex, a dedicated
+  key with a spend cap. The script refuses to start without one and refuses
+  `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN`, which are a person's
+  session;
+- the `janusly` MCP server and nothing else: no built-in tools, plugins,
+  skills, hooks, memory or global instructions.
+
+The script never reads or writes `~/.claude`, `~/.claude.json`, `~/.codex` or
+`~/.cursor`, and refuses an output directory, temp directory or `PATH` entry
+inside them.
+
+Claude Code runs with `--bare` (no hooks, plugin sync, auto-memory, CLAUDE.md
+discovery or keychain), `--setting-sources ""`, `--strict-mcp-config`,
+`--tools ""`, `--disable-slash-commands` and `--permission-prompts none`.
+Before each task the script starts the exact command with the model endpoint
+on a closed local port and reads its `init` event, so nothing reaches a model.
+It refuses unless `janusly` is the only MCP server and is connected, every tool
+is a `mcp__janusly__` tool from the catalog the token sees, no slash command,
+skill, plugin or agent comes from outside the CLI, the output style is the
+default and the key comes from `ANTHROPIC_API_KEY`. The run's own `init`
+event is checked again, and a client that differs is killed by PID. Claude
+Code 2.1.322 exposes `workflows.list` as `mcp__janusly__workflows_list` and
+calls the dotted name on the server.
+
+Codex runs `codex exec --ignore-user-config --ignore-rules --ephemeral` in a
+read-only sandbox with plugins, apps, computer and browser use, hooks, the
+shell tool, image generation, multi-agent, memories, skill search, tool
+suggestions, image viewing and web search off. The preflight runs
+`codex mcp list --json` and `codex features list` with the same overrides in a
+throwaway `CODEX_HOME` and refuses unless `janusly` is the only server and
+those features are off. A command, file change, web search or another
+server's tool during the run stops the cycle.
+
+A refusal stops the cycle with a non-zero exit: better not to measure than to
+measure a session that is not blank. CI runs the self-test,
+`python3 -m unittest discover -s scripts/agent-cycle`: fake `claude` and
+`codex` executables (`scripts/agent-cycle/fakes/`) load configuration the way
+the real ones do and make fixed calls against a fake MCP server. It fails when
+a session sees the operator's home, an injected MCP server, a home that
+carries configuration, a feature left on, or a client that reports nothing.
+
+### Running it
+
+To iterate locally, with a dedicated key exported only to the cycle (the
+server would use `ANTHROPIC_API_KEY` too):
 
 ```bash
 JANUSLY_MCP_HTTP_ENABLED=true JANUSLY_MCP_WRITES_ENABLED=true ALLOW_PRIVATE_HTTP_TARGETS=true make dev
-CYCLE_CLIENT=codex CYCLE_PSQL="psql $DB_URL" python3 scripts/agent-cycle/cycle.py
+CYCLE_CLIENT=claude CYCLE_MODE=approved CYCLE_PASS_ENV=ANTHROPIC_API_KEY ANTHROPIC_API_KEY="$CYCLE_ANTHROPIC_API_KEY" \
+  CYCLE_PSQL="psql $DB_URL" python3 scripts/agent-cycle/cycle.py 1 2
 ```
 
-A Codex session gets only `PATH`, `HOME`, `LANG`, `TERM` and its agent token
-(`CYCLE_PASS_ENV` adds more), no plugins or computer use, every MCP server
-from `codex mcp list` switched off, and neutral instructions; the script stops
-if it cannot list those servers. A Claude Code session uses
-`--strict-mcp-config`, but the operator's own settings and hooks still apply.
-`CYCLE_BASE_URL`, `CYCLE_SIM_PORT`, `CYCLE_OUT` and `CYCLE_CODEX_ARGS` adjust
-the rest. Each run spends real model usage; it is not part of CI.
+The official figure runs in a Linux container with the pinned clients
+(`scripts/agent-cycle/Dockerfile`) and no keychain, display or host mount
+besides `output/agent-cycle`. The overlay starts its own stack without host
+ports, keeps the key away from the server, and ignores `.env`:
+
+```bash
+export CYCLE_ANTHROPIC_API_KEY=...   # dedicated key with a spend cap
+export CYCLE_CLIENT=claude CYCLE_MODEL=claude-sonnet-5-5 CYCLE_CLIENT_VERSION=2.1.322 CYCLE_REPEAT=3
+cycle() { docker compose --env-file /dev/null -p janusly-cycle -f docker-compose.yml -f scripts/agent-cycle/compose.yml "$@"; }
+cycle build janusly cycle && cycle run --rm janusly migrate && cycle up -d --wait janusly
+cycle run --rm -e CYCLE_MODE=strict cycle && cycle run --rm -e CYCLE_MODE=approved cycle
+cycle down -v
+```
+
+`CYCLE_REPEAT` repeats every task (3 for the official figure),
+`CYCLE_CLIENT_VERSION` refuses any other client version, `CYCLE_MODEL` pins
+the model, and `CYCLE_MAX_BUDGET_USD` caps each Claude Code task.
+`CYCLE_TASK_SECONDS`, `CYCLE_BASE_URL`, `CYCLE_SIM_PORT`, `CYCLE_OUT` and
+`CYCLE_CODEX_ARGS` adjust the rest. `results-<client>-<mode>-<stamp>.json`
+records each task's client version, model, calls, tool errors, tokens, cost,
+seconds and approvals, the tasks passed per repetition and their median, which
+is the reported figure. Each run spends real model usage; only the self-test
+is part of CI.
 
 ## Bundle budgets
 
