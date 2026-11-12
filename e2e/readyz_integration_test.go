@@ -43,6 +43,40 @@ func TestPublicListenerHonorsLoopbackBind(t *testing.T) {
 	if out, err := probe.CombinedOutput(); err != nil {
 		t.Fatalf("readyz against a loopback bind must exit 0: %v\n%s", err, out)
 	}
+	assertLoopbackOnly(t, port)
+}
+
+// While development auth headers are accepted, the API defaults to loopback
+// and refuses a wildcard bind that nobody acknowledged.
+func TestDevAuthHeadersKeepThePublicListenerOnLoopback(t *testing.T) {
+	for _, name := range []string{"SUPABASE_URL", "JANUSLY_ENV", "ALLOW_DEV_AUTH_HEADERS", "ALLOW_DEV_AUTH_HEADERS_ON_NETWORK", "JANUSLY_HTTP_HOST"} {
+		t.Setenv(name, "")
+	}
+	// The refusal runs first: the LAN probe below skips on hosts without one.
+	refused := exec.Command(buildBinary(t))
+	refused.Env = append(os.Environ(), "JANUSLY_HTTP_HOST=0.0.0.0", fmt.Sprintf("JANUSLY_PORT=%d", freePort(t)))
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() { out, err := refused.CombinedOutput(); done <- result{out, err} }()
+	select {
+	case res := <-done:
+		if res.err == nil || !strings.Contains(string(res.out), "ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true") {
+			t.Fatalf("a wildcard bind with development headers must refuse to boot: %v\n%s", res.err, res.out)
+		}
+	case <-time.After(15 * time.Second):
+		_ = refused.Process.Kill()
+		t.Fatal("a wildcard bind with development headers kept running")
+	}
+
+	api := bootBinary(t)
+	assertLoopbackOnly(t, strings.TrimPrefix(api.base, "http://127.0.0.1:"))
+}
+
+func assertLoopbackOnly(t *testing.T, port string) {
+	t.Helper()
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
 		t.Fatal(err)
