@@ -10,39 +10,19 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { flowRowProps } from '../test/flow-row-fixture'
 import type { SavedWorkflow } from '../types'
 import { FlowRow, type FlowRowProps } from './FlowRow'
 
 vi.mock('./WorkflowHealthBadge', () => ({ WorkflowHealthBadge: () => <button type="button">health</button> }))
 vi.mock('./FlowHealthTrend', () => ({ FlowHealthTrend: () => null }))
 
-const noop = () => {}
 const renderRow = (row: ReactElement) => render(row, {
   wrapper: ({ children }: { children: ReactNode }) => <table><tbody>{children}</tbody></table>,
 })
-const t = ((key: string) => key) as FlowRowProps['t']
 
 function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRowProps {
-  return {
-    workflow,
-    canWrite: true,
-    folderOptions: [],
-    tagOptions: [],
-    hasFolders: false,
-    selectionMode: true,
-    selectedIds,
-    draggingId: null,
-    onOpen: noop,
-    toggleSelected: noop,
-    setDraggingId: noop,
-    setDropTarget: noop,
-    setRowTag: noop,
-    moveToFolder: noop,
-    deleteWorkflow: noop,
-    resumeWorkflow: noop,
-    recoveryBusy: false,
-    t,
-  }
+  return flowRowProps(workflow, { selectionMode: true, selectedIds })
 }
 
 describe('<FlowRow /> memoization', () => {
@@ -115,6 +95,27 @@ describe('<FlowRow /> paused state', () => {
     fireEvent.click(screen.getByTestId('workflows-resume-wf-1'))
 
     expect(resumeWorkflow).toHaveBeenCalledWith('wf-1')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('marks a manually paused row and offers Resume, with no Pause in its menu', () => {
+    renderRow(<FlowRow {...props({ ...base, status: 'paused_manual', pausedReason: 'vendor maintenance' })} />)
+
+    expect(screen.getByText('workflowsDashboard.paused')).toHaveAttribute('title', 'vendor maintenance')
+    expect(screen.getByTestId('workflows-resume-wf-1')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf-1'))
+    expect(screen.queryByTestId('workflows-pause-wf-1')).toBeNull()
+  })
+
+  it('pauses from the row menu by id without opening the row', () => {
+    const pauseWorkflow = vi.fn()
+    const onOpen = vi.fn()
+    renderRow(<FlowRow {...props({ ...base, status: 'active' })} pauseWorkflow={pauseWorkflow} onOpen={onOpen} />)
+
+    fireEvent.click(screen.getByTestId('workflows-row-menu-wf-1'))
+    fireEvent.click(screen.getByTestId('workflows-pause-wf-1'))
+
+    expect(pauseWorkflow).toHaveBeenCalledWith('wf-1')
     expect(onOpen).not.toHaveBeenCalled()
   })
 

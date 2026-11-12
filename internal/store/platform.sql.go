@@ -1537,24 +1537,6 @@ func (q *Queries) RestartOnboarding(ctx context.Context, arg RestartOnboardingPa
 	return result.RowsAffected(), nil
 }
 
-const resumeWorkflowCircuitBreaker = `-- name: ResumeWorkflowCircuitBreaker :execrows
-UPDATE workflows SET status = 'active', paused_reason = NULL
-WHERE org_id = $1 AND id = $2 AND status = 'paused_circuit_breaker' AND deleted_at IS NULL
-`
-
-type ResumeWorkflowCircuitBreakerParams struct {
-	OrgID string
-	ID    string
-}
-
-func (q *Queries) ResumeWorkflowCircuitBreaker(ctx context.Context, arg ResumeWorkflowCircuitBreakerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resumeWorkflowCircuitBreaker, arg.OrgID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const retryWeeklyDigest = `-- name: RetryWeeklyDigest :execrows
 UPDATE org_digest_state
 SET lease_token = NULL, lease_expires_at = NULL,

@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,51 @@ func conformanceFormRun(t *testing.T, h *apiHarness, id string) (string, string)
 	}}, "")
 	runID := extractRunID(t, res)
 	return runID, waitFormToken(t, testPool(t), t.Context(), runID, "form")
+}
+
+// conformanceRunMapFixture seeds a run whose map and inbox fill every branch:
+// crew and agent lanes, a malformed event payload, a stuck step, cost, a tool
+// approval someone else caused, an approval step and a publish request.
+func conformanceRunMapFixture(t *testing.T, h *apiHarness) (string, string) {
+	t.Helper()
+	pool := testPool(t)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runID, decider, requester := "conformance-map-"+h.org, "decider-"+h.org, "requester-"+h.org
+	for _, user := range []string{decider, requester} {
+		exec(`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, $3, 'editor')`, "m-"+user, h.org, user)
+	}
+	doc, _ := json.Marshal(map[string]any{"workflow": map[string]any{"id": runID, "nodes": []any{
+		map[string]any{"id": "crew", "type": "multi_agent"}, map[string]any{"id": "think", "type": "agent"},
+		map[string]any{"id": "slow", "type": "http"}, map[string]any{"id": "gate", "type": "tool"},
+		map[string]any{"id": "sign", "type": "approval"},
+	}}})
+	exec(`INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json) VALUES ($1, $2, 'v', $1, 'running', $3)`,
+		runID, h.org, doc)
+	exec(`INSERT INTO run_nodes (id, run_id, org_id, node_id, status, attempts, started_at, finished_at, state_json) VALUES
+		($1 || '-crew', $1, $2, 'crew', 'succeeded', 1, now() - interval '3 minutes', now() - interval '2 minutes', '{}'),
+		($1 || '-think', $1, $2, 'think', 'succeeded', 2, now() - interval '2 minutes', now() - interval '1 minute', '{}'),
+		($1 || '-slow', $1, $2, 'slow', 'running', 1, now() - interval '20 minutes', NULL, '{}'),
+		($1 || '-gate', $1, $2, 'gate', 'waiting', 1, now(), NULL, '{"waiting":{"kind":"tool_approval"}}'),
+		($1 || '-sign', $1, $2, 'sign', 'waiting', 1, now(), NULL, '{"waiting":{"kind":"approval"}}')`, runID, h.org)
+	exec(`INSERT INTO tool_approval_requests (id, org_id, run_id, node_id, tool, params_json, params_digest, requester_ids, expires_at)
+		VALUES ($1 || '-ta', $2, $1, 'gate', 'http.request', '{}', 'digest', ARRAY[$3], now() + interval '30 minutes')`, runID, h.org, requester)
+	exec(`INSERT INTO usage_events (id, org_id, run_id, metric, quantity, metadata) VALUES
+		($1 || '-u', $2, $1, 'llm.completion', 900, '{"nodeId":"think","costUsd":0.004}')`, runID, h.org)
+	exec(`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload) VALUES
+		($1 || '-e1', $1, $2, 'crew', 'multi_agent.started', '{"count":1}'),
+		($1 || '-e2', $1, $2, 'crew', 'multi_agent.agent.started', '{"name":"researcher","index":0}'),
+		($1 || '-e3', $1, $2, 'crew', 'multi_agent.agent.0.tool.started', '{"agent":"researcher","tool":"http.request","iteration":0}'),
+		($1 || '-e4', $1, $2, 'think', 'agent.step.started', '{"agent":"agent","iteration":1}'),
+		($1 || '-e5', $1, $2, 'think', 'agent.tool.started', '{"tool":5,"iteration":"one"}'),
+		($1 || '-e6', $1, $2, 'think', 'agent.completed', '{"agent":"agent","status":"ok"}')`, runID, h.org)
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1 || '-pub', $2, 'wf', 'draft', 'qual', '{first_publish}', $3, $3, $3, now() + interval '1 day')`, runID, h.org, requester)
+	return runID, decider
 }
 
 func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
@@ -130,6 +176,22 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("GET /v1/dlq/clusters", h.call("GET", "/v1/dlq/clusters", nil, ""), http.StatusOK)
 	rec.record("GET /v1/runs/{runId}/investigation", h.call("GET",
 		"/v1/runs/"+failed["patch-run"]+"/investigation", nil, ""), http.StatusOK)
+	mapRun, decider := conformanceRunMapFixture(t, h)
+	asDecider := map[string]string{"x-user-id": decider}
+	runMap := rec.record("GET /v1/runs/{runId}/map", h.callWithHeaders("GET", "/v1/runs/"+mapRun+"/map", nil, "", asDecider), http.StatusOK)
+	if lanes, _ := runMap["lanes"].([]any); len(lanes) != 2 {
+		t.Fatalf("run map lanes: %+v", runMap["lanes"])
+	}
+	rec.record("GET /v1/runs/{runId}/map", h.call("GET", "/v1/runs/"+runID+"/map", nil, ""), http.StatusOK)
+	inbox := rec.record("GET /v1/needs-you", h.callWithHeaders("GET", "/v1/needs-you", nil, "", asDecider), http.StatusOK)
+	kinds := map[string]bool{}
+	for _, raw := range inbox["items"].([]any) {
+		kinds[raw.(map[string]any)["kind"].(string)] = true
+	}
+	if !kinds["tool_approval"] || !kinds["approval"] || !kinds["publish_request"] {
+		t.Fatalf("needs-you must fill every item shape: %+v", inbox)
+	}
+	rec.record("GET /v1/needs-you", h.call("GET", "/v1/needs-you", nil, ""), http.StatusOK)
 	rec.record("POST /v1/ai/patch-workflow", h.call("POST", "/v1/ai/patch-workflow",
 		map[string]any{"deadLetterId": failed["patch"]}, ""), http.StatusOK)
 	rec.record("POST /v1/dlq/redrive", h.call("POST", "/v1/dlq/redrive",
@@ -289,6 +351,9 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("POST /v1/webhooks/{workflowId}", h.call("POST", "/v1/webhooks/"+webhookWorkflowID, map[string]any{
 		"endpointKey": "conf-hook", "eventId": "evt-2",
 	}, ""), http.StatusAccepted)
+	rec.record("POST /v1/workflows/{id}/resume", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/resume", nil, ""), http.StatusOK)
+	rec.record("POST /v1/workflows/{id}/pause", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/pause",
+		map[string]any{"reason": "conformance"}, ""), http.StatusOK)
 	rec.record("POST /v1/workflows/{id}/resume", h.call("POST", "/v1/workflows/"+webhookWorkflowID+"/resume", nil, ""), http.StatusOK)
 
 	alias := "conf-mail-" + suffix

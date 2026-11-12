@@ -15,6 +15,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { ApiResponses, RecoveryActorKind, RecoveryArtifact, RecoveryCaseState, RecoveryCase as WireRecoveryCase } from './lib/api-types.generated'
 import type { WorkflowRecovery } from './lib/recovery-contract'
 import type { AuthoringProblem } from './components/authoring-problems'
+import type { RunMapNodeOverlay } from './run-map'
 
 export type JsonObject = Record<string, unknown>
 export type RunNode = {
@@ -41,6 +42,8 @@ type WorkflowNodeData = {
   onRecover?: () => void
   /** The step's worst authoring problem; projected for display, never persisted. */
   problem?: AuthoringProblem
+  /** Time, cost, stuck and needs-you from the run map while a run is shown. */
+  runMap?: RunMapNodeOverlay
 }
 type WorkflowEdgeData = {
   condition?: string
@@ -154,7 +157,7 @@ export type SolutionPackPublic = {
 }
 /**
  * `status` / `pausedReason` are the workflow's OPERATIONAL state (`active`,
- * `paused_upstream_degraded`, `paused_circuit_breaker`) — distinct from
+ * `paused_manual`, `paused_upstream_degraded`, `paused_circuit_breaker`) — distinct from
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */

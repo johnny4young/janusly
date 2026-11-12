@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 635.4,
+  "artifactGzipKiB": 640.4,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 588.6
+    "maxGzipKiB": 593.4
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -37,7 +37,7 @@
       "assets": [
         "workflow-workspace.js"
       ],
-      "maxGzipKiB": 16
+      "maxGzipKiB": 16.2
     },
     "eagerCss": {
       "label": "Eager stylesheet",
@@ -80,12 +80,12 @@
   "baselineGzipKiB": {
     "ActivityRecoveryDetail.js": 2.43,
     "ActivityWorkspace.css": 1.02,
-    "ActivityWorkspace.js": 3.74,
+    "ActivityWorkspace.js": 4.14,
     "AiGuidanceSettingsPanel.js": 1.31,
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
     "app-workspace.css": 2.85,
-    "app-workspace.js": 85.06,
+    "app-workspace.js": 93.82,
     "AuditLogPanel.css": 0.43,
     "AuditLogPanel.js": 1.46,
     "authoring-contract.js": 1.9,
@@ -98,8 +98,8 @@
     "BudgetSettingsPanel.js": 3.27,
     "CanvasWorkspace.css": 4.12,
     "CanvasWorkspace.js": 58.89,
-    "catalog-en.js": 42.58,
-    "catalog-es.js": 47.38,
+    "catalog-en.js": 47,
+    "catalog-es.js": 52.29,
     "CommandPalette.js": 6.08,
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
@@ -151,7 +151,7 @@
     "RunsPanel.css": 2.99,
     "RunsPanel.js": 25.7,
     "RunWorkspace.css": 0.77,
-    "RunWorkspace.js": 1.76,
+    "RunWorkspace.js": 1.97,
     "ScheduleHistoryPanel.css": 0.71,
     "ScheduleHistoryPanel.js": 1.96,
     "schemas.js": 17.88,

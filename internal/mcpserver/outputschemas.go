@@ -131,6 +131,15 @@ var outputSchemas = map[string]*jsonschema.Schema{
 	}),
 	"workflows.deactivate": activeObject(),
 	"workflows.reactivate": activeObject(),
+	"workflows.pause": outputObject(fields{
+		"workflowId": {kind: "string", required: true}, "status": {kind: "string", required: true},
+		"changed": {kind: "boolean", required: true},
+	}),
+	"workflows.resume": outputObject(fields{
+		"workflowId": {kind: "string", required: true}, "status": {kind: "string", required: true},
+		"changed": {kind: "boolean", required: true}, "backfilled": {kind: "integer", required: true},
+		"failed": {kind: "integer", required: true}, "remaining": {kind: "integer", required: true},
+	}),
 	"runs.output": outputObject(fields{
 		"runId": {kind: "string", required: true}, "status": {kind: "string", required: true},
 		"workflowVersionId": {kind: "string", required: true}, "output": {},

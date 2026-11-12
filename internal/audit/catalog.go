@@ -1,5 +1,5 @@
 // The closed audit-action catalog, extracted mechanically from the
-// reference (the API contract AuditAction union — 147 actions).
+// reference (the API contract AuditAction union).
 // Action is a distinct type and every write validates membership, so a
 // typo'd action is a test failure here and can never land as a silent
 // unfilterable row. Runtime-own actions (documented in the plan registry)
@@ -152,8 +152,10 @@ var knownActions = map[Action]bool{
 	"workflow.force_run_during_pause":          true,
 	"workflow.metadata.set":                    true,
 	"workflow.pack_imported":                   true,
+	"workflow.paused":                          true,
 	"workflow.recovery_qualification.recorded": true,
 	"workflow.restored":                        true,
+	"workflow.resumed":                         true,
 	"workflow.rolled_back":                     true,
 	"workflow.rollout.promoted":                true,
 	"workflow.rollout.rolled_back":             true,

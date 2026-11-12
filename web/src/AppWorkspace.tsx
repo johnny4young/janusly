@@ -239,6 +239,8 @@ function WorkspaceContent(props: AppWorkspaceProps) {
                 runNodes={runNodes}
                 panel={rightPanelElement}
                 onRecoverNode={(nodeId) => props.onRecoverRunNode(observedRun.id, nodeId)}
+                permissions={permissions}
+                execution={props.rightPanel.execution}
               />
             </Suspense>
           ) : (

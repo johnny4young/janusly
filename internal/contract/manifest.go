@@ -135,11 +135,19 @@ var Routes = []Route{
 		Response: closedObj(map[string]any{
 			"valid": boolT(), "issues": arr(validationIssue),
 		}, "valid", "issues")},
-	{Method: "POST", Path: "/v1/workflows/{id}/resume", Summary: "Resume a workflow paused by its circuit breaker",
+	{Method: "POST", Path: "/v1/workflows/{id}/resume", Summary: "Resume a manually paused or circuit-breaker-paused workflow",
 		Response: closedObj(map[string]any{
 			"ok": map[string]any{"const": true}, "workflowId": str(), "status": str(),
 			"backfilled": countT(), "failed": countT(), "remaining": countT(),
 		}, "ok", "workflowId", "status", "backfilled", "failed", "remaining")},
+	{Method: "POST", Path: "/v1/workflows/{id}/pause", Summary: "Pause a workflow without touching its versions, schedules or rollout",
+		Request: closedObj(map[string]any{
+			"reason": map[string]any{"type": "string", "maxLength": 500},
+		}),
+		Response: closedObj(map[string]any{
+			"ok": map[string]any{"const": true}, "workflowId": str(),
+			"status": map[string]any{"const": "paused_manual"}, "changed": boolT(),
+		}, "ok", "workflowId", "status", "changed")},
 	{Method: "GET", Path: "/v1/workflows", Summary: "Keyset-paginated workflow list",
 		Response: boundedPage(workflowListItem)},
 	{Method: "GET", Path: "/v1/workflows/latest", Summary: "Latest version of one workflow (nullable)",
@@ -336,4 +344,8 @@ var Routes = []Route{
 		Response: operatorBrief},
 	{Method: "GET", Path: "/v1/runs/{runId}/investigation", Summary: "Rules-based hypotheses for a run's failed step",
 		Response: runInvestigation},
+	{Method: "GET", Path: "/v1/runs/{runId}/map", Summary: "Per-step state, time, cost, stuck signal and agent lanes of one run",
+		Response: runMap},
+	{Method: "GET", Path: "/v1/needs-you", Summary: "Decisions waiting on the signed-in person",
+		Response: needsYou},
 }

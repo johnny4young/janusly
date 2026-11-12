@@ -132,6 +132,12 @@ func (e *Engine) executeSubworkflowNode(
 	// validation runs stay exact.
 	q := store.New(e.pool)
 	dryRun := replayMode == "validation"
+	if !dryRun {
+		status, err := q.GetWorkflowBreakerStatus(ctx, store.GetWorkflowBreakerStatusParams{OrgID: claim.OrgID, ID: workflowID})
+		if err == nil && status != "active" {
+			return nil, fmt.Errorf("Subworkflow is paused: %s (%s)", workflowID, status) //nolint:staticcheck // contract message is the wire contract
+		}
+	}
 	var childWorkflow *domain.Workflow
 	childVersionID, childVersion := "", 0
 	rolloutID, rolloutVariant := "", ""

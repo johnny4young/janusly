@@ -1,7 +1,7 @@
 /**
  * A single workflow row of the Flows table (name/slug with tag and folder
  * controls, status pills, open failures, health with trend, last run, version,
- * breaker Resume, the open affordance, and the row menu). Rendered inside
+ * Pause/Resume, the open affordance, and the row menu). Rendered inside
  * `FlowsTable` in both the flat and folder-grouped views.
  *
  * Presentation only: the container owns all state (drag, selection) and the
@@ -9,7 +9,7 @@
  */
 
 import { memo, type Dispatch, type SetStateAction } from 'react'
-import { Folder, GripVertical, MoreHorizontal, PlayCircle, Trash2, X } from 'lucide-react'
+import { Folder, GripVertical, MoreHorizontal, PauseCircle, PlayCircle, Trash2, X } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { FlowHealthTrend } from './FlowHealthTrend'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
@@ -37,6 +37,7 @@ export type FlowRowProps = {
   moveToFolder: (workflowId: string, folderKey: string) => void | Promise<void>
   deleteWorkflow: (workflowId: string) => void | Promise<void>
   resumeWorkflow: (workflowId: string) => void | Promise<void>
+  pauseWorkflow: (workflowId: string) => void | Promise<void>
   recoveryBusy: boolean
   onHealthScore?: (workflowId: string, score: number) => void
   t: TFunc
@@ -44,6 +45,8 @@ export type FlowRowProps = {
 
 /** `workflows.status` for a workflow its circuit breaker paused. */
 const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
+/** `workflows.status` for a workflow a person or agent paused. */
+const STATUS_PAUSED_MANUAL = 'paused_manual'
 
 export const FlowRow = memo(function FlowRow({
   workflow,
@@ -62,12 +65,14 @@ export const FlowRow = memo(function FlowRow({
   moveToFolder,
   deleteWorkflow,
   resumeWorkflow,
+  pauseWorkflow,
   recoveryBusy,
   onHealthScore,
   t,
 }: FlowRowProps) {
   // `status` is absent on older cached rows; treat that as active.
   const pausedByBreaker = workflow.status === STATUS_PAUSED_CIRCUIT_BREAKER
+  const pausedManually = workflow.status === STATUS_PAUSED_MANUAL
   const isPaused = Boolean(workflow.status) && workflow.status !== 'active'
   const hasBufferedTriggers = (workflow.bufferedTriggerCount ?? 0) > 0
   const openFailures = workflow.openFailureCount ?? 0
@@ -243,14 +248,14 @@ export const FlowRow = memo(function FlowRow({
       </td>
       <td>
         <div className="we-flows-table__cell we-flows-table__actions">
-          {/* Only breaker pauses get a Resume: an upstream-outage pause clears
-              itself when the status page recovers. An active workflow can
-              continue a capped buffered window without changing pause state. */}
-          {canWrite && pausedByBreaker && (
+          {/* An upstream-outage pause clears itself when the status page
+              recovers, so only manual and breaker pauses get a Resume. An
+              active workflow can continue a capped buffered window. */}
+          {canWrite && (pausedByBreaker || pausedManually) && (
             <Button
               size="sm"
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
-              title={t('workflowsDashboard.resumeFlowTitle')}
+              title={pausedByBreaker ? t('workflowsDashboard.resumeFlowTitle') : undefined}
               data-testid={`workflows-resume-${workflow.id}`}
               disabled={recoveryBusy}
             >
@@ -276,7 +281,13 @@ export const FlowRow = memo(function FlowRow({
               aria-label={t('workflowsDashboard.moreActions', { name: workflow.name })}
               title={t('workflowsDashboard.moreActions', { name: workflow.name })}
               data-testid={`workflows-row-menu-${workflow.id}`}
-              items={[{
+              items={[...(pausedManually ? [] : [{
+                id: 'pause',
+                label: t('workflowsDashboard.pauseFlow'),
+                icon: <PauseCircle size={14} />,
+                testId: `workflows-pause-${workflow.id}`,
+                onSelect: () => void pauseWorkflow(workflow.id),
+              }]), {
                 id: 'trash',
                 label: t('workflowsDashboard.moveToTrash'),
                 icon: <Trash2 size={14} />,

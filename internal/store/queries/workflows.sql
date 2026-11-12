@@ -218,6 +218,32 @@ WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
 SELECT id, org_id, workflow_id, version, dag_json FROM workflow_versions
 WHERE id = $1 AND org_id = $2;
 
+-- name: LockWorkflowPauseState :one
+SELECT status FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE;
+
+-- name: SetWorkflowPauseState :exec
+UPDATE workflows SET status = sqlc.arg(status), paused_reason = sqlc.narg(paused_reason)
+WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL;
+
+-- name: GetDegradedUpstreamForWorkflow :one
+SELECT s.name, COALESCE(s.last_status, '')::text AS last_status
+FROM upstream_health_sources s
+JOIN LATERAL (
+  SELECT v.upstream_health_sources FROM workflow_versions v
+  WHERE v.org_id = s.org_id AND v.workflow_id = sqlc.arg(workflow_id)
+  ORDER BY v.version DESC LIMIT 1
+) latest ON true
+WHERE s.org_id = sqlc.arg(org_id) AND s.enabled AND s.last_degraded
+  AND latest.upstream_health_sources @> jsonb_build_array(s.name)
+ORDER BY s.name
+LIMIT 1;
+
+-- name: GetDeadLetterWorkflowStatus :one
+SELECT w.status FROM dead_letters d
+JOIN runs r ON r.id = d.run_id AND r.org_id = d.org_id
+JOIN workflows w ON w.id = r.workflow_id AND w.org_id = r.org_id AND w.deleted_at IS NULL
+WHERE d.org_id = $1 AND d.id = $2;
+
 -- name: LockWorkflowForRollout :one
 SELECT id FROM workflows WHERE org_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE;
 

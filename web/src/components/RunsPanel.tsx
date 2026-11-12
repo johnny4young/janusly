@@ -18,7 +18,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { Activity, CheckCircle2, CircleX, Copy, Download, FlaskConical, GitBranch, ListChecks, Send, X } from 'lucide-react'
-import type { RunEvent, RunNode, RunSummary, SavedWorkflow, WorkflowInputSchemaShape } from '../types'
+import type { RunEvent, RunNode, RunSummary, SavedWorkflow } from '../types'
 import { isOpenRunStatus, isTerminalRunStatus } from '@/lib/status'
 import { formatCompactDuration, formatStatusLabel, formatNodeDuration } from '../constants'
 import { downloadFromApi } from '../api'
@@ -28,6 +28,7 @@ import { DeadLettersPanel } from './DeadLettersPanel'
 export { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
 export { RerunStepDialog } from './RerunStepDialog'
 export { RunExplainChat } from './RunExplainChat'
+export { HumanFormDialog } from './HumanFormDialog'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayLabForkDialog } from './ReplayLabForkDialog'
@@ -37,52 +38,12 @@ import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
-import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, type RunWaitKind, type ToolApprovalDecision } from '../run-observability'
+import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, readHumanFormWaiting, type RunWaitKind, type ToolApprovalDecision } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
 import './RunsPanel.css'
 import { Button } from './ui/Button'
-
-type HumanFormWaiting = {
-  title?: string
-  description?: string
-  schema: WorkflowInputSchemaShape
-  initialValues?: unknown
-  resumeToken: string
-}
-
-function readHumanFormWaiting(node: RunNode): HumanFormWaiting | null {
-  const waiting = node.stateJson?.waiting
-  if (!waiting || typeof waiting !== 'object' || Array.isArray(waiting)) return null
-  const data = waiting as Record<string, unknown>
-  if (data.kind !== 'human_form') return null
-  if (typeof data.resumeToken !== 'string' || !data.resumeToken) return null
-  if (!isWorkflowInputSchemaShape(data.schema)) return null
-  return {
-    title: typeof data.title === 'string' ? data.title : undefined,
-    description: typeof data.description === 'string' ? data.description : undefined,
-    schema: data.schema,
-    initialValues: data.initialValues,
-    resumeToken: data.resumeToken,
-  }
-}
-
-function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchemaShape {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const schema = value as Record<string, unknown>
-  if (!['string', 'number', 'boolean', 'object', 'array'].includes(String(schema.type))) return false
-  if (schema.properties !== undefined) {
-    if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) return false
-    for (const child of Object.values(schema.properties as Record<string, unknown>)) {
-      if (!isWorkflowInputSchemaShape(child)) return false
-    }
-  }
-  if (schema.items !== undefined && !isWorkflowInputSchemaShape(schema.items)) return false
-  if (schema.required !== undefined && (!Array.isArray(schema.required) || !schema.required.every(item => typeof item === 'string'))) return false
-  if (schema.enum !== undefined && !Array.isArray(schema.enum)) return false
-  return true
-}
 
 export type RunsPanelProps = {
   mode?: 'runs' | 'recovery'
@@ -95,7 +56,7 @@ export type RunsPanelProps = {
   activeRunId?: string | null
   onOpenRun: (id: string) => void | Promise<void>
   onRefreshPlatform: () => void
-  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void
+  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void | Promise<void>
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
   onRedriveNode: (nodeId: string) => void

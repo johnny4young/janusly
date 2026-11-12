@@ -363,6 +363,45 @@ export type MemoryMetadata = unknown
 
 export type MetricSeverity = "healthy" | "warn" | "unhealthy" | "neutral"
 
+export type NeedsYou = {
+  "items": NeedsYouItem[]
+}
+
+export type NeedsYouItem = {
+  "expiresAt": string
+  "id": string
+  "kind": "tool_approval"
+  "nodeId": string
+  "runId": string
+  "tool": string
+  "workflowId": string
+  "since"?: never
+  "reasons"?: never
+  "requestedBy"?: never
+} | {
+  "kind": "approval" | "human_form"
+  "nodeId": string
+  "runId": string
+  "since": string | null
+  "workflowId": string
+  "expiresAt"?: never
+  "id"?: never
+  "tool"?: never
+  "reasons"?: never
+  "requestedBy"?: never
+} | {
+  "expiresAt": string
+  "id": string
+  "kind": "publish_request"
+  "reasons": string[]
+  "requestedBy": string
+  "workflowId": string
+  "nodeId"?: never
+  "runId"?: never
+  "tool"?: never
+  "since"?: never
+}
+
 export type NullableCount = number | null
 
 export type OperatorBrief = {
@@ -890,6 +929,52 @@ export type RunEvent = {
 export type RunInput = unknown
 
 export type RunJSON = unknown
+
+export type RunMap = {
+  "lanes": RunMapLane[]
+  "nodes": RunMapNode[]
+  "run": {
+    "id": string
+    "parentRunId": string | null
+    "status": RunStatus
+    "workflowVersionId": string
+  }
+  "totals": {
+    "costUsd": number
+    "tokens": number
+  }
+}
+
+export type RunMapLane = {
+  "kind": string
+  "nodeId": string
+  "steps": ({
+    "agent"?: string
+    "at": string | null
+    "index"?: number
+    "iteration"?: number
+    "name"?: string
+    "status"?: string
+    "tool"?: string
+    "type": string
+  })[]
+}
+
+export type RunMapNode = {
+  "attempts": number
+  "childRunId": string | null
+  "costUsd": number
+  "elapsedMs": number | null
+  "finishedAt": string | null
+  "needsYou": boolean
+  "nodeId": string
+  "startedAt": string | null
+  "status": "pending" | "queued" | "running" | "waiting" | "succeeded" | "failed" | "skipped" | "cancelled"
+  "stuck": boolean
+  "tokens": number
+  "type": string
+  "waitingKind": string | null
+}
 
 export type RunNode = {
   "attempts": number | null
@@ -1471,6 +1556,8 @@ export interface ApiRequests {
   "GET /dlq/entries/{deadLetterId}": undefined
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": undefined
+  /** Decisions waiting on the signed-in person */
+  "GET /needs-you": undefined
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": undefined
   /** List bounded semantic recovery cases */
@@ -1493,6 +1580,8 @@ export interface ApiRequests {
   "GET /runs": undefined
   /** Rules-based hypotheses for a run's failed step */
   "GET /runs/{runId}/investigation": undefined
+  /** Per-step state, time, cost, stuck signal and agent lanes of one run */
+  "GET /runs/{runId}/map": undefined
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": undefined
   /** Alias of /v1/run */
@@ -1659,7 +1748,11 @@ export interface ApiRequests {
     "payload"?: RelayPayload
     "receivedAt"?: string
   }
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": {
+    "reason"?: string
+  }
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": undefined
   /** Start a bounded canary rollout */
   "POST /workflows/{workflowId}/rollout": {
@@ -1703,6 +1796,8 @@ export interface ApiResponses {
   "GET /dlq/entries/{deadLetterId}": DeadLetterDetail
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": MemoryConsentStatus
+  /** Decisions waiting on the signed-in person */
+  "GET /needs-you": NeedsYou
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": OperatorBrief
   /** List bounded semantic recovery cases */
@@ -1858,6 +1953,8 @@ export interface ApiResponses {
     "signature": string
     "workflowName": string
   }
+  /** Per-step state, time, cost, stuck signal and agent lanes of one run */
+  "GET /runs/{runId}/map": RunMap
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": {
     "enabled": boolean
@@ -1985,7 +2082,14 @@ export interface ApiResponses {
   }
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": TriggerIngestResponse
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": {
+    "changed": boolean
+    "ok": true
+    "status": "paused_manual"
+    "workflowId": string
+  }
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": {
     "backfilled": number
     "failed": number
@@ -2031,6 +2135,8 @@ export interface ApiSuccessStatuses {
   "GET /dlq/entries/{deadLetterId}": 200
   /** Tenant memory consent and purge posture */
   "GET /memory/consent-status": 200
+  /** Decisions waiting on the signed-in person */
+  "GET /needs-you": 200
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": 200
   /** List bounded semantic recovery cases */
@@ -2053,6 +2159,8 @@ export interface ApiSuccessStatuses {
   "GET /runs": 200
   /** Rules-based hypotheses for a run's failed step */
   "GET /runs/{runId}/investigation": 200
+  /** Per-step state, time, cost, stuck signal and agent lanes of one run */
+  "GET /runs/{runId}/map": 200
   /** Search consented run-summary memory */
   "GET /runs/semantic-search": 200
   /** Alias of /v1/run */
@@ -2127,7 +2235,9 @@ export interface ApiSuccessStatuses {
   "POST /validate": 200
   /** Ingest one webhook trigger event */
   "POST /webhooks/{workflowId}": 200
-  /** Resume a workflow paused by its circuit breaker */
+  /** Pause a workflow without touching its versions, schedules or rollout */
+  "POST /workflows/{id}/pause": 200
+  /** Resume a manually paused or circuit-breaker-paused workflow */
   "POST /workflows/{id}/resume": 200
   /** Start a bounded canary rollout */
   "POST /workflows/{workflowId}/rollout": 200

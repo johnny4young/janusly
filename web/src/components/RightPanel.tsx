@@ -120,7 +120,7 @@ export type RightPanelExecution = {
   usage: Record<string, number>
   onOpenRun: (id: string, targetTab?: ActiveTab) => void | Promise<void>
   onRefreshPlatform: () => void
-  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void
+  onApproveNode: (nodeId: string, toolDecision?: ToolApprovalDecision) => void | Promise<void>
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
     Promise<string[] | undefined> | string[] | undefined
   onReplayNode: (nodeId: string) => void

@@ -48,14 +48,20 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	if s.now == nil {
 		s.now = time.Now
 	}
-	deps.Routes.Route(mux, "GET /runs/{runId}/map", httpkit.Gate{Role: auth.RoleViewer, Permission: "runs.read"},
-		func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-			httpkit.WriteUnversioned(w, s.runMap(r, rc))
-		})
-	deps.Routes.Route(mux, "GET /needs-you", httpkit.Gate{Role: auth.RoleViewer},
-		func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-			httpkit.WriteUnversioned(w, s.needsYou(r, rc))
-		})
+	read := httpkit.Gate{Role: auth.RoleViewer, Permission: "runs.read"}
+	inbox := httpkit.Gate{Role: auth.RoleViewer}
+	deps.Routes.Route(mux, "GET /runs/{runId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.runMap(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /v1/runs/{runId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.runMap(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /needs-you", inbox, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.needsYou(r, rc))
+	})
+	deps.Routes.Route(mux, "GET /v1/needs-you", inbox, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.needsYou(r, rc))
+	})
 }
 
 type workflowSnapshot struct {
@@ -124,7 +130,7 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	return httpkit.OK(map[string]any{
 		"run": map[string]any{
 			"id": run.ID, "status": run.Status, "workflowVersionId": run.WorkflowVersionID,
-			"parentRunId": run.ParentRunID.String,
+			"parentRunId": optionalText(run.ParentRunID),
 		},
 		"nodes": views, "lanes": lanes, "totals": totals,
 	})
@@ -167,16 +173,21 @@ func (s *service) nodeView(node store.ListRunMapNodesRow, nodeType string, cost 
 		} `json:"subworkflow"`
 	}
 	_ = json.Unmarshal(node.StateJson, &state)
+	// A redriven or reclaimed step keeps its previous attempt's finished_at.
+	finishedAt := node.FinishedAt
+	if slices.Contains([]string{"pending", "queued", "running", "waiting"}, node.Status) {
+		finishedAt = nil
+	}
 	view := map[string]any{
 		"nodeId": node.NodeID, "type": nodeType, "status": node.Status, "attempts": node.Attempts,
-		"startedAt": optionalTime(node.StartedAt), "finishedAt": optionalTime(node.FinishedAt),
+		"startedAt": optionalTime(node.StartedAt), "finishedAt": optionalTime(finishedAt),
 		"elapsedMs": nil, "costUsd": cost.CostUsd, "tokens": cost.Tokens,
 		"stuck": false, "needsYou": false, "waitingKind": nil, "childRunId": nil,
 	}
 	if node.StartedAt != nil {
 		end := now
-		if node.FinishedAt != nil {
-			end = *node.FinishedAt
+		if finishedAt != nil {
+			end = *finishedAt
 		}
 		elapsed := end.Sub(*node.StartedAt)
 		view["elapsedMs"] = elapsed.Milliseconds()
@@ -245,21 +256,38 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 		if _, seen := byNode[event.NodeID]; !seen {
 			order = append(order, event.NodeID)
 		}
-		var payload map[string]any
-		_ = json.Unmarshal(event.Payload, &payload)
-		step := map[string]any{"type": event.Type, "at": optionalTime(event.CreatedAt)}
-		for _, key := range []string{"tool", "status", "iteration", "agent", "name", "index"} {
-			if value, ok := payload[key]; ok {
-				step[key] = value
-			}
-		}
-		byNode[event.NodeID] = append(byNode[event.NodeID], step)
+		byNode[event.NodeID] = append(byNode[event.NodeID], laneStep(event))
 	}
 	lanes := make([]map[string]any, 0, len(order))
 	for _, nodeID := range order {
 		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": byNode[nodeID]})
 	}
 	return lanes, nil
+}
+
+// laneStep keeps only typed payload fields, so a malformed event cannot widen
+// the wire.
+func laneStep(event store.ListRunAgentEventsRow) map[string]any {
+	var payload map[string]any
+	_ = json.Unmarshal(event.Payload, &payload)
+	step := map[string]any{"type": event.Type, "at": optionalTime(event.CreatedAt)}
+	for _, key := range []string{"tool", "status", "agent", "name"} {
+		if value, ok := payload[key].(string); ok && value != "" {
+			step[key] = value
+		}
+	}
+	// A planned step names its tool inside the plan.
+	if plan, ok := payload["plan"].(map[string]any); ok && step["tool"] == nil {
+		if tool, ok := plan["tool"].(string); ok && tool != "" {
+			step["tool"] = tool
+		}
+	}
+	for _, key := range []string{"iteration", "index"} {
+		if value, ok := payload[key].(float64); ok && value >= 0 && value == float64(int64(value)) {
+			step[key] = int64(value)
+		}
+	}
+	return step
 }
 
 // deciderPermissions is the viewer's grant when they can decide at all: a
@@ -323,8 +351,12 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 			if secondPerson && s.accountableFor(r, rc, row) {
 				continue
 			}
+			reasons := row.Reasons
+			if reasons == nil {
+				reasons = []string{}
+			}
 			items = append(items, map[string]any{"kind": "publish_request", "id": row.ID, "workflowId": row.WorkflowID,
-				"reasons": row.Reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
+				"reasons": reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
 		}
 	}
 	return httpkit.OK(map[string]any{"items": items})
@@ -359,6 +391,13 @@ func (s *service) accountableFor(r *http.Request, rc httpkit.Request, row store.
 // secondPersonKey is publishrequests.SecondPersonKey; feature packages do not
 // import each other.
 const secondPersonKey = "agents.publishRequiresSecondPerson"
+
+func optionalText(value pgtype.Text) any {
+	if !value.Valid || value.String == "" {
+		return nil
+	}
+	return value.String
+}
 
 func optionalTime(at *time.Time) any {
 	if at == nil {

@@ -26,6 +26,7 @@ const (
 	CodeValidationFailed   = "workflows_validation_failed"
 	CodeNotProductionReady = "runs_not_production_ready"
 	CodeCircuitPaused      = "workflow_circuit_breaker_paused"
+	CodeWorkflowPaused     = "workflow_paused"
 	CodeUpstreamDegraded   = "upstream_degraded"
 	CodeVersionMismatch    = "workflow_version_mismatch"
 	CodeAdhocDisabled      = "runs_adhoc_disabled"
@@ -145,8 +146,11 @@ func (s Service) Start(ctx context.Context, request Request) (Result, error) {
 		switch {
 		case err == nil && status != "active":
 			code := CodeUpstreamDegraded
-			if status == "paused_circuit_breaker" {
+			switch status {
+			case "paused_circuit_breaker":
 				code = CodeCircuitPaused
+			case engine.WorkflowStatusPausedManual:
+				code = CodeWorkflowPaused
 			}
 			return Result{}, &Rejection{
 				Code: code, Message: "Workflow is paused — resume it before starting new runs",

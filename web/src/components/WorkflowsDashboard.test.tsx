@@ -4,7 +4,11 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', async () => {
+  const { contractApiOver } = await import('../test/contract-api-mock')
+  const api = vi.fn()
+  return { api, contractApi: contractApiOver(api) }
+})
 // The per-row health badge fetches on its own; stub it so these tests stay
 // focused on Flows-list filtering, grouping, and folder-management behavior.
 vi.mock('./WorkflowHealthBadge', () => ({ WorkflowHealthBadge: () => null }))
@@ -223,6 +227,51 @@ describe('<WorkflowsDashboard />', () => {
 
     await act(async () => releaseResume?.({ backfilled: 3, remaining: 0 }))
     await waitFor(() => expect(screen.queryByTestId('workflows-backfill-wf1')).not.toBeInTheDocument())
+  })
+
+  it('pauses a workflow, then resumes it from the same row', async () => {
+    const calls: string[] = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (options?.method === 'POST') {
+        calls.push(url)
+        return url.endsWith('/resume')
+          ? { backfilled: 0, remaining: 0 }
+          : { ok: true, workflowId: 'wf1', status: 'paused_manual', changed: true }
+      }
+      return [{ id: 'wf1', orgId: 'o', name: 'Nightly cleanup', status: 'active' }]
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.click(await screen.findByTestId('workflows-row-menu-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-pause-wf1'))
+
+    const resume = await screen.findByTestId('workflows-resume-wf1')
+    expect(calls).toEqual(['/workflows/wf1/pause'])
+    fireEvent.click(resume)
+    await waitFor(() => expect(screen.queryByTestId('workflows-resume-wf1')).not.toBeInTheDocument())
+    expect(calls).toEqual(['/workflows/wf1/pause', '/workflows/wf1/resume'])
+  })
+
+  it('refetches the row when a resume is refused, so a hand-over to an upstream pause shows', async () => {
+    let status = 'paused_manual'
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/wf1/resume' && options?.method === 'POST') {
+        status = 'paused_upstream_degraded'
+        throw Object.assign(new Error('degraded'), { code: 'upstream_degraded', statusCode: 409 })
+      }
+      return [{ id: 'wf1', orgId: 'o', name: 'Nightly cleanup', status }]
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.click(await screen.findByTestId('workflows-resume-wf1'))
+    await waitFor(() => {
+      expect(within(screen.getByTestId('workflows-row-wf1')).getByText('Paused')).toBeInTheDocument()
+      expect(screen.queryByTestId('workflows-resume-wf1')).not.toBeInTheDocument()
+    })
   })
 
   it('populates the add-tag picker from GET /workflows/tags (placeholder + one option per org tag)', async () => {
