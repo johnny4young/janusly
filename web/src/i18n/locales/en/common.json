@@ -4693,7 +4693,7 @@
   "testData.badge.pinned": "Pinned",
   "testData.badge.mocked": "Mocked",
   "testData.runBadge": "Test data",
-  "oauthConsent.title": "Connect {{name}}?",
+  "oauthConsent.title": "Connect an agent?",
   "oauthConsent.name": "Client",
   "oauthConsent.unverified": "Unverified name",
   "oauthConsent.sendsTo": "Sends the code to",
@@ -4709,5 +4709,6 @@
   "oauthConsent.expires": "Days until it expires",
   "oauthConsent.connect": "Connect",
   "oauthConsent.gone": "This connection request has expired or was already answered. Start again from the agent.",
-  "oauthConsent.failed": "The decision was not saved."
+  "oauthConsent.failed": "The decision was not saved.",
+  "oauthConsent.leavesComputer": "Another server receives the code"
 }

@@ -34,7 +34,7 @@ UPDATE agent_clients
 SET token_digest = sqlc.arg(token_digest), token_last4 = sqlc.arg(token_last4),
     token_issued_at = sqlc.arg(token_issued_at), expires_at = sqlc.arg(expires_at)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND revoked_at IS NULL
-  AND expires_at > sqlc.arg(token_issued_at)
+  AND expires_at > sqlc.arg(token_issued_at) AND oauth_client_id IS NULL
 RETURNING *;
 
 -- name: RevokeAgentClient :one

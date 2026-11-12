@@ -12,7 +12,8 @@ func TestRedirectRules(t *testing.T) {
 		"https://app.example.com/cb": true, "http://127.0.0.1:8123/cb": true, "http://localhost/cb": true, "http://[::1]:9/cb": true,
 		"http://app.example.com/cb": false, "http://localhost.evil.com/cb": false, "http://127.0.0.1.nip.io/cb": false,
 		"https://user:pw@app.example.com/cb": false, "https://app.example.com/cb#frag": false, "cursor://x/cb": false,
-		"javascript:alert(1)": false, "/relative": false, "": false, "https:///nohost": false,
+		"javascript:alert(1)": false, "/relative": false, "": false, "https:///nohost": false, "https://cl\u0430ude.ai/cb": false, "https://APP.example.com/cb": false,
+		"https://xn--clude-4ve.ai/cb": true, "https://app.example.com:8443/cb": true,
 		"https://app.example.com/" + strings.Repeat("a", 2000): false,
 	} {
 		if validRedirect(redirect) != ok {
@@ -49,6 +50,13 @@ func TestScopesNeverCarryReport(t *testing.T) {
 	}
 }
 
+func TestAddressBucketGroupsAnIPv6Network(t *testing.T) {
+	if addressBucket("2001:db8:1:2:aaaa::1") != addressBucket("2001:db8:1:2:bbbb::9") ||
+		addressBucket("2001:db8:1:2::1") == addressBucket("2001:db8:1:3::1") || addressBucket("203.0.113.7") != "203.0.113.7" {
+		t.Fatal("address buckets")
+	}
+}
+
 func TestPKCE(t *testing.T) {
 	verifier := strings.Repeat("v", 43)
 	sum := sha256.Sum256([]byte(verifier))
@@ -60,7 +68,7 @@ func TestPKCE(t *testing.T) {
 }
 
 func TestClientNameIsPrintable(t *testing.T) {
-	if clientName("  Claude\u202e Code\n") != "Claude Code" || clientName("") != "MCP client" || len([]rune(clientName(strings.Repeat("x", 300)))) != 100 {
+	if clientName("  Claude\u202e Code\n") != "Claude Code" || clientName("Claude \u2713 Verified") != "Claude  Verified" || clientName("") != "MCP client" || len([]rune(clientName(strings.Repeat("x", 300)))) != 100 {
 		t.Fatalf("clientName: %q", clientName("  Claude\u202e Code\n"))
 	}
 }

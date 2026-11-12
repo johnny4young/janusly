@@ -32,7 +32,8 @@ function Consent({ requestId, navigate = url => window.location.assign(url) }: {
     getOAuthConsentRequest(requestId).then((loaded) => {
       if (!alive.current) return
       setRequest(loaded)
-      setChosen(new Set(loaded.capabilities.filter(item => item.grantable).map(item => item.capability)))
+      // Only read starts ticked: everything else is a choice the person makes.
+      setChosen(new Set(loaded.capabilities.filter(item => item.grantable && item.capability === 'read').map(item => item.capability)))
       setDays(loaded.defaultExpiresInDays)
       setState('ready')
     }, () => { if (alive.current) setState('gone') })
@@ -54,13 +55,18 @@ function Consent({ requestId, navigate = url => window.location.assign(url) }: {
   return (
     <section className="we-card oauth-consent" aria-labelledby="oauth-consent-title" data-testid="oauth-consent">
       <h3 id="oauth-consent-title">
-        {t('oauthConsent.title', { name: request.clientName })}
+        {t('oauthConsent.title')}
       </h3>
       <dl>
         <dt>{t('oauthConsent.name')}</dt>
         <dd>{request.clientName} <span className="we-pill" data-tone="warning">{t('oauthConsent.unverified')}</span></dd>
         <dt>{t('oauthConsent.sendsTo')}</dt>
-        <dd><code>{request.redirectHost}</code> {request.redirectIsLocal && t('oauthConsent.thisComputer')}</dd>
+        <dd>
+          <code>{request.redirectHost}</code>{' '}
+          {request.redirectIsLocal
+            ? t('oauthConsent.thisComputer')
+            : <span className="we-pill" data-tone="warning">{t('oauthConsent.leavesComputer')}</span>}
+        </dd>
         <dt>{t('oauthConsent.organization')}</dt>
         <dd><code>{request.organizationId}</code></dd>
       </dl>

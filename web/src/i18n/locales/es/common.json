@@ -4693,7 +4693,7 @@
   "testData.badge.pinned": "Fijado",
   "testData.badge.mocked": "Simulado",
   "testData.runBadge": "Datos de prueba",
-  "oauthConsent.title": "¿Conectar {{name}}?",
+  "oauthConsent.title": "¿Conectar un agente?",
   "oauthConsent.name": "Cliente",
   "oauthConsent.unverified": "Nombre sin verificar",
   "oauthConsent.sendsTo": "Envía el código a",
@@ -4709,5 +4709,6 @@
   "oauthConsent.expires": "Días hasta que vence",
   "oauthConsent.connect": "Conectar",
   "oauthConsent.gone": "Esta solicitud de conexión venció o ya fue respondida. Empieza de nuevo desde el agente.",
-  "oauthConsent.failed": "No se guardó la decisión."
+  "oauthConsent.failed": "No se guardó la decisión.",
+  "oauthConsent.leavesComputer": "El código lo recibe otro servidor"
 }

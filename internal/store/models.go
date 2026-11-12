@@ -33,7 +33,6 @@ type AgentClient struct {
 	OauthClientID      pgtype.Text
 	AccessExpiresAt    *time.Time
 	RefreshDigest      []byte
-	RefreshPrevDigest  []byte
 }
 
 type AgentSession struct {
@@ -503,6 +502,12 @@ type OauthClient struct {
 	RegisteredFrom string
 	CreatedAt      time.Time
 	LastUsedAt     *time.Time
+}
+
+type OauthRefreshHistory struct {
+	Digest        []byte
+	AgentClientID string
+	RotatedAt     time.Time
 }
 
 type OnboardingProgress struct {

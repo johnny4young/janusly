@@ -36,7 +36,12 @@ const (
 	UnusedClientTTL = 24 * time.Hour
 	// maxUnusedClients bounds what unauthenticated registration can store.
 	maxUnusedClients = 1000
-	maxFormBytes     = 8 << 10
+	// maxPendingRequests bounds what unauthenticated authorize calls can store.
+	maxPendingRequests = 5000
+	maxFormBytes       = 8 << 10
+	// retryGrace is how long a just-used code or refresh token may be presented
+	// again without it reading as a leak: a client retrying a lost response.
+	retryGrace = 30 * time.Second
 
 	codePrefix    = "jly_code_"
 	refreshPrefix = "jly_refresh_"
@@ -160,12 +165,21 @@ func (s *service) limited(w http.ResponseWriter, r *http.Request, opts ratelimit
 		return false
 	}
 	var limit *ratelimit.LimitError
-	if err := s.limiter.Enforce(r.Context(), "ip:"+httpkit.ClientAddress(r), opts); err != nil && asLimit(err, &limit) {
+	if err := s.limiter.Enforce(r.Context(), "ip:"+addressBucket(httpkit.ClientAddress(r)), opts); err != nil && asLimit(err, &limit) {
 		w.Header().Set("Retry-After", itoa(limit.RetryAfterSec))
-		oauthError(w, http.StatusTooManyRequests, "slow_down", "too many requests; retry later")
+		oauthError(w, http.StatusTooManyRequests, "temporarily_unavailable", "too many requests; retry later")
 		return true
 	}
 	return false
+}
+
+// addressBucket counts an IPv6 caller by its /64, the unit one host controls.
+func addressBucket(address string) string {
+	ip := net.ParseIP(address)
+	if ip == nil || ip.To4() != nil {
+		return address
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 // oauthError writes an RFC 6749 error object. It never echoes input.
@@ -189,6 +203,11 @@ func loopbackHost(host string) bool {
 func validRedirect(raw string) bool {
 	parsed, err := url.Parse(raw)
 	if err != nil || len(raw) > 2000 || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || strings.Contains(raw, "#") {
+		return false
+	}
+	// The host is shown to the person who consents: plain lowercase ASCII only,
+	// so an internationalized look-alike has to arrive as visible punycode.
+	if !plainHost.MatchString(parsed.Host) {
 		return false
 	}
 	switch parsed.Scheme {
@@ -234,6 +253,8 @@ func digest(secret string) []byte {
 	sum := sha256.Sum256([]byte(secret))
 	return sum[:]
 }
+
+var plainHost = regexp.MustCompile(`^(\[[0-9a-f:]+\]|[a-z0-9]([a-z0-9.-]*[a-z0-9])?)(:[0-9]{1,5})?$`)
 
 var (
 	challengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)

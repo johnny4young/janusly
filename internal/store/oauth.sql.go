@@ -62,6 +62,17 @@ func (q *Queries) ApproveOAuthRequest(ctx context.Context, arg ApproveOAuthReque
 	return i, err
 }
 
+const countPendingOAuthRequests = `-- name: CountPendingOAuthRequests :one
+SELECT count(*)::int FROM oauth_authorization_requests WHERE status = 'pending' AND expires_at > $1::timestamptz
+`
+
+func (q *Queries) CountPendingOAuthRequests(ctx context.Context, now time.Time) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingOAuthRequests, now)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countUnusedOAuthClients = `-- name: CountUnusedOAuthClients :one
 SELECT count(*)::int FROM oauth_clients WHERE last_used_at IS NULL
 `
@@ -79,6 +90,18 @@ DELETE FROM oauth_authorization_requests WHERE expires_at < $1::timestamptz
 
 func (q *Queries) DeleteExpiredOAuthRequests(ctx context.Context, cutoff time.Time) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredOAuthRequests, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOldOAuthRefreshHistory = `-- name: DeleteOldOAuthRefreshHistory :execrows
+DELETE FROM oauth_refresh_history WHERE rotated_at < $1::timestamptz
+`
+
+func (q *Queries) DeleteOldOAuthRefreshHistory(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldOAuthRefreshHistory, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -134,38 +157,16 @@ func (q *Queries) DenyOAuthRequest(ctx context.Context, arg DenyOAuthRequestPara
 	return i, err
 }
 
-const getAgentClientByPreviousRefresh = `-- name: GetAgentClientByPreviousRefresh :one
-SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest, refresh_prev_digest FROM agent_clients WHERE refresh_prev_digest = $1
+const evictOldestUnusedOAuthClient = `-- name: EvictOldestUnusedOAuthClient :exec
+DELETE FROM oauth_clients WHERE id = (
+  SELECT id FROM oauth_clients WHERE last_used_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+)
 `
 
-func (q *Queries) GetAgentClientByPreviousRefresh(ctx context.Context, refreshPrevDigest []byte) (AgentClient, error) {
-	row := q.db.QueryRow(ctx, getAgentClientByPreviousRefresh, refreshPrevDigest)
-	var i AgentClient
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Name,
-		&i.Capabilities,
-		&i.ScopeWorkflowIds,
-		&i.ScopeTags,
-		&i.TokenDigest,
-		&i.TokenLast4,
-		&i.RateLimitPerMinute,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.TokenIssuedAt,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.RevokedBy,
-		&i.LastUsedAt,
-		&i.GateTools,
-		&i.CaptureContent,
-		&i.OauthClientID,
-		&i.AccessExpiresAt,
-		&i.RefreshDigest,
-		&i.RefreshPrevDigest,
-	)
-	return i, err
+// Makes room for a new registration by dropping the oldest one nobody used.
+func (q *Queries) EvictOldestUnusedOAuthClient(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, evictOldestUnusedOAuthClient)
+	return err
 }
 
 const getOAuthClient = `-- name: GetOAuthClient :one
@@ -183,6 +184,26 @@ func (q *Queries) GetOAuthClient(ctx context.Context, id string) (OauthClient, e
 		&i.CreatedAt,
 		&i.LastUsedAt,
 	)
+	return i, err
+}
+
+const getOAuthRefreshHistory = `-- name: GetOAuthRefreshHistory :one
+SELECT h.agent_client_id, h.rotated_at, c.org_id
+FROM oauth_refresh_history h
+JOIN agent_clients c ON c.id = h.agent_client_id
+WHERE h.digest = $1
+`
+
+type GetOAuthRefreshHistoryRow struct {
+	AgentClientID string
+	RotatedAt     time.Time
+	OrgID         string
+}
+
+func (q *Queries) GetOAuthRefreshHistory(ctx context.Context, digest []byte) (GetOAuthRefreshHistoryRow, error) {
+	row := q.db.QueryRow(ctx, getOAuthRefreshHistory, digest)
+	var i GetOAuthRefreshHistoryRow
+	err := row.Scan(&i.AgentClientID, &i.RotatedAt, &i.OrgID)
 	return i, err
 }
 
@@ -274,6 +295,23 @@ func (q *Queries) InsertOAuthClient(ctx context.Context, arg InsertOAuthClientPa
 	return i, err
 }
 
+const insertOAuthRefreshHistory = `-- name: InsertOAuthRefreshHistory :exec
+INSERT INTO oauth_refresh_history (digest, agent_client_id, rotated_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (digest) DO NOTHING
+`
+
+type InsertOAuthRefreshHistoryParams struct {
+	Digest        []byte
+	AgentClientID string
+	RotatedAt     time.Time
+}
+
+func (q *Queries) InsertOAuthRefreshHistory(ctx context.Context, arg InsertOAuthRefreshHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertOAuthRefreshHistory, arg.Digest, arg.AgentClientID, arg.RotatedAt)
+	return err
+}
+
 const insertOAuthRequest = `-- name: InsertOAuthRequest :one
 INSERT INTO oauth_authorization_requests (id, oauth_client_id, redirect_uri, code_challenge, scopes, state, resource, expires_at)
 VALUES ($1, $2, $3, $4,
@@ -328,11 +366,10 @@ func (q *Queries) InsertOAuthRequest(ctx context.Context, arg InsertOAuthRequest
 const issueOAuthTokens = `-- name: IssueOAuthTokens :one
 UPDATE agent_clients
 SET token_digest = $1, token_last4 = $2,
-    access_expires_at = $3,
-    refresh_prev_digest = refresh_digest, refresh_digest = $4
+    access_expires_at = $3, refresh_digest = $4
 WHERE id = $5 AND oauth_client_id = $6 AND revoked_at IS NULL
   AND expires_at > $7::timestamptz
-RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest, refresh_prev_digest
+RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest
 `
 
 type IssueOAuthTokensParams struct {
@@ -378,13 +415,12 @@ func (q *Queries) IssueOAuthTokens(ctx context.Context, arg IssueOAuthTokensPara
 		&i.OauthClientID,
 		&i.AccessExpiresAt,
 		&i.RefreshDigest,
-		&i.RefreshPrevDigest,
 	)
 	return i, err
 }
 
 const lockAgentClientByRefresh = `-- name: LockAgentClientByRefresh :one
-SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest, refresh_prev_digest FROM agent_clients WHERE refresh_digest = $1 FOR UPDATE
+SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest FROM agent_clients WHERE refresh_digest = $1 FOR UPDATE
 `
 
 func (q *Queries) LockAgentClientByRefresh(ctx context.Context, refreshDigest []byte) (AgentClient, error) {
@@ -412,7 +448,6 @@ func (q *Queries) LockAgentClientByRefresh(ctx context.Context, refreshDigest []
 		&i.OauthClientID,
 		&i.AccessExpiresAt,
 		&i.RefreshDigest,
-		&i.RefreshPrevDigest,
 	)
 	return i, err
 }
@@ -489,6 +524,22 @@ type RevokeOAuthAgentClientParams struct {
 // A replayed code or refresh token ends the grant.
 func (q *Queries) RevokeOAuthAgentClient(ctx context.Context, arg RevokeOAuthAgentClientParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeOAuthAgentClient, arg.RevokedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeUnexchangedOAuthClients = `-- name: RevokeUnexchangedOAuthClients :execrows
+UPDATE agent_clients SET revoked_at = now(), revoked_by = 'oauth:unused'
+WHERE oauth_client_id IS NOT NULL AND access_expires_at IS NULL AND revoked_at IS NULL
+  AND created_at < $1::timestamptz
+`
+
+// A grant whose code was never exchanged is ended, so it does not sit in the
+// client list as if it were connected.
+func (q *Queries) RevokeUnexchangedOAuthClients(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUnexchangedOAuthClients, cutoff)
 	if err != nil {
 		return 0, err
 	}

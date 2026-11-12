@@ -43,8 +43,10 @@ type registration struct {
 
 // clientName keeps a registered name printable; it is shown as unverified.
 func clientName(raw string) string {
+	// Plain ASCII only: a name cannot carry look-alike letters or marks that
+	// read as an endorsement.
 	name := strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
 			return -1
 		}
 		return r
@@ -96,9 +98,13 @@ func (s *service) register(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, http.StatusInternalServerError, "server_error", "registration failed")
 		return
 	}
+	// At the cap the oldest registration nobody used makes room, so filling
+	// the table cannot lock new clients out.
 	if unused >= maxUnusedClients {
-		oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many unused registrations; retry later")
-		return
+		if err := q.EvictOldestUnusedOAuthClient(r.Context()); err != nil {
+			oauthError(w, http.StatusInternalServerError, "server_error", "registration failed")
+			return
+		}
 	}
 	client, err := q.InsertOAuthClient(r.Context(), store.InsertOAuthClientParams{
 		ID: "oc_" + uuid.NewString(), ClientName: clientName(body.ClientName),
@@ -135,6 +141,9 @@ func (s *service) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := query.Get("state")
+	if len(state) > 512 {
+		state = ""
+	}
 	fail := func(code, description string) {
 		http.Redirect(w, r, redirectWith(redirect, url.Values{
 			"error": {code}, "error_description": {description}, "state": {state}, "iss": {s.issuer},
@@ -142,8 +151,8 @@ func (s *service) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	scopes, scopesOK := parseScopes(query.Get("scope"))
 	switch {
-	case state == "" || len(state) > 512:
-		fail("invalid_request", "state is required")
+	case state == "":
+		fail("invalid_request", "state is required, at most 512 characters")
 	case query.Get("response_type") != "code":
 		fail("unsupported_response_type", "response_type must be code")
 	case query.Get("code_challenge_method") != "S256" || !challengePattern.MatchString(query.Get("code_challenge")):
@@ -153,6 +162,10 @@ func (s *service) authorize(w http.ResponseWriter, r *http.Request) {
 	case !scopesOK:
 		fail("invalid_scope", "unknown scope")
 	default:
+		if pending, err := q.CountPendingOAuthRequests(r.Context(), s.now().UTC()); err != nil || pending >= maxPendingRequests {
+			fail("temporarily_unavailable", "too many pending requests; retry later")
+			return
+		}
 		request, err := q.InsertOAuthRequest(r.Context(), store.InsertOAuthRequestParams{
 			ID: uuid.NewString(), OauthClientID: client.ID, RedirectUri: redirect,
 			CodeChallenge: query.Get("code_challenge"), Scopes: scopes, State: state,
@@ -248,8 +261,12 @@ func (s *service) exchangeCode(r *http.Request, form url.Values) (tokenReply, er
 	if err != nil {
 		return tokenReply{}, err
 	}
-	// A code presented twice means it leaked: the grant it made ends.
+	// A code presented again means it leaked and the grant it made ends,
+	// unless it is the same client retrying within the grace window.
 	if request.CodeUsedAt != nil {
+		if now.Sub(*request.CodeUsedAt) <= retryGrace {
+			return tokenReply{}, errInvalidGrant
+		}
 		if err := s.endGrant(r, q, request.OrgID.String, request.AgentClientID.String, codeReuseAction); err != nil {
 			return tokenReply{}, err
 		}
@@ -286,17 +303,20 @@ func (s *service) refresh(r *http.Request, form url.Values) (tokenReply, error) 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(tx)
-	client, err := q.LockAgentClientByRefresh(ctx, digest(presented))
+	now := s.now().UTC()
+	presentedDigest := digest(presented)
+	client, err := q.LockAgentClientByRefresh(ctx, presentedDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// A refresh token already rotated away means it leaked: the grant ends.
-		previous, prevErr := q.GetAgentClientByPreviousRefresh(ctx, digest(presented))
-		if prevErr == nil {
-			if err := s.endGrant(r, q, previous.OrgID, previous.ID, refreshReuseAction); err != nil {
-				return tokenReply{}, err
-			}
-			return tokenReply{}, errors.Join(errInvalidGrant, tx.Commit(ctx))
+		// A refresh token rotated away, however long ago, means it leaked and
+		// the grant ends, unless it is the same client retrying right after.
+		rotated, historyErr := q.GetOAuthRefreshHistory(ctx, presentedDigest)
+		if historyErr != nil || now.Sub(rotated.RotatedAt) <= retryGrace {
+			return tokenReply{}, errInvalidGrant
 		}
-		return tokenReply{}, errInvalidGrant
+		if err := s.endGrant(r, q, rotated.OrgID, rotated.AgentClientID, refreshReuseAction); err != nil {
+			return tokenReply{}, err
+		}
+		return tokenReply{}, errors.Join(errInvalidGrant, tx.Commit(ctx))
 	}
 	if err != nil {
 		return tokenReply{}, err
@@ -304,7 +324,12 @@ func (s *service) refresh(r *http.Request, form url.Values) (tokenReply, error) 
 	if client.OauthClientID.String != form.Get("client_id") || form.Get("client_id") == "" {
 		return tokenReply{}, errInvalidGrant
 	}
-	reply, err := s.issue(r, q, client.ID, client.OauthClientID.String, s.now().UTC())
+	if err := q.InsertOAuthRefreshHistory(ctx, store.InsertOAuthRefreshHistoryParams{
+		Digest: presentedDigest, AgentClientID: client.ID, RotatedAt: now,
+	}); err != nil {
+		return tokenReply{}, err
+	}
+	reply, err := s.issue(r, q, client.ID, client.OauthClientID.String, now)
 	if err != nil {
 		return tokenReply{}, err
 	}

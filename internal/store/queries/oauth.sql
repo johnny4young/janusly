@@ -52,8 +52,7 @@ UPDATE oauth_authorization_requests SET code_used_at = sqlc.arg(now) WHERE id = 
 -- name: IssueOAuthTokens :one
 UPDATE agent_clients
 SET token_digest = sqlc.arg(token_digest), token_last4 = sqlc.arg(token_last4),
-    access_expires_at = sqlc.arg(access_expires_at),
-    refresh_prev_digest = refresh_digest, refresh_digest = sqlc.arg(refresh_digest)
+    access_expires_at = sqlc.arg(access_expires_at), refresh_digest = sqlc.arg(refresh_digest)
 WHERE id = sqlc.arg(id) AND oauth_client_id = sqlc.arg(oauth_client_id) AND revoked_at IS NULL
   AND expires_at > sqlc.arg(now)::timestamptz
 RETURNING *;
@@ -61,8 +60,35 @@ RETURNING *;
 -- name: LockAgentClientByRefresh :one
 SELECT * FROM agent_clients WHERE refresh_digest = $1 FOR UPDATE;
 
--- name: GetAgentClientByPreviousRefresh :one
-SELECT * FROM agent_clients WHERE refresh_prev_digest = $1;
+-- name: InsertOAuthRefreshHistory :exec
+INSERT INTO oauth_refresh_history (digest, agent_client_id, rotated_at)
+VALUES (sqlc.arg(digest), sqlc.arg(agent_client_id), sqlc.arg(rotated_at))
+ON CONFLICT (digest) DO NOTHING;
+
+-- name: GetOAuthRefreshHistory :one
+SELECT h.agent_client_id, h.rotated_at, c.org_id
+FROM oauth_refresh_history h
+JOIN agent_clients c ON c.id = h.agent_client_id
+WHERE h.digest = $1;
+
+-- name: DeleteOldOAuthRefreshHistory :execrows
+DELETE FROM oauth_refresh_history WHERE rotated_at < sqlc.arg(cutoff)::timestamptz;
+
+-- A grant whose code was never exchanged is ended, so it does not sit in the
+-- client list as if it were connected.
+-- name: RevokeUnexchangedOAuthClients :execrows
+UPDATE agent_clients SET revoked_at = now(), revoked_by = 'oauth:unused'
+WHERE oauth_client_id IS NOT NULL AND access_expires_at IS NULL AND revoked_at IS NULL
+  AND created_at < sqlc.arg(cutoff)::timestamptz;
+
+-- name: CountPendingOAuthRequests :one
+SELECT count(*)::int FROM oauth_authorization_requests WHERE status = 'pending' AND expires_at > sqlc.arg(now)::timestamptz;
+
+-- Makes room for a new registration by dropping the oldest one nobody used.
+-- name: EvictOldestUnusedOAuthClient :exec
+DELETE FROM oauth_clients WHERE id = (
+  SELECT id FROM oauth_clients WHERE last_used_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+);
 
 -- A replayed code or refresh token ends the grant.
 -- name: RevokeOAuthAgentClient :execrows

@@ -7,16 +7,20 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/johnny4young/janusly/internal/agentclient"
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 const testIssuer = "https://janusly.example.test"
@@ -214,21 +218,47 @@ func TestOAuthFullFlowIssuesAShortLivedGrantThatRotates(t *testing.T) {
 		t.Fatalf("refresh moved the client's expiry: %s -> %s (%d)", before, after, again.status)
 	}
 
-	// A refresh token used twice ends the grant, and says so in the audit log.
-	reuse := h.tokenCall(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh2}, "client_id": {clientID}})
+	// A client that retries the refresh it just made is not treated as a thief.
+	retry := h.tokenCall(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh2}, "client_id": {clientID}})
+	access3, _ := again.body["access_token"].(string)
+	if retry.status != 400 || retry.body["error"] != "invalid_grant" {
+		t.Fatalf("retried refresh: %d %s", retry.status, retry.text)
+	}
+	if _, err := resolver.Resolve(t.Context(), access3); err != nil {
+		t.Fatalf("a retried refresh ended the grant: %v", err)
+	}
+	// Any refresh token rotated away, however many rotations ago, ends the
+	// grant when it comes back later: someone else holds it.
+	refresh3, _ := again.body["refresh_token"].(string)
+	fourth := h.tokenCall(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh3}, "client_id": {clientID}})
+	access4, _ := fourth.body["access_token"].(string)
+	if fourth.status != 200 {
+		t.Fatalf("third rotation: %d %s", fourth.status, fourth.text)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE oauth_refresh_history SET rotated_at = now() - interval '5 minutes' WHERE agent_client_id = $1`, principal.ClientID); err != nil {
+		t.Fatal(err)
+	}
+	reuse := h.tokenCall(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}})
 	if reuse.status != 400 || reuse.body["error"] != "invalid_grant" {
 		t.Fatalf("reused refresh token: %d %s", reuse.status, reuse.text)
 	}
-	access3, _ := again.body["access_token"].(string)
-	if _, err := resolver.Resolve(t.Context(), access3); err == nil {
-		t.Fatal("the grant survived a reused refresh token")
+	if _, err := resolver.Resolve(t.Context(), access4); err == nil {
+		t.Fatal("the grant survived a refresh token from three rotations ago")
 	}
 	var audited int
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'oauth.refresh_reused' AND target_id = $2`,
 		h.org, principal.ClientID).Scan(&audited); err != nil || audited != 1 {
 		t.Fatalf("refresh reuse audit: %d %v", audited, err)
 	}
-	// An OAuth client is never rotated by hand into a static token.
+	var history string
+	_ = pool.QueryRow(t.Context(), `SELECT coalesce(string_agg(encode(digest, 'escape'), ' '), '') FROM oauth_refresh_history WHERE agent_client_id = $1`, principal.ClientID).Scan(&history)
+	if strings.Contains(history, "jly_refresh_") {
+		t.Fatal("a refresh token was stored in clear")
+	}
+	// An OAuth client is never rotated into a static token, by the route or the query.
+	if _, err := agentclient.Rotate(t.Context(), store.New(pool), h.org, principal.ClientID, time.Now(), 30); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("the store rotated an OAuth client: %v", err)
+	}
 	if res := h.callWithHeaders("POST", "/agent-clients/"+principal.ClientID+"/rotate", nil, "", as); res.status != 409 {
 		t.Fatalf("rotating an OAuth client: %d %v", res.status, res.body)
 	}
@@ -246,12 +276,19 @@ func TestOAuthRefusesBadRequestsWithoutLeakingOrRedirecting(t *testing.T) {
 		"plain http":     `{"redirect_uris":["http://client.example.test/cb"]}`,
 		"private scheme": `{"redirect_uris":["cursor://anysphere.cursor/cb"]}`,
 		"fragment":       `{"redirect_uris":["https://x.example/cb#frag"]}`,
+		"look-alike":     `{"redirect_uris":["https://cl\u0430ude.ai/cb"]}`,
+		"bidi host":      `{"redirect_uris":["https://evil\u202e.example/cb"]}`,
+		"upper host":     `{"redirect_uris":["https://Client.Example.test/cb"]}`,
 		"credentials":    `{"redirect_uris":["https://user:pw@x.example/cb"]}`,
 		"none":           `{"redirect_uris":[]}`,
 		"confidential":   `{"redirect_uris":["https://x.example/cb"],"token_endpoint_auth_method":"client_secret_basic"}`,
 		"implicit":       `{"redirect_uris":["https://x.example/cb"],"grant_types":["implicit"]}`,
 		"not json":       `nope`,
 	} {
+		// The per-address limit is not what this loop is about.
+		if _, err := testPool(t).Exec(t.Context(), `DELETE FROM rate_limit_windows WHERE name LIKE 'oauth.%'`); err != nil {
+			t.Fatal(err)
+		}
 		if res := h.raw(t, "POST", "/oauth/register", "application/json", body); res.status != 400 {
 			t.Fatalf("register %s: %d %s", name, res.status, res.text)
 		}
@@ -345,6 +382,16 @@ func TestOAuthRefusesBadRequestsWithoutLeakingOrRedirecting(t *testing.T) {
 	access, _ := first.body["access_token"].(string)
 	if first.status != 200 {
 		t.Fatalf("exchange: %d %s", first.status, first.text)
+	}
+	// A retried exchange is refused without ending the grant; a later replay ends it.
+	if retry := h.tokenCall(t, good); retry.status != 400 || retry.body["error"] != "invalid_grant" {
+		t.Fatalf("code retry: %d %s", retry.status, retry.text)
+	}
+	if _, err := (agentclient.Resolver{Pool: testPool(t)}).Resolve(t.Context(), access); err != nil {
+		t.Fatalf("a retried exchange ended the grant: %v", err)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `UPDATE oauth_authorization_requests SET code_used_at = now() - interval '2 minutes' WHERE id = $1`, requestID); err != nil {
+		t.Fatal(err)
 	}
 	if replay := h.tokenCall(t, good); replay.status != 400 || replay.body["error"] != "invalid_grant" {
 		t.Fatalf("code replay: %d %s", replay.status, replay.text)
@@ -459,6 +506,23 @@ func TestOAuthRegistrationIsBounded(t *testing.T) {
 	}
 	if !limited {
 		t.Fatal("registration from one address was never limited")
+	}
+	// At the global cap a new registration evicts the oldest unused one.
+	if _, err := pool.Exec(t.Context(), `DELETE FROM rate_limit_windows WHERE name LIKE 'oauth.%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `DELETE FROM oauth_clients WHERE last_used_at IS NULL;
+		INSERT INTO oauth_clients (id, client_name, redirect_uris, registered_from, created_at)
+		SELECT 'oc_fill_' || n, 'fill', '{https://x.example.test/cb}', '::1', now() - make_interval(secs => 2000 - n) FROM generate_series(1, 1000) n`); err != nil {
+		t.Fatal(err)
+	}
+	fresh := h.register(t, "fresh", "https://x.example.test/cb")
+	var oldest, total int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE id = 'oc_fill_1'), count(*) FROM oauth_clients WHERE last_used_at IS NULL`).Scan(&oldest, &total); err != nil {
+		t.Fatal(err)
+	}
+	if oldest != 0 || total != 1000 || fresh == "" {
+		t.Fatalf("eviction at the cap: oldest kept %d, total %d", oldest, total)
 	}
 	used := h.register2(t, pool)
 	if _, err := pool.Exec(t.Context(), `UPDATE oauth_clients SET created_at = now() - interval '25 hours'`); err != nil {

@@ -159,6 +159,10 @@ func (s *service) decide(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
+	// The registration is in use from here on, so the unused sweep keeps it.
+	if err := q.TouchOAuthClient(ctx, request.OauthClientID); err != nil {
+		return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
+	}
 	codeExpires := now.Add(codeTTL)
 	if _, err := q.ApproveOAuthRequest(ctx, store.ApproveOAuthRequestParams{
 		ID: id, OrgID: text(rc.OrgID), DecidedBy: text(rc.UserID), AgentClientID: text(issued.Client.ID),

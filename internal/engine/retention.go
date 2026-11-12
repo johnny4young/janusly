@@ -159,6 +159,14 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		if _, err := store.New(e.pool).DeleteExpiredOAuthRequests(ctx, e.now().UTC().Add(-24*time.Hour)); err != nil {
 			passErr = errors.Join(passErr, err)
 		}
+		// A consent whose code was never exchanged, and rotated refresh tokens
+		// older than any grant can live.
+		if _, err := store.New(e.pool).RevokeUnexchangedOAuthClients(ctx, e.now().UTC().Add(-10*time.Minute)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).DeleteOldOAuthRefreshHistory(ctx, e.now().UTC().Add(-91*24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
 		// Captured gate input is kept for a shorter window than its session.
 		gateNow := e.now().UTC()
 		if _, err := store.New(e.pool).ExpireAgentGates(ctx, gateNow); err != nil {

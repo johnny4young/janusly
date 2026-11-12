@@ -3655,11 +3655,9 @@ CREATE TABLE public.agent_clients (
     oauth_client_id text,
     access_expires_at timestamp with time zone,
     refresh_digest bytea,
-    refresh_prev_digest bytea,
     CONSTRAINT agent_clients_oauth_check CHECK (
-        (oauth_client_id IS NOT NULL OR (access_expires_at IS NULL AND refresh_digest IS NULL AND refresh_prev_digest IS NULL))
-        AND (refresh_digest IS NULL OR octet_length(refresh_digest) = 32)
-        AND (refresh_prev_digest IS NULL OR octet_length(refresh_prev_digest) = 32)),
+        (oauth_client_id IS NOT NULL OR (access_expires_at IS NULL AND refresh_digest IS NULL))
+        AND (refresh_digest IS NULL OR octet_length(refresh_digest) = 32)),
     CONSTRAINT agent_clients_gate_check CHECK (cardinality(gate_tools) <= 20 AND (NOT capture_content OR cardinality(gate_tools) > 0)),
     CONSTRAINT agent_clients_name_check CHECK (char_length(name) BETWEEN 1 AND 120),
     CONSTRAINT agent_clients_capabilities_check CHECK (
@@ -3675,7 +3673,15 @@ CREATE TABLE public.agent_clients (
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
 CREATE INDEX agent_clients_org_created_idx ON public.agent_clients (org_id, created_at DESC, id DESC);
 CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients (refresh_digest) WHERE refresh_digest IS NOT NULL;
-CREATE INDEX agent_clients_refresh_prev_idx ON public.agent_clients (refresh_prev_digest) WHERE refresh_prev_digest IS NOT NULL;
+
+-- Every refresh token a grant rotated away. Presenting one again means it
+-- leaked, however many rotations ago.
+CREATE TABLE public.oauth_refresh_history (
+    digest bytea PRIMARY KEY,
+    agent_client_id text NOT NULL,
+    rotated_at timestamp with time zone NOT NULL
+);
+CREATE INDEX oauth_refresh_history_rotated_idx ON public.oauth_refresh_history (rotated_at);
 
 -- A public OAuth client registered by an MCP client before anyone signed in.
 -- It belongs to no organization and grants nothing by itself.

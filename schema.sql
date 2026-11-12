@@ -172,13 +172,12 @@ CREATE TABLE public.agent_clients (
     oauth_client_id text,
     access_expires_at timestamp with time zone,
     refresh_digest bytea,
-    refresh_prev_digest bytea,
     CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
     CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
     CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '2160:00:00'::interval)))),
     CONSTRAINT agent_clients_gate_check CHECK (((cardinality(gate_tools) <= 20) AND ((NOT capture_content) OR (cardinality(gate_tools) > 0)))),
     CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
-    CONSTRAINT agent_clients_oauth_check CHECK ((((oauth_client_id IS NOT NULL) OR ((access_expires_at IS NULL) AND (refresh_digest IS NULL) AND (refresh_prev_digest IS NULL))) AND ((refresh_digest IS NULL) OR (octet_length(refresh_digest) = 32)) AND ((refresh_prev_digest IS NULL) OR (octet_length(refresh_prev_digest) = 32)))),
+    CONSTRAINT agent_clients_oauth_check CHECK ((((oauth_client_id IS NOT NULL) OR ((access_expires_at IS NULL) AND (refresh_digest IS NULL))) AND ((refresh_digest IS NULL) OR (octet_length(refresh_digest) = 32)))),
     CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
     CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
     CONSTRAINT agent_clients_scope_check CHECK (((cardinality(scope_workflow_ids) <= 100) AND (cardinality(scope_tags) <= 20)))
@@ -848,6 +847,17 @@ CREATE TABLE public.oauth_clients (
     last_used_at timestamp with time zone,
     CONSTRAINT oauth_clients_name_check CHECK (((char_length(client_name) >= 1) AND (char_length(client_name) <= 100))),
     CONSTRAINT oauth_clients_redirects_check CHECK (((cardinality(redirect_uris) >= 1) AND (cardinality(redirect_uris) <= 5)))
+);
+
+
+--
+-- Name: oauth_refresh_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_refresh_history (
+    digest bytea NOT NULL,
+    agent_client_id text NOT NULL,
+    rotated_at timestamp with time zone NOT NULL
 );
 
 
@@ -2275,6 +2285,14 @@ ALTER TABLE ONLY public.oauth_clients
 
 
 --
+-- Name: oauth_refresh_history oauth_refresh_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_refresh_history
+    ADD CONSTRAINT oauth_refresh_history_pkey PRIMARY KEY (digest);
+
+
+--
 -- Name: onboarding_progress onboarding_progress_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2809,13 +2827,6 @@ CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients USING btre
 
 
 --
--- Name: agent_clients_refresh_prev_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX agent_clients_refresh_prev_idx ON public.agent_clients USING btree (refresh_prev_digest) WHERE (refresh_prev_digest IS NOT NULL);
-
-
---
 -- Name: agent_clients_token_digest_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3324,6 +3335,13 @@ CREATE UNIQUE INDEX memory_entries_run_summary_key ON public.memory_entries USIN
 --
 
 CREATE INDEX oauth_clients_unused_idx ON public.oauth_clients USING btree (created_at) WHERE (last_used_at IS NULL);
+
+
+--
+-- Name: oauth_refresh_history_rotated_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_refresh_history_rotated_idx ON public.oauth_refresh_history USING btree (rotated_at);
 
 
 --

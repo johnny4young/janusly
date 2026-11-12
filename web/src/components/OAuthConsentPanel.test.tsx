@@ -31,7 +31,8 @@ describe('<OAuthConsentPanel />', () => {
       path.endsWith('/decision') ? { redirectTo: 'http://127.0.0.1:53211/callback?code=c&state=s' } : request)
     const navigate = vi.fn()
     render(<OAuthConsentPanel navigate={navigate} />)
-    expect(await screen.findByRole('heading', { name: /Connect Claude Code\?/ })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Connect an agent?' })).toBeVisible()
+    expect(screen.getByText('Claude Code')).toBeVisible()
     expect(screen.getByText('Unverified name')).toBeVisible()
     expect(screen.getByText('127.0.0.1:53211')).toBeVisible()
     expect(screen.getByText('acme')).toBeVisible()
@@ -39,7 +40,10 @@ describe('<OAuthConsentPanel />', () => {
     expect(operate).toBeDisabled()
     expect(operate).not.toBeChecked()
     expect(screen.getByText('You lack runs.cancel')).toBeVisible()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Save workflow drafts' }))
+    // Nothing beyond read is granted unless the person ticks it.
+    const propose = screen.getByRole('checkbox', { name: 'Save workflow drafts' })
+    expect(propose).not.toBeChecked()
+    expect(screen.queryByText('Another server receives the code')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith('http://127.0.0.1:53211/callback?code=c&state=s'))
     const [path, init] = vi.mocked(api).mock.calls.at(-1)!
@@ -54,9 +58,16 @@ describe('<OAuthConsentPanel />', () => {
     const navigate = vi.fn()
     render(<OAuthConsentPanel navigate={navigate} />)
     expect(await screen.findByText('Nombre sin verificar')).toBeVisible()
+    expect(screen.getByText('(este computador)')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Rechazar' }))
     await vi.waitFor(() => expect(navigate).toHaveBeenCalled())
     expect(JSON.parse(String((vi.mocked(api).mock.calls.at(-1)![1] as RequestInit).body))).toEqual({ approve: false })
+  })
+
+  it('warns when the code goes to another server', async () => {
+    vi.mocked(api).mockResolvedValue({ ...request, redirectHost: 'client.example', redirectIsLocal: false })
+    render(<OAuthConsentPanel navigate={vi.fn()} />)
+    expect(await screen.findByText('Another server receives the code')).toBeVisible()
   })
 
   it('says when the request is gone and never navigates on a malformed answer', async () => {
