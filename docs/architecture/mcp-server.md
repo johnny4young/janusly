@@ -301,7 +301,8 @@ recovery tools keep their withheld projections.
 `runs.cancel` (`runs.cancel`) call the same engine operations as the HTTP
 rollback, pause, resume, trash, restore and cancel routes. They are
 business writes, so they also need write consent, and deactivate and cancel are
-annotated destructive.
+annotated destructive. A pause reason over 500 characters is refused with
+`invalid_argument` at `/reason`, as the HTTP route refuses it.
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.
