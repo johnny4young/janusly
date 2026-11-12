@@ -82,6 +82,75 @@
 .workflow-node[data-status="failed"],
 .workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
 
+/* Run map: stuck keeps the status colour on a dashed full border; a step
+   waiting on the viewer gets a full outline. */
+.workflow-node[data-stuck="true"] {
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.workflow-node[data-needs-you="true"] {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 3px;
+}
+
+.workflow-node-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.workflow-node-facts {
+  color: var(--we-ink-soft);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  gap: 2px 10px;
+  margin: 8px 0 0;
+}
+
+.workflow-node-facts dd,
+.canvas-run-totals dd {
+  margin: 0;
+}
+
+.workflow-node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.canvas-run-totals {
+  display: inline-flex;
+  font-size: 12px;
+  gap: 12px;
+  margin: 0;
+}
+
+.canvas-run-totals div {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.canvas-run-totals dt {
+  color: var(--we-muted);
+  font-weight: 600;
+}
+
+.canvas-run-totals dd {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.canvas-run-flags {
+  display: inline-flex;
+  gap: 6px;
+}
+
 @keyframes we-running-node-pulse {
   50% { box-shadow: 0 0 0 8px transparent; }
 }

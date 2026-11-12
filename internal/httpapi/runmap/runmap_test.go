@@ -1,8 +1,11 @@
 package runmap
 
 import (
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/johnny4young/janusly/internal/store"
 )
 
 func TestIsStuck(t *testing.T) {
@@ -60,5 +63,29 @@ func TestFormResumable(t *testing.T) {
 	}
 	if !formResumable("approval", expired, now) {
 		t.Fatal("an approval step has no resume token")
+	}
+}
+
+func TestLaneStepKeepsOnlyTypedFields(t *testing.T) {
+	got := laneStep(store.ListRunAgentEventsRow{Type: "multi_agent.agent.started",
+		Payload: []byte(`{"name":"planner","index":1,"iteration":-1,"tool":7,"agent":"","goal":"secret","status":"ok"}`)})
+	want := map[string]any{"type": "multi_agent.agent.started", "at": nil, "name": "planner", "index": int64(1), "status": "ok"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("laneStep = %#v, want %#v", got, want)
+	}
+	planned := laneStep(store.ListRunAgentEventsRow{Type: "agent.step.planned",
+		Payload: []byte(`{"agent":"a","iteration":0,"plan":{"tool":"crm.lookup","input":{"secret":"x"}}}`)})
+	if planned["tool"] != "crm.lookup" || planned["plan"] != nil || planned["input"] != nil {
+		t.Fatalf("planned step must name only its tool: %#v", planned)
+	}
+}
+
+func TestNodeViewIgnoresAPreviousAttemptsFinish(t *testing.T) {
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	started, finished := now.Add(-40*time.Minute), now.Add(-time.Hour)
+	view := (&service{}).nodeView(store.ListRunMapNodesRow{NodeID: "n", Status: "running", StartedAt: &started, FinishedAt: &finished},
+		"http", store.ListRunNodeCostsRow{}, nil, nil, nil, "viewer", now)
+	if view["finishedAt"] != nil || view["elapsedMs"] != (40*time.Minute).Milliseconds() || view["stuck"] != true {
+		t.Fatalf("redriven running step: %v", view)
 	}
 }

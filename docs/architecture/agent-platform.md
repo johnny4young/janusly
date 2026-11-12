@@ -347,13 +347,13 @@ blocked.
 
 ## 5. Run map and agents view
 
-What exists: `RunObservationWorkspace` overlays node status on a read-only
-canvas built from the run's snapshot; the editor canvas does the same for the
-open run; the run stream (`GET /runs/{runId}/stream`) pages by commit-ordered
-sequence with `Last-Event-ID` resume and LISTEN/NOTIFY wake-ups; the Agents
-tab draws lanes only for `multi_agent.*` events; cost lives in `usage_events`
-with the node id in metadata and is read per run, not per node; the reaper
-fails a stalled node but nothing signals "stuck" while it waits.
+What exists: `RunObservationWorkspace` overlays the run map on a read-only
+canvas built from the run's snapshot; the editor canvas shows the same facts,
+without actions, for the open run of the workflow on screen; the run stream
+(`GET /runs/{runId}/stream`) pages by commit-ordered sequence with
+`Last-Event-ID` resume and LISTEN/NOTIFY wake-ups; the Agents tab draws a lane
+per `agent` and `multi_agent` step from the map; cost lives in `usage_events`
+with the node id in metadata.
 
 ### Run map
 
@@ -371,7 +371,26 @@ plus agent lanes from `agent.*` and `multi_agent.*` events and run totals.
 `GET /needs-you` lists, for the signed-in person, tool approvals they did not
 cause, approval and form steps (both with `runs.start`) and agent publish
 requests (with `workflows.write`, and not to the people a second-person rule
-excludes). The canvas does not use them yet.
+excludes). Both are in the versioned contract (`/v1/runs/{runId}/map`,
+`/v1/needs-you`). A lane step carries only its type, time and the string or
+integer fields `tool`, `status`, `agent` (a crew agent's `name`) and
+`iteration`.
+
+The canvas reads the map through one shared feed per run
+(`web/src/hooks/useRunMap.ts`): it refetches 400 ms after the run projection
+changes (stream frames or the polling fallback) and every 15 seconds while
+the run is open, so elapsed time and the stuck signal advance; it stops
+ticking once the run is terminal, and a failed read keeps the last map. Node
+status stays with the live run projection. Elapsed time counts on in the
+browser from the moment the map arrived. A decision is offered only while the
+live step still waits and its binding is complete: a tool approval posts its
+approval id and parameter digest to `POST /runs/tool-approvals/decide`, an
+approval step resumes through `POST /resume` (there is no reject route for an
+approval step), and a form opens the existing form dialog. Rerun uses the
+existing preview and side-effect acknowledgement. The Agents tab reads the
+same feed. Not built yet: expanding a child run inline (the node links to
+it), the MCP activity lane, and recovery approvals and publish requests on
+the canvas.
 
 - **Agent and subworkflow lanes.** An `agent` or `multi_agent` node expands
   into a lane of its steps and tool calls from its `agent.*` events. A

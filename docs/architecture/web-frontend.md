@@ -539,6 +539,21 @@ not add global keyboard interception, regenerate ids, rewrite persisted position
 or introduce a layout library without representative difficult graphs and a
 measured operator need.
 
+## Run map
+
+The run canvas and the Agents tab read `GET /v1/runs/{runId}/map` through
+`contractApi` and its generated guard, sharing one feed per run
+(`src/hooks/useRunMap.ts`; the refetch rules are in
+`docs/architecture/agent-platform.md`). `src/run-map.ts` projects it purely:
+node facts and the decision a step offers, and the agent lanes. Facts render
+inside `WorkflowStepNode`, so the editor shows them too; actions come from
+`RunMapActionsContext`, which only `RunObservationWorkspace` provides. Each
+action button is named after its step, and focusing one pans an off-screen
+node into view. Stuck is a dashed full border plus a clock icon and the word
+"Stuck"; a step that needs the viewer gets a full outline and the words
+"Needs you". The form and rerun dialogs load from the run panel's chunk,
+which the run map always shows beside the canvas.
+
 ## Data invalidation
 
 Panel reads subscribe to the resources they depend on through

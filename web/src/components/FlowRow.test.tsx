@@ -10,40 +10,19 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { flowRowProps } from '../test/flow-row-fixture'
 import type { SavedWorkflow } from '../types'
 import { FlowRow, type FlowRowProps } from './FlowRow'
 
 vi.mock('./WorkflowHealthBadge', () => ({ WorkflowHealthBadge: () => <button type="button">health</button> }))
 vi.mock('./FlowHealthTrend', () => ({ FlowHealthTrend: () => null }))
 
-const noop = () => {}
 const renderRow = (row: ReactElement) => render(row, {
   wrapper: ({ children }: { children: ReactNode }) => <table><tbody>{children}</tbody></table>,
 })
-const t = ((key: string) => key) as FlowRowProps['t']
 
 function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRowProps {
-  return {
-    workflow,
-    canWrite: true,
-    folderOptions: [],
-    tagOptions: [],
-    hasFolders: false,
-    selectionMode: true,
-    selectedIds,
-    draggingId: null,
-    onOpen: noop,
-    toggleSelected: noop,
-    setDraggingId: noop,
-    setDropTarget: noop,
-    setRowTag: noop,
-    moveToFolder: noop,
-    deleteWorkflow: noop,
-    resumeWorkflow: noop,
-    pauseWorkflow: noop,
-    recoveryBusy: false,
-    t,
-  }
+  return flowRowProps(workflow, { selectionMode: true, selectedIds })
 }
 
 describe('<FlowRow /> memoization', () => {

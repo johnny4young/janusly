@@ -4,6 +4,7 @@
  *
  * Used by:
  * - `components/RunsPanel.tsx` for run identity, trigger input, and wait cards.
+ * - `run-map.ts` for the decisions the run map offers in place.
  * - Focused unit tests that pin malformed/historical payload fallbacks.
  *
  * Invariants:
@@ -11,7 +12,7 @@
  * - `inputJson.workflow` is treated as display context, never authorization.
  */
 
-import type { JsonObject, RunEvent, RunNode, RunSummary } from './types'
+import type { JsonObject, RunEvent, RunNode, RunSummary, WorkflowInputSchemaShape } from './types'
 
 export type RunWorkflowIdentity = { id: string | null; name: string | null }
 export type RunWaitKind = 'approval' | 'tool_approval' | 'human_form' | 'webhook' | 'timer' | 'subworkflow' | 'unknown'
@@ -143,4 +144,43 @@ export function getToolApprovalRequest(node: RunNode): ToolApprovalRequest | nul
     approvalId, tool, params: waiting.params, paramsDigest, maskedPaths: strings(waiting.maskedPaths),
     requesterIds: strings(waiting.requesterIds), eligibleApprovers, requiredApprovals: required,
   }
+}
+
+export type HumanFormWaiting = {
+  title?: string
+  description?: string
+  schema: WorkflowInputSchemaShape
+  initialValues?: unknown
+  resumeToken: string
+}
+
+/** A waiting human form with everything the resume route needs, or null. */
+export function readHumanFormWaiting(node: RunNode): HumanFormWaiting | null {
+  const data = asObject(asObject(node.stateJson)?.waiting)
+  if (data?.kind !== 'human_form') return null
+  if (typeof data.resumeToken !== 'string' || !data.resumeToken) return null
+  if (!isWorkflowInputSchemaShape(data.schema)) return null
+  return {
+    title: typeof data.title === 'string' ? data.title : undefined,
+    description: typeof data.description === 'string' ? data.description : undefined,
+    schema: data.schema,
+    initialValues: data.initialValues,
+    resumeToken: data.resumeToken,
+  }
+}
+
+function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchemaShape {
+  const schema = asObject(value)
+  if (!schema || !['string', 'number', 'boolean', 'object', 'array'].includes(String(schema.type))) return false
+  if (schema.properties !== undefined) {
+    const properties = asObject(schema.properties)
+    if (!properties) return false
+    for (const child of Object.values(properties)) {
+      if (!isWorkflowInputSchemaShape(child)) return false
+    }
+  }
+  if (schema.items !== undefined && !isWorkflowInputSchemaShape(schema.items)) return false
+  if (schema.required !== undefined && (!Array.isArray(schema.required) || !schema.required.every(item => typeof item === 'string'))) return false
+  if (schema.enum !== undefined && !Array.isArray(schema.enum)) return false
+  return true
 }

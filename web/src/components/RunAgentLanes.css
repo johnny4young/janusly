@@ -1,0 +1,63 @@
+/* Styles for RunAgentLanes.tsx: shipped with the lazy chunk that renders it. */
+
+.we-run-lanes {
+  display: grid;
+  gap: 10px;
+}
+
+.we-run-lane {
+  display: grid;
+  gap: 8px;
+}
+
+.we-run-lane__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.we-run-lane__head h3 {
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.we-run-lane__track h4 {
+  color: var(--we-ink-soft);
+  font-size: 12px;
+  margin: 0 0 4px;
+}
+
+.we-run-lane__track ol {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-run-lane__step {
+  align-items: center;
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  font-size: 12px;
+  gap: 8px;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  padding: 5px 0;
+}
+
+.we-run-lane__step span {
+  overflow-wrap: anywhere;
+}
+
+.we-run-lane__step time {
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.we-run-lane__step[data-tone="tool"] svg { color: var(--we-info); }
+.we-run-lane__step[data-tone="success"] svg { color: var(--we-success); }
+.we-run-lane__step[data-tone="error"] svg { color: var(--we-danger); }
+.we-run-lane__step[data-tone="info"] svg { color: var(--we-muted); }
