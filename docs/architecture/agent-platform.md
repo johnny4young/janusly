@@ -728,6 +728,20 @@ Identity comes first because every later stage records and limits by client.
 The gate comes before the map because the map's "save as workflow" ends in
 the gate.
 
+### Cycle harness
+
+Each task runs in a throwaway home with only the `janusly` MCP server and a
+dedicated model key from the environment; a preflight reads what the client
+loaded and refuses the cycle when anything else appears. The official figure
+runs in a container, three repetitions per task and mode, and reports the
+median. `docs/development.md` (Agent cycle) has the rules and the commands.
+
+| Client | Mode | Passed | Notes |
+|---|---|---|---|
+| Codex 0.167 | strict | 7/10 | One run per task, before throwaway homes |
+| Codex 0.167 | approved | 9/10 | Same run; task 7 failed on a product gap since closed |
+| Claude Code 2.1.322 | strict, approved | not measured | Needs a dedicated key with a spend cap |
+
 ## Threats
 
 | Threat | Control |

@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Stands in for Codex in the harness self-test: `--version`, `mcp list`,
+`features list` and `exec` resolve configuration the way the real CLI does
+(CODEX_HOME, else HOME/.codex, then -c overrides), and exec makes two fixed
+MCP calls. behavior.json beside it simulates configuration the harness
+cannot reach."""
+
+import json, os, re, sys, urllib.request
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+VERSION = "0.167.2"
+FEATURES = ("plugins", "remote_plugin", "apps", "computer_use", "browser_use", "browser_use_external", "in_app_browser",
+            "hooks", "shell_tool", "unified_exec", "image_generation", "multi_agent", "skill_search", "tool_suggest",
+            "view_image", "goals")
+EXEC_FLAGS = {"--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--json"}
+
+
+def read_json(path):
+    try:
+        with open(path) as source:
+            return json.load(source)
+    except (OSError, ValueError):
+        return {}
+
+
+def toml_value(raw):
+    raw = raw.strip()
+    if raw in ("true", "false"):
+        return raw == "true"
+    if raw.startswith('"'):
+        return json.loads(raw)
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def split(argv):
+    """-c overrides apart from the remaining arguments."""
+    overrides, rest, index = [], [], 0
+    while index < len(argv):
+        if argv[index] == "-c":
+            key, _, value = argv[index + 1].partition("=")
+            overrides.append((key, toml_value(value)))
+            index += 2
+            continue
+        rest.append(argv[index])
+        index += 1
+    return overrides, rest
+
+
+def resolve(overrides, ignore_user=False):
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.environ.get("HOME", ""), ".codex")
+    servers, section = {}, None
+    if not ignore_user:
+        try:
+            lines = open(os.path.join(home, "config.toml")).read().splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            header = re.match(r"\[mcp_servers\.([^\]]+)\]", line.strip())
+            if header:
+                section = servers.setdefault(header.group(1), {})
+            elif section is not None and "=" in line:
+                key, _, value = line.partition("=")
+                section[key.strip()] = toml_value(value)
+    features = {name: True for name in FEATURES}
+    behavior = read_json(os.path.join(HERE, "behavior.json"))
+    for key, value in overrides:
+        parts = key.split(".", 2)
+        if parts[0] == "mcp_servers" and len(parts) == 3:
+            servers.setdefault(parts[1], {})[parts[2]] = value
+        elif parts[0] == "features" and len(parts) == 2:
+            features[parts[1]] = value
+    servers.update(behavior.get("managedMcpServers", {}))
+    for name in behavior.get("featuresOn", []):
+        features[name] = True
+    return servers, features, behavior
+
+
+def rpc(server, body):
+    token = os.environ.get(server.get("bearer_token_env_var", ""), "")
+    req = urllib.request.Request(server["url"], data=json.dumps({"jsonrpc": "2.0", **body}).encode(), method="POST",
+                                 headers={"content-type": "application/json", "authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=10) as res:
+        raw = res.read()
+    return json.loads(raw) if raw else {}
+
+
+def emit(event):
+    print(json.dumps(event), flush=True)
+
+
+def main():
+    overrides, rest = split(sys.argv[1:])
+    if rest[:1] == ["--version"]:
+        print(f"codex-cli {VERSION}")
+        return
+    if rest[:2] == ["mcp", "list"]:
+        servers, _, _ = resolve(overrides)
+        print(json.dumps([{"name": name, "enabled": server.get("enabled", True),
+                           "transport": {"type": "streamable_http", "url": server.get("url")}} for name, server in servers.items()]))
+        return
+    if rest[:2] == ["features", "list"]:
+        _, features, _ = resolve(overrides)
+        for name, on in sorted(features.items()):
+            print(f"{name:<40} stable             {'true' if on else 'false'}")
+        return
+    if rest[:1] != ["exec"]:
+        sys.exit(f"fake codex: unsupported {rest[:2]}")
+    args, prompt = rest[1:], None
+    flags = set()
+    index = 0
+    while index < len(args):
+        if args[index] in EXEC_FLAGS:
+            flags.add(args[index])
+        elif args[index] == "-s":
+            index += 1
+        elif args[index].startswith("-"):
+            sys.exit(f"error: unexpected argument '{args[index]}'")
+        else:
+            prompt = args[index]
+        index += 1
+    servers, features, behavior = resolve(overrides, "--ignore-user-config" in flags)
+    emit({"type": "fake", "pid": os.getpid(), "home": os.environ.get("HOME"), "codexHome": os.environ.get("CODEX_HOME"),
+          "env": sorted(os.environ)})
+    emit({"type": "thread.started", "thread_id": "fake"})
+    if behavior.get("localCommand"):
+        emit({"type": "item.completed", "item": {"type": "command_execution", "command": "ls ~"}})
+    janusly = servers.get("janusly") or {}
+    approve = janusly.get("default_tools_approval_mode") == "approve"
+    catalog = {tool["name"]: tool for tool in rpc(janusly, {"id": 2, "method": "tools/list"})["result"]["tools"]}
+    for tool in ("workflows.list", "runs.cancel"):
+        hints = catalog[tool].get("annotations") or {}
+        if hints.get("destructiveHint") and not approve:
+            emit({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "janusly", "tool": tool,
+                                                     "status": "failed", "error": {"message": "user cancelled MCP tool call"}}})
+            continue
+        rpc(janusly, {"id": 3, "method": "tools/call", "params": {"name": tool, "arguments": {}}})
+        emit({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "janusly", "tool": tool, "status": "completed"}})
+    emit({"type": "item.completed", "item": {"type": "agent_message", "text": "fake answer to " + (prompt or "")[:20]}})
+    emit({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}})
+
+
+if __name__ == "__main__":
+    main()

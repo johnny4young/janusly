@@ -37,6 +37,7 @@ jobs:
         run: |
           bash scripts/ci-contract.test.sh
           bash scripts/verify-isolated.test.sh
+          python3 -m unittest discover -s scripts/agent-cycle -v
       - id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}

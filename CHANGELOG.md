@@ -26,6 +26,14 @@
   and the screen says how many before converting. Each agent's goal and the
   outputs are left as placeholders that `workflows.qualify` refuses until
   they are filled in.
+- The agent cycle harness runs every Claude Code and Codex session in a
+  throwaway home with only the `janusly` MCP server and a dedicated model key
+  from `CYCLE_PASS_ENV`, and never touches `~/.claude`, `~/.codex` or
+  `~/.cursor`. A preflight reads what the client loaded, with the model
+  endpoint on a closed port, and refuses the cycle when the session is not
+  blank. `CYCLE_MODE` (strict or approved), `CYCLE_REPEAT`, `CYCLE_MODEL` and
+  `CYCLE_CLIENT_VERSION` pin a measurement, and a container overlay runs the
+  official figure. CI runs a self-test with fake clients.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the
