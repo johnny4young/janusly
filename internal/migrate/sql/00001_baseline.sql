@@ -3655,7 +3655,7 @@ CREATE TABLE public.agent_clients (
     CONSTRAINT agent_clients_digest_check CHECK (octet_length(token_digest) = 32),
     CONSTRAINT agent_clients_rate_check CHECK (rate_limit_per_minute BETWEEN 1 AND 600),
     CONSTRAINT agent_clients_expiry_check CHECK (
-        expires_at > token_issued_at AND expires_at <= token_issued_at + interval '90 days'),
+        expires_at > token_issued_at AND expires_at <= token_issued_at + interval '2160 hours'),
     CONSTRAINT agent_clients_revocation_check CHECK ((revoked_at IS NULL) = (revoked_by IS NULL))
 );
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
