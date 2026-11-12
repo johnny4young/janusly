@@ -3708,6 +3708,13 @@ CREATE UNIQUE INDEX tool_approval_requests_live_idx ON public.tool_approval_requ
 
 
 --
+-- Name: tool_approval_requests_org_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_approval_requests_org_pending_idx ON public.tool_approval_requests USING btree (org_id, created_at) WHERE ((status = 'pending'::text) AND (consumed_at IS NULL));
+
+
+--
 -- Name: tool_approval_requests_run_node_idx; Type: INDEX; Schema: public; Owner: -
 --
 

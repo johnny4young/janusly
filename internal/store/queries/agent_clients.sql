@@ -23,6 +23,10 @@ WHERE org_id = sqlc.arg(org_id)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- name: ListAgentClientCreators :many
+SELECT id, created_by FROM agent_clients
+WHERE org_id = sqlc.arg(org_id) AND id = ANY(sqlc.arg(ids)::text[]);
+
 -- name: RotateAgentClientToken :one
 UPDATE agent_clients
 SET token_digest = sqlc.arg(token_digest), token_last4 = sqlc.arg(token_last4),

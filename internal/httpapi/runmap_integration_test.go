@@ -158,6 +158,12 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 	if kinds := inbox(editor); kinds["publish_request"] != 1 {
 		t.Fatalf("a second person does not see the request: %v", kinds)
 	}
+	// A drafting agent whose creator cannot be found counts as the viewer's own.
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, 'wf-gone', 'draft', 'qual', '{first_publish}', $3, 'someone-else', $3, now() + interval '1 day')`, "pub-gone-"+suffix, h.org, "agent:gone-"+suffix)
+	if kinds := inbox(editor); kinds["publish_request"] != 1 {
+		t.Fatalf("a request from an unknown agent was offered under the second-person rule: %v", kinds)
+	}
 
 	// Approvals the viewer caused, or on runs no longer waiting, never crowd out one they can decide.
 	exec(`INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json)

@@ -196,6 +196,41 @@ func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowFo
 	return i, err
 }
 
+const listAgentClientCreators = `-- name: ListAgentClientCreators :many
+SELECT id, created_by FROM agent_clients
+WHERE org_id = $1 AND id = ANY($2::text[])
+`
+
+type ListAgentClientCreatorsParams struct {
+	OrgID string
+	Ids   []string
+}
+
+type ListAgentClientCreatorsRow struct {
+	ID        string
+	CreatedBy string
+}
+
+func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClientCreatorsParams) ([]ListAgentClientCreatorsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientCreatorsRow
+	for rows.Next() {
+		var i ListAgentClientCreatorsRow
+		if err := rows.Scan(&i.ID, &i.CreatedBy); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentClients = `-- name: ListAgentClients :many
 SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients
 WHERE org_id = $1
