@@ -247,7 +247,8 @@ document, so one call shows every problem.
 
 `runs.start` accepts either a document or a `workflowId`. A `workflowId` runs
 the active workflow's latest immutable version, bound exactly as if that
-document had been sent. `idempotencyKey` shares the HTTP start's per-tenant key
+document had been sent. A `workflowVersionId` passed with it must be that
+latest version; any other is refused, never run. `idempotencyKey` shares the HTTP start's per-tenant key
 space: a retry with the same key returns the first run with `replayed: true`.
 
 `workflows.save` calls the same canonical atomic engine append as HTTP. It does
