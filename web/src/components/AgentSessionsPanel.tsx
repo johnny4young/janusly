@@ -160,7 +160,9 @@ function SessionDetail({ id, onBack, onOpenRun }: { id: string; onBack: () => vo
   const running = map?.session.status === 'running'
   useEffect(() => {
     if (!running) return undefined
-    const timer = setInterval(() => void load(), SESSION_POLL_MS)
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void load()
+    }, SESSION_POLL_MS)
     return () => clearInterval(timer)
   }, [load, running])
 

@@ -15,7 +15,8 @@ import (
 type seededSession struct{ id, clientID string }
 
 // seedAgentSession stores a session with a subagent that is still live after
-// a turn stopped, and one Janusly call naming runID.
+// a turn stopped, and one Janusly call naming runID. The run, when it exists,
+// is marked as started by another agent client of the same creator.
 func seedAgentSession(t *testing.T, org, runID string) seededSession {
 	t.Helper()
 	pool := testPool(t)
@@ -29,6 +30,11 @@ func seedAgentSession(t *testing.T, org, runID string) seededSession {
 	exec(`INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)
 		VALUES ($1, $2, 'Claude Code', '{read,report}', $3, 'abcd', 'creator', now() + interval '1 day')`,
 		s.clientID, org, []byte(strings.Repeat("d", 16)+s.clientID[:16]))
+	starter := uuid.NewString()
+	exec(`INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)
+		VALUES ($1, $2, 'Claude MCP', '{read,operate}', $3, 'efgh', 'creator', now() + interval '1 day')`,
+		starter, org, []byte(strings.Repeat("e", 16)+starter[:16]))
+	exec(`UPDATE runs SET created_by = 'agent:' || $1 WHERE org_id = $2 AND id = $3`, starter, org, runID)
 	exec(`INSERT INTO agent_sessions (id, org_id, agent_client_id, external_session_id, runtime, project, model, started_at, last_event_at, event_count, last_seq)
 		VALUES ($1, $2, $3, $4, 'claude-code', 'billing', 'opus', now() - interval '1 minute', now(), 6, 6)`, s.id, org, s.clientID, "ext-"+s.id)
 	at := time.Now().Add(-time.Minute)
@@ -64,9 +70,19 @@ func seedAgentSession(t *testing.T, org, runID string) seededSession {
 	return s
 }
 
+func seedRun(t *testing.T, org, createdBy string) string {
+	t.Helper()
+	id := "run-" + uuid.NewString()
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO runs (id, org_id, workflow_version_id, status, input_json, created_by)
+		VALUES ($1, $2, 'v-seed', 'succeeded', '{}', $3)`, id, org, createdBy); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func TestAgentSessionMapNestsSubagentsAndLinksRuns(t *testing.T) {
 	h := newAPIHarnessWithoutWorkers(t)
-	runID := "run-" + uuid.NewString()
+	runID := seedRun(t, h.org, "")
 	s := seedAgentSession(t, h.org, runID)
 
 	listed := h.call("GET", "/agent-sessions", nil, "")
@@ -97,6 +113,11 @@ func TestAgentSessionMapNestsSubagentsAndLinksRuns(t *testing.T) {
 	}
 	if refs := got.body["refs"].(map[string]any); fmt.Sprint(refs["runIds"]) != "["+runID+"]" {
 		t.Fatalf("refs: %v", refs)
+	}
+
+	linked := h.call("GET", "/runs/"+runID+"/map", nil, "")
+	if sessions, _ := linked.body["sessions"].([]any); linked.status != 200 || len(sessions) != 1 {
+		t.Fatalf("run map link: %d %v", linked.status, linked.body["sessions"])
 	}
 
 	pool := testPool(t)
@@ -135,7 +156,62 @@ func TestAgentSessionReadsAreIsolated(t *testing.T) {
 	if res := h.call("GET", "/agent-sessions?cursor=bm9wZQ", nil, ""); res.status != 400 {
 		t.Fatalf("bad cursor: %d", res.status)
 	}
+	if res := h.call("GET", "/agent-sessions/bad%00id/map", nil, ""); res.status != 404 {
+		t.Fatalf("malformed session id: %d", res.status)
+	}
 	if res := h.call("GET", "/agent-sessions?limit=0", nil, ""); res.status != 400 {
 		t.Fatalf("bad limit: %d", res.status)
+	}
+}
+
+// A session reports its Janusly references itself: a run another person's
+// agent started is neither linked from the run map nor listed on the session.
+func TestAgentSessionRunLinkRequiresTheSameCreatorsAgent(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	foreignStarter := uuid.NewString()
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)
+		VALUES ($1, $2, 'someone else', '{read,operate}', $3, 'wxyz', 'another-person', now() + interval '1 day')`,
+		foreignStarter, h.org, []byte(strings.Repeat("f", 16)+foreignStarter[:16])); err != nil {
+		t.Fatal(err)
+	}
+	for name, runID := range map[string]string{
+		"a person's run":         seedRun(t, h.org, "some-user"),
+		"another person's agent": seedRun(t, h.org, "agent:"+foreignStarter),
+	} {
+		s := seedAgentSession(t, h.org, "")
+		if _, err := testPool(t).Exec(t.Context(), `UPDATE agent_session_events SET janusly_refs = jsonb_build_object('runId', $1::text)
+			WHERE session_id = $2 AND janusly_refs IS NOT NULL`, runID, s.id); err != nil {
+			t.Fatal(err)
+		}
+		if res := h.call("GET", "/runs/"+runID+"/map", nil, ""); len(res.body["sessions"].([]any)) != 0 {
+			t.Fatalf("%s: run map linked an unverified session: %v", name, res.body["sessions"])
+		}
+		if res := h.call("GET", "/agent-sessions/"+s.id+"/map", nil, ""); fmt.Sprint(res.body["refs"].(map[string]any)["runIds"]) != "[]" {
+			t.Fatalf("%s: session listed an unverified run: %v", name, res.body["refs"])
+		}
+	}
+}
+
+// Sessions name agent clients: without agents.read a member reads no session
+// and the run map links none.
+func TestAgentSessionsRequireAgentsRead(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	runID := seedRun(t, h.org, "")
+	s := seedAgentSession(t, h.org, runID)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_roles(id, org_id, name, inherits_from, granted_permissions)
+		VALUES($1, $2, 'runs-only', 'viewer', '["runs.read"]'::jsonb)`, h.org+"-runs-only", h.org); err != nil {
+		t.Fatal(err)
+	}
+	seedMemberRow(t, pool, h.org, "runs-only-user", "runs-only@example.test", "runs-only")
+	as := map[string]string{"x-user-id": "runs-only-user"}
+	for _, path := range []string{"/agent-sessions", "/agent-sessions/" + s.id + "/map"} {
+		if res := h.callWithHeaders("GET", path, nil, "", as); res.status != 403 {
+			t.Fatalf("%s without agents.read: %d %v", path, res.status, res.body)
+		}
+	}
+	res := h.callWithHeaders("GET", "/runs/"+runID+"/map", nil, "", as)
+	if res.status != 200 || len(res.body["sessions"].([]any)) != 0 {
+		t.Fatalf("run map without agents.read: %d %v", res.status, res.body["sessions"])
 	}
 }

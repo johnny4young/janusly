@@ -404,18 +404,21 @@ func (q *Queries) ListAgentSessions(ctx context.Context, arg ListAgentSessionsPa
 }
 
 const listAgentSessionsForRun = `-- name: ListAgentSessionsForRun :many
-SELECT DISTINCT s.id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.last_event_at
+SELECT DISTINCT s.id, c.name AS agent_client_name, s.runtime, s.last_event_at
 FROM agent_session_events e
 JOIN agent_sessions s ON s.id = e.session_id AND s.org_id = e.org_id
-LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
-WHERE e.org_id = $1 AND e.janusly_refs->>'runId' = $2::text
+JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+JOIN runs r ON r.org_id = e.org_id AND r.id = $1::text
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
+WHERE e.org_id = $2 AND e.janusly_refs->>'runId' = $1::text
+  AND starter.created_by = c.created_by
 ORDER BY s.last_event_at DESC
 LIMIT 10
 `
 
 type ListAgentSessionsForRunParams struct {
-	OrgID string
 	RunID string
+	OrgID string
 }
 
 type ListAgentSessionsForRunRow struct {
@@ -425,9 +428,11 @@ type ListAgentSessionsForRunRow struct {
 	LastEventAt     time.Time
 }
 
-// Sessions whose Janusly calls named this run.
+// Sessions whose Janusly calls named this run. A session reports the link
+// itself, so it counts only when an agent client of the same creator started
+// the run.
 func (q *Queries) ListAgentSessionsForRun(ctx context.Context, arg ListAgentSessionsForRunParams) ([]ListAgentSessionsForRunRow, error) {
-	rows, err := q.db.Query(ctx, listAgentSessionsForRun, arg.OrgID, arg.RunID)
+	rows, err := q.db.Query(ctx, listAgentSessionsForRun, arg.RunID, arg.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -542,4 +547,40 @@ func (q *Queries) ProjectAgentSessionEvent(ctx context.Context, arg ProjectAgent
 	var last_seq int64
 	err := row.Scan(&last_seq)
 	return last_seq, err
+}
+
+const verifyAgentSessionRunRefs = `-- name: VerifyAgentSessionRunRefs :many
+SELECT r.id FROM runs r
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
+JOIN agent_clients c ON c.org_id = r.org_id AND c.id = $1::text
+WHERE r.org_id = $2 AND r.id = ANY($3::text[])
+  AND starter.created_by = c.created_by
+ORDER BY r.id
+`
+
+type VerifyAgentSessionRunRefsParams struct {
+	AgentClientID string
+	OrgID         string
+	RunIds        []string
+}
+
+// The reported run ids an agent client of the session client's creator started.
+func (q *Queries) VerifyAgentSessionRunRefs(ctx context.Context, arg VerifyAgentSessionRunRefsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, verifyAgentSessionRunRefs, arg.AgentClientID, arg.OrgID, arg.RunIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,6 +42,8 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	if s.now == nil {
 		s.now = time.Now
 	}
+	// Sessions name agent clients, so they also need agents.read (checked in
+	// each handler; a gate holds one permission).
 	read := httpkit.Gate{Role: auth.RoleViewer, Permission: "runs.read"}
 	deps.Routes.Route(mux, "GET /agent-sessions", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
 		httpkit.WriteUnversioned(w, s.list(r, rc))
@@ -60,7 +63,29 @@ func internalError() httpkit.Result {
 	return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
+// Holds reports whether the viewer's live grant includes permission, resolved
+// the way the route gate resolves it.
+func Holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission string) bool {
+	if rc.Auth == nil {
+		return false
+	}
+	q := store.New(pool)
+	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
+	if err != nil || role == nil {
+		return false
+	}
+	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
+	return err == nil && permissions[permission]
+}
+
+func forbidden() httpkit.Result {
+	return httpkit.Error(http.StatusForbidden, "server_request_failed", "Forbidden: requires permission agents.read", nil)
+}
+
 func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
+	if !Holds(r, s.pool, rc, "agents.read") {
+		return forbidden()
+	}
 	limit := defaultPage
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -98,8 +123,15 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 }
 
 func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result {
+	if !Holds(r, s.pool, rc, "agents.read") {
+		return forbidden()
+	}
 	q := store.New(s.pool)
-	row, err := q.GetAgentSession(r.Context(), store.GetAgentSessionParams{OrgID: rc.OrgID, ID: r.PathValue("sessionId")})
+	id := r.PathValue("sessionId")
+	if uuid.Validate(id) != nil {
+		return httpkit.Error(http.StatusNotFound, "agent_session_not_found", "agent session not found", nil)
+	}
+	row, err := q.GetAgentSession(r.Context(), store.GetAgentSessionParams{OrgID: rc.OrgID, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpkit.Error(http.StatusNotFound, "agent_session_not_found", "agent session not found", nil)
 	}
@@ -107,7 +139,7 @@ func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result
 		return internalError()
 	}
 	rows, err := q.ListAgentSessionEvents(r.Context(), store.ListAgentSessionEventsParams{
-		OrgID: rc.OrgID, SessionID: row.ID, RowLimit: agentsession.MaxEventsPerSession,
+		OrgID: rc.OrgID, SessionID: row.ID, RowLimit: agentsession.MaxStoredPerSession,
 	})
 	if err != nil {
 		return internalError()
@@ -122,6 +154,14 @@ func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result
 		})
 	}
 	graph := agentsession.Project(events)
+	// Refs are what the agent reported; keep only runs its creator's agents started.
+	verified, err := q.VerifyAgentSessionRunRefs(r.Context(), store.VerifyAgentSessionRunRefsParams{
+		OrgID: rc.OrgID, AgentClientID: row.AgentClientID, RunIds: graph.Refs.RunIDs,
+	})
+	if err != nil {
+		return internalError()
+	}
+	graph.Refs.RunIDs = append([]string{}, verified...)
 	return httpkit.OK(map[string]any{
 		"session": sessionView(row, s.now()), "lanes": graph.Lanes, "totals": graph.Totals,
 		"liveSubagents": graph.LiveSubagents, "refs": graph.Refs,
@@ -171,7 +211,7 @@ func decodeCursor(raw string) (time.Time, string, bool) {
 	}
 	at, id, found := strings.Cut(string(decoded), "|")
 	parsed, err := time.Parse(time.RFC3339Nano, at)
-	if !found || err != nil || id == "" {
+	if !found || err != nil || uuid.Validate(id) != nil {
 		return time.Time{}, "", false
 	}
 	return parsed, id, true

@@ -24,6 +24,8 @@ const (
 	MaxEventsPerSession = 5000
 	// closingSlack bounds the closing and stale events a full session may still store.
 	closingSlack = 50
+	// MaxStoredPerSession is every receipt a session can hold.
+	MaxStoredPerSession = MaxEventsPerSession + closingSlack
 	// IdleAfter is how long a running session may stay silent.
 	IdleAfter = 30 * time.Minute
 	// StaleAfter keeps late events of an ended session out of its projection.
@@ -94,7 +96,7 @@ func ingest(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Prin
 	params := eventParams(principal, session.ID, event, now, newID())
 	stale := session.EndedAt != nil && now.Sub(*session.EndedAt) > StaleAfter
 	switch {
-	case session.EventCount >= MaxEventsPerSession+closingSlack:
+	case session.EventCount >= MaxStoredPerSession:
 		return Result{}, ErrTruncated
 	case stale:
 		params.Outcome = OutcomeStale

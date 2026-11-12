@@ -96,12 +96,26 @@ WHERE org_id = sqlc.arg(org_id) AND session_id = sqlc.arg(session_id) AND outcom
 ORDER BY seq
 LIMIT sqlc.arg(row_limit);
 
--- Sessions whose Janusly calls named this run.
+-- Sessions whose Janusly calls named this run. A session reports the link
+-- itself, so it counts only when an agent client of the same creator started
+-- the run.
 -- name: ListAgentSessionsForRun :many
-SELECT DISTINCT s.id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.last_event_at
+SELECT DISTINCT s.id, c.name AS agent_client_name, s.runtime, s.last_event_at
 FROM agent_session_events e
 JOIN agent_sessions s ON s.id = e.session_id AND s.org_id = e.org_id
-LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+JOIN runs r ON r.org_id = e.org_id AND r.id = sqlc.arg(run_id)::text
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
 WHERE e.org_id = sqlc.arg(org_id) AND e.janusly_refs->>'runId' = sqlc.arg(run_id)::text
+  AND starter.created_by = c.created_by
 ORDER BY s.last_event_at DESC
 LIMIT 10;
+
+-- The reported run ids an agent client of the session client's creator started.
+-- name: VerifyAgentSessionRunRefs :many
+SELECT r.id FROM runs r
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
+JOIN agent_clients c ON c.org_id = r.org_id AND c.id = sqlc.arg(agent_client_id)::text
+WHERE r.org_id = sqlc.arg(org_id) AND r.id = ANY(sqlc.arg(run_ids)::text[])
+  AND starter.created_by = c.created_by
+ORDER BY r.id;

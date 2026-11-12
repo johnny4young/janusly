@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/auth"
+	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/publishgate"
 	"github.com/johnny4young/janusly/internal/store"
@@ -128,9 +129,13 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return internalError()
 	}
-	linked, err := q.ListAgentSessionsForRun(ctx, store.ListAgentSessionsForRunParams{OrgID: rc.OrgID, RunID: runID})
-	if err != nil {
-		return internalError()
+	// Sessions name agent clients, so only viewers with agents.read see them.
+	var linked []store.ListAgentSessionsForRunRow
+	if agentsessions.Holds(r, s.pool, rc, "agents.read") {
+		linked, err = q.ListAgentSessionsForRun(ctx, store.ListAgentSessionsForRunParams{OrgID: rc.OrgID, RunID: runID})
+		if err != nil {
+			return internalError()
+		}
 	}
 	sessions := make([]map[string]any, 0, len(linked))
 	for _, session := range linked {

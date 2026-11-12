@@ -3788,6 +3788,6 @@ CREATE TABLE public.agent_session_events (
 );
 CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_events (agent_client_id, event_id);
 CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events (session_id, seq);
-CREATE INDEX agent_session_events_run_idx ON public.agent_session_events (org_id, (janusly_refs->>'runId')) WHERE janusly_refs ? 'runId';
+CREATE INDEX agent_session_events_run_idx ON public.agent_session_events (org_id, (janusly_refs->>'runId')) WHERE (janusly_refs->>'runId') IS NOT NULL;
 
 -- +goose StatementEnd
