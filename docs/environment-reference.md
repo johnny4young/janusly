@@ -124,6 +124,9 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_ADMIN_TOKEN` | CLI | secret; fallback JANUSLY_API_SERVICE_TOKEN; applies on the next command invocation | `cmd/admin/main.go` or `cmd/seed/main.go`; not server aliases |
 | `JANUSLY_SEED_API` | CLI | URL; http://127.0.0.1:3001; applies on the next command invocation | `cmd/admin/main.go` or `cmd/seed/main.go`; not server aliases |
 | `JANUSLY_SEED_ORG` | CLI | string; demo-org; applies on the next command invocation | `cmd/admin/main.go` or `cmd/seed/main.go`; not server aliases |
+| `JANUSLY_URL` | CLI | URL; no default; `janusly hook` posts to `<url>/agent-sessions/events`; `https` unless a loopback IP literal; applies on the next hook invocation | `internal/hookbridge/bridge.go` |
+| `JANUSLY_AGENT_TOKEN` | CLI | secret; no default; an agent token with the `report` capability, sent only as the bearer and signing key; applies on the next hook invocation | `internal/hookbridge/bridge.go` |
+| `JANUSLY_AGENT_TOKEN_FILE` | CLI | path; no default; file holding the hook's agent token, preferred over `JANUSLY_AGENT_TOKEN`; applies on the next hook invocation | `internal/hookbridge/bridge.go` |
 | `JANUSLY_BUILD_ID` | Build | string; build-time display identity; omitted → date+Git shortSHA or dev | `web/vite.config.ts; Dockerfile`; rebuild, not restart |
 | `JANUSLY_BUILD_COMMIT` | Build | 40-hex Git commit injected at build; production provenance gate | `Dockerfile`, `Makefile`, `internal/buildinfo/`; rebuild, not restart |
 | `JANUSLY_BUILD_TREE` | Build | 40-hex Git tree injected at build; production provenance gate | `Dockerfile`, `Makefile`, `internal/buildinfo/`; rebuild, not restart |

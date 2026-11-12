@@ -1,0 +1,10 @@
+{
+  "session_id": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3",
+  "transcript_path": null,
+  "cwd": "/home/sam/repos/notion-sync",
+  "model": "gpt-5.5-codex",
+  "hook_event_name": "Stop",
+  "turn_id": "turn-1",
+  "stop_hook_active": false,
+  "last_assistant_message": "synced"
+}

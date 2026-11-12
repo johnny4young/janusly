@@ -1,0 +1,8 @@
+{
+  "session_id": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+  "transcript_path": "/Users/alex/.claude/projects/-Users-alex-work-billing/3f6c1a2e.jsonl",
+  "cwd": "/Users/alex/work/billing-automation",
+  "permission_mode": "default",
+  "hook_event_name": "SessionEnd",
+  "reason": "prompt_input_exit"
+}

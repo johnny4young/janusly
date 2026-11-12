@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "2bc88b0e297017ab4c6e2113057fa4b1d10d5b79891f818e8a84c845d5f3b80f",
+  "source": "janusly-hook/1/codex",
+  "type": "io.janusly.agent.tool.completed",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3",
+    "toolUseId": "call_a2",
+    "tool": "Bash",
+    "toolKind": "builtin",
+    "status": "ok"
+  }
+}

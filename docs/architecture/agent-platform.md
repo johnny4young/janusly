@@ -485,6 +485,42 @@ signature, or the raw body.
 | Late events | session ended over an hour ago | stored as `stale`, not projected |
 | Retention | 14 days after the last event | the retention sweep deletes it |
 
+**The command** (`internal/hookbridge`). `janusly hook claude-code` or
+`janusly hook codex` reads one hook payload from stdin. It keeps only the
+fields it maps (session, agent, tool name and id, MCP server, status,
+duration, model, the last segment of `cwd`) and drops the rest before any
+network call: transcript paths, tool inputs and responses, prompts, messages
+and errors never leave the machine. From a successful `mcp__janusly__*` call
+it keeps only well-formed `workflowId`, `draftId` and `runId` values. It
+prints nothing on stdout, sends once with a 2-second budget, never retries,
+refuses plain `http` to anything but a loopback IP literal, and always exits 0.
+Secret-shaped refs and invisible format characters are dropped before sending.
+
+| Native hook | Event |
+|---|---|
+| `SessionStart` | `session.started` |
+| `UserPromptSubmit` | `prompt.submitted` |
+| `PreToolUse` | `tool.requested` |
+| `PostToolUse` / `PostToolUseFailure` / `PermissionDenied` | `tool.completed` with `ok` / `error` / `denied` |
+| `SubagentStart` / `SubagentStop` | `subagent.started` / `subagent.stopped` |
+| `Stop` | `turn.stopped` |
+| `SessionEnd` | `session.ended` |
+
+Other hooks are ignored. The event id hashes the session, hook, tool use,
+agent and turn (`turn_id` in Codex, `prompt_id` in Claude Code), so a retried
+hook is a duplicate and the next turn is not.
+
+Setup. Use a dedicated agent client with only the `report` capability: the
+hook runs as the same OS user as the agent, so the agent's own shell tools can
+read its token. Put the token in a file and point `JANUSLY_AGENT_TOKEN_FILE` at
+it (or set `JANUSLY_AGENT_TOKEN`), and set `JANUSLY_URL`:
+
+```bash
+janusly hook doctor                 # token, capability and signature, nothing stored
+janusly hook config claude-code     # merge into .claude/settings.json
+janusly hook config codex           # merge into .codex/hooks.json
+```
+
 - **Gate from the map.** For tools the client lists in `gateTools`, a
   `PreToolUse` event opens a gate request and the bridge long-polls its
   decision in 25-second windows, up to the hook timeout. A person approves or
