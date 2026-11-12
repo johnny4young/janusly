@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 649.2,
+  "artifactGzipKiB": 660.3,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 601.6
+    "maxGzipKiB": 611.8
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -82,9 +82,9 @@
     "ActivityWorkspace.css": 1.02,
     "ActivityWorkspace.js": 4.14,
     "agent-actors.js": 0.54,
-    "AgentClientDialogs.js": 3.63,
+    "AgentClientDialogs.js": 3.86,
     "AgentClientsPanel.css": 1.1,
-    "AgentClientsPanel.js": 3.1,
+    "AgentClientsPanel.js": 3.16,
     "AiGuidanceSettingsPanel.js": 1.31,
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
@@ -128,7 +128,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.95,
+    "OperationsPage.js": 6.56,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,
