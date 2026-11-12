@@ -119,9 +119,6 @@ func (e *Engine) saveWorkflowVersionAttempt(
 			return SaveWorkflowVersionResult{}, err
 		}
 	case errors.Is(err, pgx.ErrNoRows):
-		if err := ownedWorkflowAbsent(ctx, q, input.OrgID, input.Workflow.ID); err != nil {
-			return SaveWorkflowVersionResult{}, err
-		}
 		inserted, err := q.InsertWorkflowIfAbsent(ctx, store.InsertWorkflowIfAbsentParams{
 			ID: input.Workflow.ID, OrgID: input.OrgID, Name: input.Workflow.Name,
 			CreatedBy: pgtype.Text{String: input.UserID, Valid: input.UserID != ""},
@@ -130,7 +127,7 @@ func (e *Engine) saveWorkflowVersionAttempt(
 			return SaveWorkflowVersionResult{}, err
 		}
 		if inserted == 0 {
-			// Either this organization created it concurrently, or the id is another's.
+			// The id exists: this organization's (tombstoned or concurrent) or another's.
 			if err := ownedWorkflowAbsent(ctx, q, input.OrgID, input.Workflow.ID); err != nil {
 				return SaveWorkflowVersionResult{}, err
 			}

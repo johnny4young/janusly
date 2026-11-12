@@ -5,7 +5,8 @@
 - Workflow pause and resume hold up under races. A pause that lands while a
   resume is starting held events stops the rest of that batch; a held event
   whose start fails goes back to the queue for the next resume instead of
-  staying stuck; and a replay campaign no longer replays an item when the
+  staying stuck, unless the workflow rejects its input, in which case it is
+  marked failed so it cannot hold up newer events; and a replay campaign no longer replays an item when the
   workflow's pause state cannot be read. A pause reason that is only spaces
   or control characters is recorded as no reason, and the MCP
   `workflows.pause` tool refuses a reason over 500 characters with

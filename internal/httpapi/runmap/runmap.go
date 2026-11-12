@@ -6,6 +6,7 @@ package runmap
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -402,16 +403,17 @@ func accountableFor(viewer string, row store.PublishRequest, creators map[string
 
 // agentCreators reads the creators of every drafting agent in one query.
 func (s *service) agentCreators(r *http.Request, rc httpkit.Request, requests []store.PublishRequest) map[string]string {
-	ids := []string{}
+	seen := map[string]struct{}{}
 	for _, row := range requests {
-		if clientID, ok := strings.CutPrefix(row.DraftedBy, "agent:"); ok && !slices.Contains(ids, clientID) {
-			ids = append(ids, clientID)
+		if clientID, ok := strings.CutPrefix(row.DraftedBy, "agent:"); ok {
+			seen[clientID] = struct{}{}
 		}
 	}
 	creators := map[string]string{}
-	if len(ids) == 0 {
+	if len(seen) == 0 {
 		return creators
 	}
+	ids := slices.Collect(maps.Keys(seen))
 	rows, err := store.New(s.pool).ListAgentClientCreators(r.Context(), store.ListAgentClientCreatorsParams{OrgID: rc.OrgID, Ids: ids})
 	if err != nil {
 		return creators

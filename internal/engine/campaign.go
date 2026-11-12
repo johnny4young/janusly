@@ -65,7 +65,7 @@ func ReplayItemFailureCode(message string) string {
 // ProcessDueReplayCampaignStep claims ONE due running campaign and drains
 // at most one item. Returns false when nothing was due.
 func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error) {
-	q := store.New(e.pool)
+	q := store.New(e.wrapTx(e.pool))
 	campaign, err := q.ClaimDueReplayCampaign(ctx)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -97,7 +97,7 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 
 	// A paused workflow holds the campaign at this item until it resumes, and
 	// so does a pause state that cannot be read. No row means an ad-hoc run.
-	status, err := store.New(e.wrapTx(e.pool)).GetDeadLetterWorkflowStatus(ctx, store.GetDeadLetterWorkflowStatusParams{
+	status, err := q.GetDeadLetterWorkflowStatus(ctx, store.GetDeadLetterWorkflowStatusParams{
 		OrgID: campaign.OrgID, ID: item.DeadLetterID,
 	})
 	if (err == nil && status != "active") || (err != nil && !errors.Is(err, pgx.ErrNoRows)) {

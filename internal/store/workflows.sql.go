@@ -1085,7 +1085,7 @@ func (q *Queries) InsertWorkflow(ctx context.Context, arg InsertWorkflowParams) 
 const insertWorkflowIfAbsent = `-- name: InsertWorkflowIfAbsent :execrows
 INSERT INTO workflows (id, org_id, name, created_by)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type InsertWorkflowIfAbsentParams struct {

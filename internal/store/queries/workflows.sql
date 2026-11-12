@@ -118,7 +118,7 @@ SELECT deleted_at FROM workflows WHERE org_id = $1 AND id = $2;
 -- name: InsertWorkflowIfAbsent :execrows
 INSERT INTO workflows (id, org_id, name, created_by)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- The trash list: the same list-row shape with deletedAt populated,
 -- ordered by (deleted_at, id) DESC with its own keyset.

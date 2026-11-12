@@ -25,6 +25,8 @@ func TestNeedsYouToolApprovalsUseTheOrganizationIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	// ANALYZE writes row estimates in place, so the rollback alone would keep the seeded ones.
+	defer func() { _, _ = pool.Exec(ctx, `ANALYZE runs, tool_approval_requests`) }()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
