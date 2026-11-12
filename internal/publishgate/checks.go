@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -338,4 +339,68 @@ func ReachesOut(wf *domain.Workflow) []string {
 		ids = append(ids, "/outputs")
 	}
 	return ids
+}
+
+// Shrink is what a draft takes away from the live version: triggers removed,
+// added or reconfigured, and steps or declared outputs removed.
+type Shrink struct {
+	TriggersChanged []string `json:"triggersChanged,omitempty"`
+	StepsRemoved    []string `json:"stepsRemoved,omitempty"`
+	OutputsRemoved  []string `json:"outputsRemoved,omitempty"`
+}
+
+// Reasons maps the shrink to publish request reasons.
+func (s Shrink) Reasons() []string {
+	reasons := []string{}
+	if len(s.TriggersChanged) > 0 {
+		reasons = append(reasons, "triggers_changed")
+	}
+	if len(s.StepsRemoved) > 0 {
+		reasons = append(reasons, "steps_removed")
+	}
+	if len(s.OutputsRemoved) > 0 {
+		reasons = append(reasons, "outputs_removed")
+	}
+	return reasons
+}
+
+// Empty reports a purely additive change.
+func (s Shrink) Empty() bool {
+	return len(s.TriggersChanged) == 0 && len(s.StepsRemoved) == 0 && len(s.OutputsRemoved) == 0
+}
+
+// Shrinks compares a draft with the live version it would replace.
+func Shrinks(live, draft *domain.Workflow) Shrink {
+	drafted := map[string]domain.Node{}
+	for _, node := range draft.Nodes {
+		drafted[node.ID] = node
+	}
+	shrink := Shrink{}
+	liveTriggers := map[string]bool{}
+	for _, node := range live.Nodes {
+		next, kept := drafted[node.ID]
+		if triggerTypes[node.Type] {
+			liveTriggers[node.ID] = true
+			if !kept || next.Type != node.Type || !reflect.DeepEqual(normalize(next.Config), normalize(node.Config)) {
+				shrink.TriggersChanged = append(shrink.TriggersChanged, node.ID)
+			}
+			continue
+		}
+		if !kept {
+			shrink.StepsRemoved = append(shrink.StepsRemoved, node.ID)
+		}
+	}
+	for _, node := range draft.Nodes {
+		if triggerTypes[node.Type] && !liveTriggers[node.ID] {
+			shrink.TriggersChanged = append(shrink.TriggersChanged, node.ID)
+		}
+	}
+	for _, key := range sortedKeys(live.Outputs) {
+		if _, kept := draft.Outputs[key]; !kept {
+			shrink.OutputsRemoved = append(shrink.OutputsRemoved, key)
+		}
+	}
+	slices.Sort(shrink.TriggersChanged)
+	slices.Sort(shrink.StepsRemoved)
+	return shrink
 }
