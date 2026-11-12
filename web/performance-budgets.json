@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 640.9,
+  "artifactGzipKiB": 651.7,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 593.8
+    "maxGzipKiB": 603.8
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -81,6 +81,10 @@
     "ActivityRecoveryDetail.js": 2.43,
     "ActivityWorkspace.css": 1.02,
     "ActivityWorkspace.js": 4.14,
+    "agent-actors.js": 0.54,
+    "AgentClientDialogs.js": 3.63,
+    "AgentClientsPanel.css": 1.1,
+    "AgentClientsPanel.js": 3.1,
     "AiGuidanceSettingsPanel.js": 1.31,
     "AlertPoliciesPanel.css": 0.39,
     "AlertPoliciesPanel.js": 4.24,
@@ -124,7 +128,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 5.86,
+    "OperationsPage.js": 6.5,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,
@@ -162,7 +166,7 @@
     "SlackInteractionsPanel.js": 2.56,
     "SnippetInsertMenu.js": 3.92,
     "SolutionPacksPanel.css": 0.43,
-    "SolutionPacksPanel.js": 2.33,
+    "SolutionPacksPanel.js": 2.57,
     "supabase-runtime.js": 21.13,
     "ToolInputFields.js": 1.51,
     "UpstreamHealthPanel.js": 2.39,
