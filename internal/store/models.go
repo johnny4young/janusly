@@ -1188,6 +1188,7 @@ type WorkflowDraft struct {
 	Digest        string
 	CreatedBy     string
 	CreatedAt     time.Time
+	Origin        json.RawMessage
 }
 
 type WorkflowImprovement struct {

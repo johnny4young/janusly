@@ -1798,6 +1798,7 @@ CREATE TABLE public.workflow_drafts (
     digest text NOT NULL,
     created_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    origin jsonb,
     CONSTRAINT workflow_drafts_digest_check CHECK ((char_length(digest) = 64))
 );
 
@@ -4015,6 +4016,13 @@ CREATE UNIQUE INDEX workflow_drafts_digest_idx ON public.workflow_drafts USING b
 --
 
 CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts USING btree (org_id, created_at DESC, id DESC);
+
+
+--
+-- Name: workflow_drafts_origin_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflow_drafts_origin_session_idx ON public.workflow_drafts USING btree (org_id, ((origin ->> 'sessionId'::text))) WHERE ((origin ->> 'sessionId'::text) IS NOT NULL);
 
 
 --

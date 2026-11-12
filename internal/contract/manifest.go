@@ -350,6 +350,8 @@ var Routes = []Route{
 		Response: agentSessionList},
 	{Method: "GET", Path: "/v1/agent-sessions/{sessionId}/map", Summary: "Agent lanes, totals and Janusly references of one observed session",
 		Response: agentSessionMap},
+	{Method: "POST", Path: "/v1/agent-sessions/{sessionId}/draft", Summary: "Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses",
+		Response: agentSessionDraft},
 	{Method: "POST", Path: "/v1/agent-sessions/gates/{gateId}/decide", Summary: "Approve or deny a tool call an agent's hook is holding",
 		Request:  closedObj(map[string]any{"decision": strEnum([]string{"approve", "deny"}), "reason": str()}, "decision"),
 		Response: agentGateDecision},

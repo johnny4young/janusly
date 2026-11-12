@@ -332,6 +332,7 @@ func manifestConformanceRows() map[string]conformanceRow {
 		"GET /v1/runs/{runId}/map":                      onlyIntegration(),
 		"GET /v1/needs-you":                             onlyIntegration(),
 		"GET /v1/agent-sessions":                        onlyIntegration(),
+		"POST /v1/agent-sessions/{sessionId}/draft":     onlyIntegration(),
 		"POST /v1/agent-sessions/gates/{gateId}/decide": onlyIntegration(),
 		"GET /v1/agent-sessions/{sessionId}/map":        onlyIntegration(),
 		"GET /v1/operations/brief": {integration: true, fixtures: func(t *testing.T) []any {

@@ -591,9 +591,43 @@ Rules:
 - The second-person rule keys on who created the client, not on who runs the
   agent with its token.
 
-- **Save as workflow.** An observed session converts into a draft: subagents
-  become `agent` nodes, overlapping ones run in parallel. It enters the
-  publish gate like any agent draft; it is a starting point, not a replay.
+**Save as workflow** (`internal/sessiondraft`). An observed session becomes a
+draft of a new workflow: a starting point, not a replay.
+
+- **What converts.** Only MCP tool calls. Each agent that made at least one
+  becomes an `agent` step, in the order they started; agents whose activity
+  overlapped run between a `parallel_fork` and its `join`. Local tools (a
+  shell, file edits) have no workflow equivalent, and `mcp__janusly__*` calls
+  are the authoring, not the work: both are left out. A session with no MCP
+  tool calls does not convert (`422 agent_session_not_convertible`).
+- **Said before converting.** The session map carries `conversion`
+  (`convertibleSteps` of `totalSteps`, the MCP servers used) and the screen
+  states it above the button.
+- **What stays open.** A session shows what ran, not what it was for. Each
+  agent's goal and the workflow's outputs are written as
+  `observed_placeholder: …` values, and the publish gate reports every value
+  that still contains the marker as an `observed_placeholder` check with its
+  path, so `workflows.qualify` fails until they are replaced. The check is a
+  reminder, not a boundary: publication still needs a person.
+- **Observed names are untrusted.** Tool names, agent types and the project
+  come from the agent's hooks. They never enter the goal; an agent type or
+  project is used as a label or in the name only when it is plain text, and
+  the observed tools travel in the response, not in the document.
+- **One draft per session and author.** Converting again returns the first
+  draft. The draft is readable like any draft in the organization, so it
+  shows the session's agent structure to whoever can read drafts. The draft has no fixtures (`fixtures_missing`), and
+  the existing write, credential and recovery checks apply unchanged.
+- **Entry points.** A person: `POST /v1/agent-sessions/{id}/draft` (editor
+  rank, `workflows.write`, plus the session read permissions). An agent: the
+  MCP tool `sessions.to_draft` (`propose` capability), only for sessions its
+  own client reported; another client's session reads exactly like a missing
+  one. The stdio operator also needs `agents.read` and `runs.read`. Both store an ordinary draft with
+  `origin: {kind: "observed_session", sessionId}`, audit
+  `agent_session.converted`, and return the observed tools and a suggested
+  timeout (twice the 95th percentile of the observed calls) per agent.
+- **After that, nothing special.** `workflows.test`, `workflows.qualify`,
+  `workflows.publish`. A new workflow has no published version, so publishing
+  always opens a publish request for a person.
 
 The run map is measured with five people answering what runs, what is stuck,
 what needs them and what it has cost, each within 30 seconds.

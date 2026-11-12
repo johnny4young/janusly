@@ -75,6 +75,43 @@
       "AgentSessionMap": {
         "additionalProperties": false,
         "properties": {
+          "canConvert": {
+            "type": "boolean"
+          },
+          "conversion": {
+            "additionalProperties": false,
+            "properties": {
+              "agents": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "convertible": {
+                "type": "boolean"
+              },
+              "convertibleSteps": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mcpServers": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "totalSteps": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "totalSteps",
+              "convertibleSteps",
+              "agents",
+              "mcpServers",
+              "convertible"
+            ],
+            "type": "object"
+          },
           "gates": {
             "items": {
               "additionalProperties": false,
@@ -272,7 +309,9 @@
           "totals",
           "liveSubagents",
           "refs",
-          "gates"
+          "gates",
+          "conversion",
+          "canConvert"
         ],
         "type": "object"
       },
@@ -7334,6 +7373,146 @@
           }
         },
         "summary": "Approve or deny a tool call an agent's hook is holding"
+      }
+    },
+    "/agent-sessions/{sessionId}/draft": {
+      "post": {
+        "operationId": "post_v1_agent-sessions_sessionId_draft",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "agents": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "agentType": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "suggestedTimeoutMs": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tools": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "nodeId",
+                                  "tools"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "conversion": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "agents": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "convertible": {
+                                  "type": "boolean"
+                                },
+                                "convertibleSteps": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "mcpServers": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "totalSteps": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "totalSteps",
+                                "convertibleSteps",
+                                "agents",
+                                "mcpServers",
+                                "convertible"
+                              ],
+                              "type": "object"
+                            },
+                            "digest": {
+                              "type": "string"
+                            },
+                            "draftId": {
+                              "type": "string"
+                            },
+                            "mcpServers": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "next": {
+                              "type": "string"
+                            },
+                            "placeholders": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "draftId",
+                            "workflowId",
+                            "digest",
+                            "conversion",
+                            "agents",
+                            "mcpServers",
+                            "placeholders",
+                            "next"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses"
       }
     },
     "/agent-sessions/{sessionId}/map": {

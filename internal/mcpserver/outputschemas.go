@@ -16,6 +16,12 @@ var outputSchemas = map[string]*jsonschema.Schema{
 		"newWorkflow": {kind: "boolean", required: true}, "fixtures": {kind: "integer", required: true},
 		"validation": {kind: "object", required: true}, "next": {kind: "string"},
 	}),
+	"sessions.to_draft": outputObject(fields{
+		"draftId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
+		"digest": {kind: "string", required: true}, "conversion": {kind: "object", required: true},
+		"agents": {kind: "array", required: true}, "mcpServers": {kind: "array", required: true},
+		"placeholders": {kind: "array", required: true}, "next": {kind: "string"},
+	}),
 	"drafts.get": outputObject(fields{
 		"draftId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
 		"digest": {kind: "string", required: true}, "baseVersionId": {kind: "string"},

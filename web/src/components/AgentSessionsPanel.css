@@ -77,3 +77,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.agent-sessions__convert {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.agent-sessions__convert p { margin: 0; }

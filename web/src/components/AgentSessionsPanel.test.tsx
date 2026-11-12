@@ -30,6 +30,8 @@ const detail: AgentSessionMap = {
   liveSubagents: 1,
   refs: { workflowIds: [], draftIds: [], runIds: ['run_8c1'] },
   gates: [],
+  conversion: { totalSteps: 3, convertibleSteps: 2, agents: 1, mcpServers: ['notion'], convertible: true },
+  canConvert: true,
 }
 
 beforeEach(() => {
@@ -121,5 +123,33 @@ describe('<AgentSessionsPanel />', () => {
     fireEvent.click(within(cards[0]!).getByRole('button', { name: 'Approve' }))
     await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([path, init]) =>
       path === '/v1/agent-sessions/gates/gate-1/decide' && String((init as RequestInit).body).includes('"approve"'))).toBe(true))
+  })
+
+  it('says what converts before saving, and saves a draft with its open placeholders', async () => {
+    window.history.replaceState(null, '', '/#/multiAgent/sessions/sess-1')
+    vi.mocked(api).mockImplementation(async (path: string) => path.endsWith('/draft')
+      ? { draftId: 'draft_1', workflowId: 'wf_1', digest: 'd', conversion: detail.conversion, agents: [], mcpServers: ['notion'],
+        placeholders: ['/nodes/agent_1/config/goal', '/outputs/result'], next: '' }
+      : detail)
+    render(<AgentSessionsPanel />)
+    const card = await screen.findByTestId('agent-session-convert')
+    expect(within(card).getByText(/2 of 3 tool calls can become workflow steps\. Only MCP tool calls convert/)).toBeVisible()
+    fireEvent.click(within(card).getByRole('button', { name: 'Save as workflow draft' }))
+    expect(await screen.findByTestId('agent-session-draft')).toHaveTextContent('Draft saved with 2 values to fill in before it can qualify. draft_1')
+    expect(within(card).queryByRole('button')).toBeNull()
+  })
+
+  it('offers no conversion for a coding session or to someone who cannot write workflows', async () => {
+    window.history.replaceState(null, '', '/#/multiAgent/sessions/sess-1')
+    const none = { totalSteps: 4, convertibleSteps: 0, agents: 0, mcpServers: [], convertible: false }
+    vi.mocked(api).mockResolvedValueOnce({ ...detail, conversion: none })
+    const first = render(<AgentSessionsPanel />)
+    const card = await screen.findByTestId('agent-session-convert')
+    expect(within(card).getByText('Nothing here can become a workflow: the session used no MCP tools.')).toBeVisible()
+    expect(within(card).queryByRole('button')).toBeNull()
+    first.unmount()
+    vi.mocked(api).mockResolvedValueOnce({ ...detail, session: { ...summary, status: 'ended' }, canConvert: false })
+    render(<AgentSessionsPanel />)
+    expect(within(await screen.findByTestId('agent-session-convert')).queryByRole('button')).toBeNull()
   })
 })
