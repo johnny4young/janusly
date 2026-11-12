@@ -58,17 +58,18 @@ func TestCircuitBreakerLoop(t *testing.T) {
 		}
 		h.waitRun(extractRunID(t, res), "failed")
 	}
+	// The trip commits after the run's terminal status, so wait for it.
 	var status, reason string
-	deadline := 50
-	for ; deadline > 0; deadline-- {
-		_ = pool.QueryRow(ctx, `SELECT status, COALESCE(paused_reason,'') FROM workflows
+	var scanErr error
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		scanErr = pool.QueryRow(ctx, `SELECT status, COALESCE(paused_reason,'') FROM workflows
 			WHERE org_id = $1 AND id = $2`, h.org, wfID).Scan(&status, &reason)
-		if status == "paused_circuit_breaker" {
+		if scanErr == nil && status == "paused_circuit_breaker" {
 			break
 		}
 	}
 	if status != "paused_circuit_breaker" || reason == "" {
-		t.Fatalf("streak must trip the pause: %s/%q", status, reason)
+		t.Fatalf("streak must trip the pause: %s/%q (last read: %v)", status, reason, scanErr)
 	}
 	var trips int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1

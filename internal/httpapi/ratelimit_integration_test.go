@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,6 +25,20 @@ func resetRateWindow(t *testing.T, name string) {
 	}
 	clear()
 	t.Cleanup(func() { clear(); pool.Close() })
+}
+
+// frozenRateLimitClock pins the fixed-window limiter to the last millisecond
+// of a future window, so a test's requests never straddle a window boundary.
+func frozenRateLimitClock(options V1ServerOptions) V1ServerOptions {
+	now := time.Now().UTC().Truncate(time.Minute).Add(3*time.Minute - time.Millisecond)
+	options.rateLimitNow = func() time.Time { return now }
+	return options
+}
+
+func frozenClockHarness(t *testing.T, startWorkers bool) *apiHarness {
+	options := defaultV1ServerOptionsForTest()
+	options.Logger = quietTestLogger()
+	return newAPIHarnessWithOptions(t, startWorkers, frozenRateLimitClock(options))
 }
 
 func countRows(t *testing.T, table string) int64 {
@@ -44,7 +59,7 @@ func countRows(t *testing.T, table string) int64 {
 // an unauthenticated caller could fill the table. The bucket now trips before
 // the handler touches storage.
 func TestSsoStartIsRateLimitedPerIP(t *testing.T) {
-	h := newAPIHarnessWithoutWorkers(t)
+	h := frozenClockHarness(t, false)
 	resetRateWindow(t, ssoStartLimit.Name)
 	path := "/auth/sso/start?orgId=" + h.org
 	for i := 0; i < ssoStartLimit.Max; i++ {
@@ -70,7 +85,7 @@ func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
 	const perMinute = 5
 	options := defaultV1ServerOptionsForTest()
 	options.StartRateLimitPerMinute = perMinute
-	h := newAPIHarnessWithOptions(t, false, options)
+	h := newAPIHarnessWithOptions(t, false, frozenRateLimitClock(options))
 	for i := 0; i < perMinute; i++ {
 		res := h.call("POST", "/v1/start", map[string]any{}, "")
 		if res.status == http.StatusTooManyRequests {
@@ -89,7 +104,7 @@ func TestStartRunIsRateLimitedPerOrg(t *testing.T) {
 // The public status page is unauthenticated; the IP bucket keeps a token
 // scan from turning into three queries per request forever.
 func TestPublicStatusPageIsRateLimitedPerIP(t *testing.T) {
-	h := newAPIHarnessWithoutWorkers(t)
+	h := frozenClockHarness(t, false)
 	resetRateWindow(t, publicStatusPageLimit.Name)
 	path := "/public/status/" + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	for i := 0; i < publicStatusPageLimit.Max; i++ {
