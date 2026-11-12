@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- While development auth headers are accepted (no identity provider outside
+  production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
+  `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless
+  `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true`. Those headers let any caller act as
+  any user, and before this change an unset `JANUSLY_HTTP_HOST` exposed them on
+  every interface. Docker Compose sets both values for its container, whose
+  port is published on the host's loopback only.
 - The runs list no longer shows another organization's workflow name. A run
   whose document reused a workflow id saved in a different organization took
   that workflow's name, in the API and in the MCP `runs.list`; the name now

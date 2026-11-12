@@ -211,7 +211,7 @@ func run() error {
 	// Process-global LLM telemetry recorder, registered before any
 	// surface that could fire an LLM call.
 	usage.SetRecorder(usage.NewDBRecorder(pool))
-	logger.Info("boot", "port", cfg.Port, "internal_host", cfg.InternalHost,
+	logger.Info("boot", "http_host", cfg.HTTPHost, "port", cfg.Port, "internal_host", cfg.InternalHost,
 		"internal_port", cfg.InternalPort,
 		"build_verified", identity.Verified, "build_commit", identity.Commit,
 		"build_tree", identity.Tree, "artifact_sha256", identity.ArtifactSHA256)

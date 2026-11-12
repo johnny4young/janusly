@@ -181,7 +181,7 @@ var errProductionDevHeaders = devHeadersBootError{}
 
 // NewResolver builds the chain over the pool.
 func NewResolver(pool *pgxpool.Pool, cfg Config) *Resolver {
-	allowDev := cfg.AllowDevHeaders || (cfg.SupabaseURL == "" && !cfg.Production)
+	allowDev := config.DevAuthHeadersActive(cfg.SupabaseURL != "", cfg.Production, cfg.AllowDevHeaders)
 	r := &Resolver{
 		pool:            pool,
 		supabaseURL:     cfg.SupabaseURL,

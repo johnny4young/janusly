@@ -41,7 +41,7 @@ type Config struct {
 	// Port serves the public API.
 	Port int
 	// HTTPHost is the public listener's bind address; empty listens on every
-	// interface.
+	// interface, and on loopback while development auth headers are accepted.
 	HTTPHost string
 	// InternalPort serves Prometheus metrics and pprof; never exposed publicly.
 	InternalPort int
@@ -76,6 +76,13 @@ func IsProduction(getenv func(string) string) bool {
 		getenv = os.Getenv
 	}
 	return strings.EqualFold(strings.TrimSpace(getenv("JANUSLY_ENV")), "production")
+}
+
+// DevAuthHeadersActive mirrors the auth resolver: forgeable x-org-id and
+// x-user-id headers are accepted when explicitly allowed, or outside
+// production without an identity provider.
+func DevAuthHeadersActive(identityProvider, production, explicit bool) bool {
+	return explicit || (!identityProvider && !production)
 }
 
 // defaultDatabaseURL matches the compose project in this directory.
@@ -176,6 +183,17 @@ func Load(getenv func(string) string) (Config, error) {
 	case "", "127.0.0.1", "0.0.0.0", "::1", "::":
 	default:
 		problems = append(problems, "JANUSLY_HTTP_HOST must be empty, 127.0.0.1, 0.0.0.0, ::1, or ::")
+	}
+	if DevAuthHeadersActive(getenv("SUPABASE_URL") != "", production, getenv("ALLOW_DEV_AUTH_HEADERS") == "true") {
+		switch cfg.HTTPHost {
+		case "":
+			cfg.HTTPHost = "127.0.0.1"
+		case "0.0.0.0", "::":
+			if getenv("ALLOW_DEV_AUTH_HEADERS_ON_NETWORK") != "true" {
+				problems = append(problems, "development auth headers let any caller act as any user; listening on "+
+					cfg.HTTPHost+" requires ALLOW_DEV_AUTH_HEADERS_ON_NETWORK=true")
+			}
+		}
 	}
 	switch cfg.InternalHost {
 	case "127.0.0.1", "0.0.0.0", "::1", "::":
