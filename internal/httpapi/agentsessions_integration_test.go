@@ -356,12 +356,25 @@ func TestAgentSessionConvertsIntoADraftThatTheGateRefusesUntilFilledIn(t *testin
 		t.Fatal(err)
 	}
 	if !strings.Contains(origin, s.id) || !strings.Contains(origin, "observed_session") || versions != 0 || audited != 1 ||
-		!strings.Contains(document, "observed_placeholder:") || !strings.Contains(document, "mcp__notion__search") ||
-		strings.Contains(document, "Bash") || strings.Contains(document, "janusly__") {
+		!strings.Contains(document, "observed_placeholder:") || strings.Contains(document, "mcp__") ||
+		strings.Contains(document, "Bash") || !strings.Contains(fmt.Sprint(created.body["agents"]), "mcp__notion__search") {
 		t.Fatalf("stored draft: origin %s versions %d audited %d document %s", origin, versions, audited, document)
 	}
 
+	// Converting again returns the same draft: no second workflow, no second audit row.
+	again := h.call("POST", "/agent-sessions/"+s.id+"/draft", nil, "")
+	var drafts int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM workflow_drafts WHERE org_id = $1 AND origin->>'sessionId' = $2`, h.org, s.id).Scan(&drafts); err != nil {
+		t.Fatal(err)
+	}
+	if again.status != 200 || again.body["draftId"] != draftID || drafts != 1 {
+		t.Fatalf("second conversion: %d %v (%d drafts)", again.status, again.body["draftId"], drafts)
+	}
+
 	// A session with no MCP tool calls says so instead of producing an empty workflow.
+	if _, err := pool.Exec(t.Context(), `DELETE FROM workflow_drafts WHERE org_id = $1 AND id = $2`, h.org, draftID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE agent_session_events SET tool_kind = 'builtin', mcp_server = NULL WHERE session_id = $1`, s.id); err != nil {
 		t.Fatal(err)
 	}

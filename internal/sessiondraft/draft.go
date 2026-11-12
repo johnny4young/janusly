@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/johnny4young/janusly/internal/agentsession"
@@ -88,11 +88,18 @@ func observe(events []agentsession.EventRow) (agents []*observedAgent, servers [
 		}
 		agent := byID[event.AgentID]
 		if agent == nil {
-			agent = &observedAgent{id: event.AgentID, first: event.At}
+			agent = &observedAgent{id: event.AgentID, first: event.At, last: event.At}
 			byID[event.AgentID] = agent
 			agents = append(agents, agent)
 		}
-		agent.last, agent.steps = event.At, agent.steps+1
+		// Event times are the reporter's: take the span, not the arrival order.
+		if event.At.Before(agent.first) {
+			agent.first = event.At
+		}
+		if event.At.After(agent.last) {
+			agent.last = event.At
+		}
+		agent.steps++
 		if !slices.Contains(agent.tools, event.Tool) && len(agent.tools) < maxListedTools {
 			agent.tools = append(agent.tools, event.Tool)
 		}
@@ -114,7 +121,8 @@ func observe(events []agentsession.EventRow) (agents []*observedAgent, servers [
 // Convertibility counts what a draft would keep.
 func Convertibility(events []agentsession.EventRow) Conversion {
 	agents, servers, total := observe(events)
-	out := Conversion{TotalSteps: total, Agents: len(agents), MCPServers: servers, Convertible: len(agents) > 0}
+	out := Conversion{TotalSteps: total, Agents: len(agents), MCPServers: servers,
+		Convertible: len(agents) > 0 && len(agents) <= MaxDraftAgents}
 	if out.MCPServers == nil {
 		out.MCPServers = []string{}
 	}
@@ -177,13 +185,11 @@ func BuildDraft(workflowID, name string, events []agentsession.EventRow) (Draft,
 		for _, agent := range wave {
 			index++
 			nodeID := fmt.Sprintf("agent_%d", index)
-			label := agent.agentType
-			if label == "" {
-				label = fmt.Sprintf("Agent %d", index)
-			}
+			label := safeName(agent.agentType, fmt.Sprintf("Agent %d", index))
 			goalPath := "/nodes/" + nodeID + "/config/goal"
 			nodes = append(nodes, map[string]any{"id": nodeID, "type": "agent", "label": label, "config": map[string]any{
-				"goal": PlaceholderPrefix + " say what this agent must achieve. In the session it called " + strings.Join(agent.tools, ", ") + ".",
+				// Observed names are the reporter's text: they stay out of the goal.
+				"goal": PlaceholderPrefix + " say what this agent must achieve.",
 			}})
 			draft.Placeholders = append(draft.Placeholders, goalPath)
 			draft.Agents = append(draft.Agents, DraftAgent{NodeID: nodeID, AgentType: agent.agentType, Tools: agent.tools,
@@ -211,10 +217,21 @@ func BuildDraft(workflowID, name string, events []agentsession.EventRow) (Draft,
 	if err != nil {
 		return Draft{}, err
 	}
-	if wf, issues := domain.Parse(raw); wf == nil {
-		return Draft{}, fmt.Errorf("drafted workflow does not parse: %v", issues)
+	if wf, _ := domain.Parse(raw); wf == nil {
+		return Draft{}, ErrNotConvertible
 	}
 	return draft, nil
+}
+
+var plainName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _.-]{0,59}$`)
+
+// safeName keeps an observed name only when it is plain text that cannot be
+// read as a template or an instruction; anything else becomes fallback.
+func safeName(observed, fallback string) string {
+	if plainName.MatchString(observed) {
+		return observed
+	}
+	return fallback
 }
 
 // suggestedTimeout is twice the 95th percentile of the observed call durations.

@@ -4019,6 +4019,13 @@ CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts USING btr
 
 
 --
+-- Name: workflow_drafts_origin_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflow_drafts_origin_session_idx ON public.workflow_drafts USING btree (org_id, ((origin ->> 'sessionId'::text))) WHERE ((origin ->> 'sessionId'::text) IS NOT NULL);
+
+
+--
 -- Name: workflow_improvements_org_workflow_idx; Type: INDEX; Schema: public; Owner: -
 --
 

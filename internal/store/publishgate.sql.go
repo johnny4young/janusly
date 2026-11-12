@@ -248,6 +248,39 @@ func (q *Queries) GetWorkflowDraftByDigest(ctx context.Context, arg GetWorkflowD
 	return i, err
 }
 
+const getWorkflowDraftByOrigin = `-- name: GetWorkflowDraftByOrigin :one
+SELECT id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, created_at, origin FROM workflow_drafts
+WHERE org_id = $1 AND created_by = $2
+  AND origin->>'sessionId' = $3::text
+ORDER BY created_at
+LIMIT 1
+`
+
+type GetWorkflowDraftByOriginParams struct {
+	OrgID     string
+	CreatedBy string
+	SessionID string
+}
+
+// The draft a person or agent already made from an observed session.
+func (q *Queries) GetWorkflowDraftByOrigin(ctx context.Context, arg GetWorkflowDraftByOriginParams) (WorkflowDraft, error) {
+	row := q.db.QueryRow(ctx, getWorkflowDraftByOrigin, arg.OrgID, arg.CreatedBy, arg.SessionID)
+	var i WorkflowDraft
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.WorkflowID,
+		&i.BaseVersionID,
+		&i.Document,
+		&i.Fixtures,
+		&i.Digest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Origin,
+	)
+	return i, err
+}
+
 const insertDraftQualification = `-- name: InsertDraftQualification :one
 INSERT INTO draft_qualifications (id, org_id, draft_id, digest, status, checks, fixture_runs, created_by, completed_at)
 VALUES ($1, $2, $3, $4, $5,

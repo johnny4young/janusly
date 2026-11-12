@@ -99,12 +99,26 @@ func SaveDraft(ctx context.Context, pool *pgxpool.Pool, in SaveInput) (SavedDraf
 		return SavedDraft{}, err
 	}
 	name := "Observed session"
-	if session.Project.Valid && session.Project.String != "" {
-		name = "Observed session in " + session.Project.String
+	if project := safeName(session.Project.String, ""); project != "" {
+		name = "Observed session in " + project
 	}
-	built, err := BuildDraft("wf_"+in.NewID(), name, events)
+	// One draft per session and author: a second call returns the first.
+	workflowID := "wf_" + in.NewID()
+	existing, err := q.GetWorkflowDraftByOrigin(ctx, store.GetWorkflowDraftByOriginParams{
+		OrgID: in.OrgID, CreatedBy: in.CreatedBy, SessionID: session.ID,
+	})
+	switch {
+	case err == nil:
+		workflowID = existing.WorkflowID
+	case !errors.Is(err, pgx.ErrNoRows):
+		return SavedDraft{}, err
+	}
+	built, err := BuildDraft(workflowID, name, events)
 	if err != nil {
 		return SavedDraft{}, err
+	}
+	if existing.ID != "" {
+		return SavedDraft{Draft: existing, Conversion: Convertibility(events), Built: built, Unchanged: true}, nil
 	}
 	raw, err := json.Marshal(built.Document)
 	if err != nil {

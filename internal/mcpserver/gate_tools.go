@@ -319,6 +319,9 @@ func (d Deps) sessionToDraft(ctx context.Context, args sessionToDraftArgs) (*mcp
 		}
 		// An agent converts only what its own client reported.
 		in.OnlyClientID = principal.ClientID
+	} else if !d.Permissions["agents.read"] || !d.Permissions["runs.read"] {
+		// The operator reaches any session, so it needs what the people route needs.
+		return expected("sessions.to_draft also requires agents.read and runs.read")
 	}
 	saved, err := sessiondraft.SaveDraft(ctx, d.Pool, in)
 	switch {
@@ -328,6 +331,9 @@ func (d Deps) sessionToDraft(ctx context.Context, args sessionToDraftArgs) (*mcp
 		return gateError("not_convertible", err.Error(), "/sessionId", "Only sessions that called MCP tools convert; shell and file tools have no workflow equivalent.")
 	case err != nil:
 		return nil, nil, err
+	}
+	if saved.Unchanged {
+		return ok(sessiondraft.View(saved, "this session already has a draft; continue with drafts.get and drafts.save (same workflowId)"))
 	}
 	d.Audit.Write(ctx, d.Pool, d.auditContext(), sessiondraft.ConvertedAction, audit.Options{
 		TargetType: "agent_session", TargetID: args.SessionID,

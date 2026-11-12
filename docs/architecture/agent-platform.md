@@ -605,15 +605,23 @@ draft of a new workflow: a starting point, not a replay.
   states it above the button.
 - **What stays open.** A session shows what ran, not what it was for. Each
   agent's goal and the workflow's outputs are written as
-  `observed_placeholder: …` values, and the publish gate reports every one as
-  an `observed_placeholder` check with its path, so `workflows.qualify` fails
-  until they are replaced. The draft has no fixtures (`fixtures_missing`), and
+  `observed_placeholder: …` values, and the publish gate reports every value
+  that still contains the marker as an `observed_placeholder` check with its
+  path, so `workflows.qualify` fails until they are replaced. The check is a
+  reminder, not a boundary: publication still needs a person.
+- **Observed names are untrusted.** Tool names, agent types and the project
+  come from the agent's hooks. They never enter the goal; an agent type or
+  project is used as a label or in the name only when it is plain text, and
+  the observed tools travel in the response, not in the document.
+- **One draft per session and author.** Converting again returns the first
+  draft. The draft is readable like any draft in the organization, so it
+  shows the session's agent structure to whoever can read drafts. The draft has no fixtures (`fixtures_missing`), and
   the existing write, credential and recovery checks apply unchanged.
 - **Entry points.** A person: `POST /v1/agent-sessions/{id}/draft` (editor
   rank, `workflows.write`, plus the session read permissions). An agent: the
   MCP tool `sessions.to_draft` (`propose` capability), only for sessions its
   own client reported; another client's session reads exactly like a missing
-  one. Both store an ordinary draft with
+  one. The stdio operator also needs `agents.read` and `runs.read`. Both store an ordinary draft with
   `origin: {kind: "observed_session", sessionId}`, audit
   `agent_session.converted`, and return the observed tools and a suggested
   timeout (twice the 95th percentile of the observed calls) per agent.

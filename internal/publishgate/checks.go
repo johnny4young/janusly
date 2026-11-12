@@ -261,7 +261,7 @@ const ObservedPlaceholderPrefix = "observed_placeholder:"
 func placeholderPaths(value any, path string) []string {
 	switch typed := value.(type) {
 	case string:
-		if strings.HasPrefix(typed, ObservedPlaceholderPrefix) {
+		if strings.Contains(strings.ToLower(typed), ObservedPlaceholderPrefix) {
 			return []string{path}
 		}
 	case []any:

@@ -97,7 +97,7 @@ func holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission s
 }
 
 func forbidden() httpkit.Result {
-	return httpkit.Error(http.StatusForbidden, "server_request_failed", "Forbidden: requires permission agents.read", nil)
+	return httpkit.Error(http.StatusForbidden, "server_request_failed", "Forbidden: requires permissions runs.read and agents.read", nil)
 }
 
 func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
@@ -265,6 +265,9 @@ func (s *service) toDraft(r *http.Request, rc httpkit.Request) httpkit.Result {
 		return httpkit.Error(http.StatusUnprocessableEntity, "agent_session_not_convertible", err.Error(), nil)
 	case err != nil:
 		return internalError()
+	}
+	if saved.Unchanged {
+		return httpkit.OK(sessiondraft.View(saved, ""))
 	}
 	s.audit.Write(r.Context(), s.pool, rc.Auth, sessiondraft.ConvertedAction, audit.Options{
 		TargetType: "agent_session", TargetID: id,
