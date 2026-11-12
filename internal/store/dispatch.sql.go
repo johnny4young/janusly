@@ -27,7 +27,7 @@ UPDATE trigger_events SET backfill_claim_token = $1, backfill_claimed_at = now()
 WHERE trigger_events.id IN (
   SELECT te.id FROM trigger_events te
   WHERE te.org_id = $2 AND te.workflow_id = $3 AND te.status = 'buffered'
-    AND te.backfill_claim_token IS NULL
+    AND (te.backfill_claim_token IS NULL OR te.backfill_claimed_at < now() - interval '5 minutes')
     AND EXISTS (SELECT 1 FROM workflows w WHERE w.org_id = te.org_id AND w.id = te.workflow_id
                 AND w.status = 'active' AND w.deleted_at IS NULL)
   ORDER BY te.created_at ASC
@@ -773,6 +773,25 @@ func (q *Queries) QueueRunNode(ctx context.Context, arg QueueRunNodeParams) (int
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const releaseBufferedTriggerEventClaims = `-- name: ReleaseBufferedTriggerEventClaims :exec
+UPDATE trigger_events SET backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = $1 AND status = 'buffered'
+  AND backfill_claim_token = $2 AND id = ANY($3::text[])
+`
+
+type ReleaseBufferedTriggerEventClaimsParams struct {
+	OrgID      string
+	ClaimToken pgtype.Text
+	Ids        []string
+}
+
+// Returns events a backfill page did not start to the buffer; the token keeps
+// a late releaser from clearing a newer claim.
+func (q *Queries) ReleaseBufferedTriggerEventClaims(ctx context.Context, arg ReleaseBufferedTriggerEventClaimsParams) error {
+	_, err := q.db.Exec(ctx, releaseBufferedTriggerEventClaims, arg.OrgID, arg.ClaimToken, arg.Ids)
+	return err
 }
 
 const releaseReplayCampaignItem = `-- name: ReleaseReplayCampaignItem :exec
