@@ -2714,6 +2714,13 @@ CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_eve
 
 
 --
+-- Name: agent_session_events_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_events_run_idx ON public.agent_session_events USING btree (org_id, ((janusly_refs ->> 'runId'::text))) WHERE ((janusly_refs ->> 'runId'::text) IS NOT NULL);
+
+
+--
 -- Name: agent_session_events_session_idx; Type: INDEX; Schema: public; Owner: -
 --
 

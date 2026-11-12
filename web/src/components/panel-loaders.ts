@@ -22,7 +22,7 @@ export const panelLoaders = {
   runs: () => import('./RunsPanel'),
   recoveryCase: () => import('./RecoveryCasePanel'),
   reasoning: () => import('./ReasoningPanel'),
-  multiAgent: () => import('../MultiAgentTimeline'),
+  multiAgent: () => import('./AgentActivityPanel'),
   reports: () => import('./ReportsPanel'),
 } satisfies Partial<Record<ActiveTab, () => Promise<unknown>>>
 

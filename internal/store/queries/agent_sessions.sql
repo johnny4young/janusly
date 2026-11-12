@@ -70,3 +70,52 @@ WITH doomed AS (
 )
 DELETE FROM agent_sessions s USING doomed
 WHERE s.id = doomed.id AND s.last_event_at < sqlc.arg(cutoff)::timestamptz;
+
+-- name: ListAgentSessions :many
+SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+FROM agent_sessions s
+LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+WHERE s.org_id = sqlc.arg(org_id)
+  AND (s.last_event_at, s.id) < (sqlc.arg(before_at)::timestamptz, sqlc.arg(before_id)::text)
+ORDER BY s.last_event_at DESC, s.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: GetAgentSession :one
+SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+FROM agent_sessions s
+LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+WHERE s.org_id = $1 AND s.id = $2;
+
+-- name: ListAgentSessionEvents :many
+SELECT seq, type, agent_id, parent_agent_id, agent_type, tool_use_id, tool, tool_kind, mcp_server,
+       status, duration_ms, janusly_refs, occurred_at
+FROM agent_session_events
+WHERE org_id = sqlc.arg(org_id) AND session_id = sqlc.arg(session_id) AND outcome = 'applied'
+ORDER BY seq
+LIMIT sqlc.arg(row_limit);
+
+-- Sessions whose Janusly calls named this run. A session reports the link
+-- itself, so it counts only when an agent client of the same creator started
+-- the run.
+-- name: ListAgentSessionsForRun :many
+SELECT DISTINCT s.id, c.name AS agent_client_name, s.runtime, s.last_event_at
+FROM agent_session_events e
+JOIN agent_sessions s ON s.id = e.session_id AND s.org_id = e.org_id
+JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+JOIN runs r ON r.org_id = e.org_id AND r.id = sqlc.arg(run_id)::text
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
+WHERE e.org_id = sqlc.arg(org_id) AND e.janusly_refs->>'runId' = sqlc.arg(run_id)::text
+  AND starter.created_by = c.created_by
+ORDER BY s.last_event_at DESC
+LIMIT 10;
+
+-- The reported run ids an agent client of the session client's creator started.
+-- name: VerifyAgentSessionRunRefs :many
+SELECT r.id FROM runs r
+JOIN agent_clients starter ON starter.org_id = r.org_id AND 'agent:' || starter.id = r.created_by
+JOIN agent_clients c ON c.org_id = r.org_id AND c.id = sqlc.arg(agent_client_id)::text
+WHERE r.org_id = sqlc.arg(org_id) AND r.id = ANY(sqlc.arg(run_ids)::text[])
+  AND starter.created_by = c.created_by
+ORDER BY r.id;

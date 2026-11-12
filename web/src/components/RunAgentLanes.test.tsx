@@ -15,7 +15,7 @@ vi.mock('../api', async () => {
 function map(lanes: RunMap['lanes']): RunMap {
   return {
     run: { id: 'run-lanes', status: 'succeeded', workflowVersionId: 'v', parentRunId: null },
-    nodes: [], lanes, totals: { costUsd: 0, tokens: 0 },
+    nodes: [], lanes, totals: { costUsd: 0, tokens: 0 }, sessions: [],
   }
 }
 
@@ -70,5 +70,13 @@ describe('<RunAgentLanes />', () => {
     vi.mocked(api).mockRejectedValue(new Error('forbidden'))
     render(<RunAgentLanes runId="run-denied" />)
     expect(await screen.findByTestId('run-agent-lanes-failed')).toBeVisible()
+  })
+
+  it('links the observed agent sessions that started the run', async () => {
+    vi.mocked(api).mockResolvedValue({ ...map([]), sessions: [{ id: 'sess-1', agentClientName: '', runtime: 'codex' }] })
+    render(<RunAgentLanes runId="run-linked" />)
+    const link = await screen.findByRole('button', { name: 'Session of Codex' })
+    link.click()
+    expect(window.location.hash).toBe('#/multiAgent/sessions/sess-1')
   })
 })

@@ -521,6 +521,22 @@ janusly hook config claude-code     # merge into .claude/settings.json
 janusly hook config codex           # merge into .codex/hooks.json
 ```
 
+**Session map.** `GET /v1/agent-sessions` lists the organization's sessions,
+newest first, by cursor; `GET /v1/agent-sessions/{id}/map` returns the session,
+one lane per agent shaped like run map lanes (`external_agent` for the main
+agent, `external_subagent` with `parentId` for each subagent, the latest 200
+steps each), totals, live subagents and the Janusly runs its calls named.
+Both need `runs.read` and `agents.read` (sessions name agent clients); another
+organization's session answers `404`; agent tokens are refused like on every
+people route. Janusly references are what the agent reported, so a run counts
+as linked only when an agent client of the same creator started it. A session reads `idle` after 30 silent
+minutes and `ended` only on `session.ended`: a stopped turn with a live
+subagent is still running. The run map lists those linked sessions (empty
+without `agents.read`), and the session links back to the run. In the web app the sessions
+live in the Agent activity tab (`#/multiAgent/sessions/<id>`), loaded on
+demand; a running session refreshes every 5 seconds by polling, since no run
+stream carries it.
+
 - **Gate from the map.** For tools the client lists in `gateTools`, a
   `PreToolUse` event opens a gate request and the bridge long-polls its
   decision in 25-second windows, up to the hook timeout. A person approves or
