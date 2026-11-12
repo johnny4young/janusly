@@ -43,6 +43,9 @@ type Config struct {
 	Now     func() time.Time
 	// GateWait bounds how long a gated tool call waits for a person.
 	GateWait time.Duration
+	// Gated marks a hook whose client lists gateTools: when Janusly cannot
+	// say whether a call is gated, the hook asks instead of staying silent.
+	Gated bool
 }
 
 // ConfigFromEnv reads JANUSLY_URL and the token from JANUSLY_AGENT_TOKEN_FILE
@@ -60,6 +63,8 @@ func ConfigFromEnv(getenv func(string) string, args []string) Config {
 	}
 	for _, arg := range args {
 		switch arg {
+		case "--gate":
+			cfg.Gated = true
 		case hookwire.RuntimeClaudeCode, "claude":
 			cfg.Runtime = hookwire.RuntimeClaudeCode
 		case hookwire.RuntimeCodex:
@@ -107,17 +112,24 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, cfg Con
 		return
 	}
 	status, reply, err := send(ctx, cfg, http.MethodPost, endpoint, body, SendTimeout)
-	if err != nil {
-		note(stderr, err.Error())
-	} else if status == http.StatusAccepted || status == http.StatusOK {
+	reported := err == nil && (status == http.StatusAccepted || status == http.StatusOK)
+	if event.Type == hookwire.TypeToolRequested {
 		var accepted struct {
 			Gate           bool `json:"gate"`
 			CaptureContent bool `json:"captureContent"`
 		}
-		if event.Type == hookwire.TypeToolRequested && json.Unmarshal(reply, &accepted) == nil && accepted.Gate {
-			holdForDecision(ctx, cfg, endpoint, event, raw, accepted.CaptureContent, stdout, stderr)
+		switch {
+		case reported && json.Unmarshal(reply, &accepted) == nil && accepted.Gate:
+			holdForDecision(ctx, cfg, endpoint, event, raw, accepted.CaptureContent, true, stdout, stderr)
+		case !reported && cfg.Gated:
+			// The event was not stored, so nothing said whether this call is
+			// gated: ask the gate route itself, and ask the person if it cannot say.
+			holdForDecision(ctx, cfg, endpoint, event, raw, false, false, stdout, stderr)
 		}
-	} else {
+	}
+	if err != nil {
+		note(stderr, err.Error())
+	} else if !reported {
 		note(stderr, "event refused with HTTP "+strconv.Itoa(status))
 	}
 }

@@ -329,6 +329,8 @@ type GateRequest struct {
 	MCPServer string       `json:"mcpServer,omitempty"`
 	AgentID   string       `json:"agentId,omitempty"`
 	Content   *GateContent `json:"content,omitempty"`
+	// WaitSeconds is how long the bridge will wait; the gate lives that long.
+	WaitSeconds int `json:"waitSeconds,omitempty"`
 }
 
 // GateReply is the server's answer to opening or polling a gate.
@@ -338,7 +340,7 @@ type GateReply struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-var gateFields = map[string]bool{"sessionId": true, "toolUseId": true, "tool": true, "mcpServer": true, "agentId": true, "content": true}
+var gateFields = map[string]bool{"sessionId": true, "toolUseId": true, "tool": true, "mcpServer": true, "agentId": true, "content": true, "waitSeconds": true}
 
 // ParseGateRequest reads one strict gate request.
 func ParseGateRequest(raw []byte) (GateRequest, error) {
@@ -357,7 +359,7 @@ func ParseGateRequest(raw []byte) (GateRequest, error) {
 	}
 	if !text(request.SessionID, maxIDChars, true) || !text(request.ToolUseID, maxIDChars, true) ||
 		!text(request.Tool, maxIDChars, true) || !text(request.MCPServer, maxNameChars, false) ||
-		!text(request.AgentID, maxIDChars, false) {
+		!text(request.AgentID, maxIDChars, false) || request.WaitSeconds < 0 || request.WaitSeconds > 3600 {
 		return GateRequest{}, ErrInvalidEvent
 	}
 	if signedingest.IdentitySensitive(request.SessionID, request.ToolUseID, request.Tool, request.MCPServer, request.AgentID) {

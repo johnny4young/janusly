@@ -557,10 +557,20 @@ Rules:
   agent on their machine), unless the organization sets
   `agents.publishRequiresSecondPerson`; then the route refuses them and
   `/needs-you` does not offer it.
-- **No answer is `ask`.** A gate lives 10 minutes. Expired, unanswered within
-  the bridge's wait, refused, unreachable, or past 20 open gates per client:
-  the bridge prints `ask` and the person decides in their terminal. Nothing
-  defaults to `allow`.
+- **No answer is `ask`.** A gate lives as long as its bridge waits (30
+  seconds to 10 minutes). Expired, unanswered, refused, unreachable, or past
+  20 open gates per client: the bridge prints `ask` and the person decides in
+  their terminal. Nothing defaults to `allow`.
+- **A decision is for one call, briefly.** A repeated open answers with the
+  stored gate only when it names the same tool and server; an approval stops
+  answering `allow` two minutes after it is given.
+- **`--gate`.** The bridge learns a call is gated from the ingest's answer. If
+  the event itself is refused (rate limit, a full session, an outage) a hook
+  run as `janusly hook <runtime> --gate` asks the gate route, and prints `ask`
+  when that cannot answer either. Hooks of clients with `gateTools` must use
+  it (`janusly hook config <runtime> --gate` prints it, with a `PreToolUse`
+  timeout that covers `JANUSLY_HOOK_GATE_SECONDS`); without it a refused
+  event leaves the call to the runtime's own policy.
 - **Codex.** Its hooks have no `ask` and no documented plain `allow`, so the
   bridge prints only denials there; an approval or an unanswered gate leaves
   the call to Codex's own approval policy.
@@ -568,12 +578,18 @@ Rules:
   agent and session, not the arguments, and the card says so.
   `captureContent` applies only to `gateTools`: the bridge then sends the
   gated call's input, scrubbed on both sides and cut to 8000 bytes; a client
-  without it that sends content is refused. Only people of the deciding role
+  without it that sends content is refused. Input that does not fit whole
+  is stored as not captured, never cut off. Only people of the deciding role
   read the captured input; a viewer sees that it exists. It is cleared after 7
   days and never enters audit rows (`agent_gate.decided` records the tool,
   session, client and decision).
 - A gate belongs to its client: another client, or another organization, gets
-  `404` reading or opening it. The poll holds nothing beyond its own request.
+  `404` reading or opening it. The poll holds nothing beyond its own request,
+  and one client holds at most 20 waiting polls per process.
+- A denial's reason reaches the agent labelled as a reviewer note; an approval
+  carries no free text.
+- The second-person rule keys on who created the client, not on who runs the
+  agent with its token.
 
 - **Save as workflow.** An observed session converts into a draft: subagents
   become `agent` nodes, overlapping ones run in parallel. It enters the

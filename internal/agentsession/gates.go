@@ -19,8 +19,13 @@ import (
 const (
 	// MaxOpenGatesPerClient bounds pending gates; past it the call goes back to the runtime's own prompt.
 	MaxOpenGatesPerClient = 20
-	// GateTTL is how long a gate waits for a person.
-	GateTTL = 10 * time.Minute
+	// A gate lives as long as its bridge waits, within these bounds: nobody
+	// should decide a call no hook is holding any more.
+	minGateTTL     = 30 * time.Second
+	defaultGateTTL = 2 * time.Minute
+	maxGateTTL     = 10 * time.Minute
+	// approvalWindow is how long an approval answers "allow" after it is given.
+	approvalWindow = 2 * time.Minute
 	// GateContentRetention is how long captured input outlives its gate.
 	GateContentRetention = 7 * 24 * time.Hour
 	maxGateContentBytes  = 8000
@@ -78,14 +83,14 @@ func OpenGate(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Pr
 	}
 	call := store.GetAgentGateByCallParams{SessionID: sessionID, ToolUseID: request.ToolUseID}
 	if existing, err := q.GetAgentGateByCall(ctx, call); err == nil {
-		return gateReply(existing, now), tx.Commit(ctx)
+		return sameCall(existing, request, now), tx.Commit(ctx)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return hookwire.GateReply{}, err
 	}
 	if err := q.LockAgentClientSessions(ctx, principal.ClientID); err != nil {
 		return hookwire.GateReply{}, err
 	}
-	if _, err := q.ExpireAgentGates(ctx, now); err != nil {
+	if err := q.ExpireAgentGatesForClient(ctx, store.ExpireAgentGatesForClientParams{AgentClientID: principal.ClientID, Now: now}); err != nil {
 		return hookwire.GateReply{}, err
 	}
 	open, err := q.CountPendingAgentGates(ctx, principal.ClientID)
@@ -98,12 +103,17 @@ func OpenGate(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Pr
 	var content json.RawMessage
 	if request.Content != nil {
 		content = grammar.SafePersistPayload(signedingest.Scrub(map[string]any{"input": request.Content.Input}),
-			grammar.PersistOptions{MaxBytes: maxGateContentBytes})
+			grammar.PersistOptions{MaxBytes: grammar.PersistUnbounded})
+		// Input that does not fit is stored as not captured: the decider must
+		// never read a cut-off argument as the whole call.
+		if len(content) > maxGateContentBytes {
+			content = nil
+		}
 	}
 	gate, err := q.InsertAgentGate(ctx, store.InsertAgentGateParams{
 		ID: newID(), OrgID: principal.OrgID, AgentClientID: principal.ClientID, SessionID: sessionID,
 		ToolUseID: request.ToolUseID, Tool: request.Tool, McpServer: text(request.MCPServer), AgentID: text(request.AgentID),
-		Content: content, ExpiresAt: now.Add(GateTTL),
+		Content: content, ExpiresAt: now.Add(gateTTL(request.WaitSeconds)),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The same call raced in; answer with its gate.
@@ -111,7 +121,7 @@ func OpenGate(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Pr
 		if err != nil {
 			return hookwire.GateReply{}, err
 		}
-		return gateReply(existing, now), tx.Commit(ctx)
+		return sameCall(existing, request, now), tx.Commit(ctx)
 	}
 	if err != nil {
 		return hookwire.GateReply{}, err
@@ -119,12 +129,33 @@ func OpenGate(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Pr
 	return gateReply(gate, now), tx.Commit(ctx)
 }
 
-func gateReply(gate store.AgentSessionGate, now time.Time) hookwire.GateReply {
-	return hookwire.GateReply{GateID: gate.ID, Decision: liveDecision(gate.Status, gate.ExpiresAt, now), Reason: gate.Reason.String}
+func gateTTL(waitSeconds int) time.Duration {
+	if waitSeconds <= 0 {
+		return defaultGateTTL
+	}
+	return min(max(time.Duration(waitSeconds)*time.Second, minGateTTL), maxGateTTL)
 }
 
-func liveDecision(status string, expiresAt, now time.Time) string {
-	if status == "pending" && !now.Before(expiresAt) {
+func gateReply(gate store.AgentSessionGate, now time.Time) hookwire.GateReply {
+	return hookwire.GateReply{GateID: gate.ID, Decision: liveDecision(gate.Status, gate.ExpiresAt, gate.DecidedAt, now), Reason: gate.Reason.String}
+}
+
+// sameCall answers a repeated open with the stored gate only when it names
+// the same tool: a decision never carries over to another call.
+func sameCall(gate store.AgentSessionGate, request hookwire.GateRequest, now time.Time) hookwire.GateReply {
+	if gate.Tool != request.Tool || gate.McpServer.String != request.MCPServer {
+		return hookwire.GateReply{Decision: hookwire.DecisionAsk}
+	}
+	return gateReply(gate, now)
+}
+
+// liveDecision never lets a decision outlive its moment: an unanswered gate
+// past its expiry, and an approval older than approvalWindow, are "ask".
+func liveDecision(status string, expiresAt time.Time, decidedAt *time.Time, now time.Time) string {
+	switch {
+	case status == "pending" && !now.Before(expiresAt):
+		return hookwire.DecisionAsk
+	case status == "approved" && (decidedAt == nil || now.Sub(*decidedAt) > approvalWindow):
 		return hookwire.DecisionAsk
 	}
 	return GateDecision(status)
@@ -141,5 +172,5 @@ func ReadGate(ctx context.Context, pool *pgxpool.Pool, principal *agentclient.Pr
 	if err != nil {
 		return hookwire.GateReply{}, err
 	}
-	return hookwire.GateReply{GateID: gate.ID, Decision: liveDecision(gate.Status, gate.ExpiresAt, now.UTC()), Reason: gate.Reason.String}, nil
+	return hookwire.GateReply{GateID: gate.ID, Decision: liveDecision(gate.Status, gate.ExpiresAt, gate.DecidedAt, now.UTC()), Reason: gate.Reason.String}, nil
 }

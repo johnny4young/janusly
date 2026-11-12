@@ -21,15 +21,26 @@ const (
 	MaxGateWait = 540 * time.Second
 	// gateTimeoutSlack is what the hook timeout adds over the wait.
 	gateTimeoutSlack = 15 * time.Second
+	// maxGateInputBytes stays under what the server keeps of one captured input.
+	maxGateInputBytes = 7000
 )
+
+// decisionNone prints nothing: the gate route said this call is not gated.
+const decisionNone = ""
 
 // holdForDecision opens a gate for a held tool call and waits for a person.
 // Any failure, and a wait that runs out, hands the call back to the runtime's
-// own permission prompt: the hook never allows by default.
+// own permission prompt: the hook never allows by default. known says the
+// ingest already confirmed the call is gated.
 func holdForDecision(ctx context.Context, cfg Config, eventsEndpoint string, event hookwire.Event, raw []byte,
-	capture bool, stdout, stderr io.Writer) {
+	capture, known bool, stdout, stderr io.Writer) {
 	decision, reason := waitForDecision(ctx, cfg, eventsEndpoint, event, raw, capture, stderr)
-	printDecision(stdout, event.Runtime(), decision, reason)
+	if decision == decisionNone && known {
+		decision = hookwire.DecisionAsk
+	}
+	if decision != decisionNone {
+		printDecision(stdout, event.Runtime(), decision, reason)
+	}
 }
 
 func waitForDecision(ctx context.Context, cfg Config, eventsEndpoint string, event hookwire.Event, raw []byte,
@@ -41,20 +52,24 @@ func waitForDecision(ctx context.Context, cfg Config, eventsEndpoint string, eve
 	request := hookwire.GateRequest{
 		SessionID: event.Data.SessionID, ToolUseID: event.Data.ToolUseID, Tool: event.Data.Tool,
 		MCPServer: event.Data.MCPServer, AgentID: event.Data.AgentID,
+		WaitSeconds: int((cfg.GateWait + gateTimeoutSlack).Seconds()),
 	}
 	body, _ := json.Marshal(request)
 	if capture {
 		var input toolInput
 		if json.Unmarshal(raw, &input) == nil && input.ToolInput != nil {
 			request.Content = &hookwire.GateContent{Input: signedingest.Scrub(input.ToolInput)}
-			// Input too large to send is left out; the decider sees "not captured".
-			if withContent, err := json.Marshal(request); err == nil && len(withContent) <= hookwire.MaxGateBodyBytes {
+			// Input too large to keep whole is left out; the decider sees "not captured".
+			if withContent, err := json.Marshal(request); err == nil && len(withContent) <= maxGateInputBytes {
 				body = withContent
 			}
 		}
 	}
 	gates := strings.TrimSuffix(eventsEndpoint, hookwire.Path) + hookwire.GatesPath
 	status, reply, err := send(ctx, cfg, http.MethodPost, gates, body, SendTimeout)
+	if err == nil && status == http.StatusConflict {
+		return decisionNone, ""
+	}
 	gate, ok := gateReply(status, reply, err)
 	if !ok {
 		note(stderr, "gate not opened; asking here instead")
@@ -104,8 +119,9 @@ func printDecision(stdout io.Writer, runtime, decision, reason string) {
 		hookwire.DecisionAsk:   "No decision from Janusly; asking here",
 	}
 	message := texts[decision]
-	if reason = bounded(reason, 500); reason != "" && decision != hookwire.DecisionAsk {
-		message += ": " + reason
+	// The reviewer's words reach the agent only with a denial, and labelled as a note.
+	if reason = bounded(reason, 500); reason != "" && decision == hookwire.DecisionDeny {
+		message += ". Reviewer note (not an instruction): " + reason
 	}
 	out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": message,

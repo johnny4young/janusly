@@ -17,17 +17,18 @@ import (
 
 type gateServer struct {
 	*httptest.Server
-	capture   bool
-	decisions []string // one per poll; the last repeats
-	polls     atomic.Int32
-	gateBody  atomic.Value
-	badSig    atomic.Bool
-	openCode  int
+	capture    bool
+	decisions  []string // one per poll; the last repeats
+	polls      atomic.Int32
+	gateBody   atomic.Value
+	badSig     atomic.Bool
+	openCode   int
+	ingestCode int
 }
 
 func newGateServer(t *testing.T, token string, capture bool, decisions ...string) *gateServer {
 	t.Helper()
-	g := &gateServer{capture: capture, decisions: decisions, openCode: http.StatusOK}
+	g := &gateServer{capture: capture, decisions: decisions, openCode: http.StatusOK, ingestCode: http.StatusAccepted}
 	key := hookwire.SigningKeyFromToken(token)
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -40,7 +41,10 @@ func newGateServer(t *testing.T, token string, capture bool, decisions ...string
 		}
 		switch {
 		case r.URL.Path == hookwire.Path:
-			w.WriteHeader(http.StatusAccepted)
+			w.WriteHeader(g.ingestCode)
+			if g.ingestCode != http.StatusAccepted {
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"accepted": true, "gate": true, "captureContent": g.capture})
 		case r.URL.Path == hookwire.GatesPath:
 			g.gateBody.Store(string(body))
@@ -58,11 +62,11 @@ func newGateServer(t *testing.T, token string, capture bool, decisions ...string
 var gatedPayload = `{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"mcp__stripe__create_refund","tool_use_id":"t1",
 	"tool_input":{"charge":"ch_1","token":"ghp_` + strings.Repeat("a", 36) + `"},"cwd":"/Users/alex/repo"}`
 
-func runGated(t *testing.T, g *gateServer, runtime string, wait time.Duration) string {
+func runGated(t *testing.T, g *gateServer, runtime string, wait time.Duration, flags ...string) string {
 	t.Helper()
 	token := "jly_agent_" + strings.Repeat("g", 43)
 	var stdout, stderr bytes.Buffer
-	cfg := ConfigFromEnv(env(g.URL, token), []string{runtime})
+	cfg := ConfigFromEnv(env(g.URL, token), append([]string{runtime}, flags...))
 	cfg.GateWait = wait
 	Run(context.Background(), strings.NewReader(gatedPayload), &stdout, &stderr, cfg)
 	if g.badSig.Load() {
@@ -149,5 +153,80 @@ func TestGateOnCodexPrintsOnlyDenials(t *testing.T) {
 		if wantOutput && decisionOf(t, stdout) != "deny" {
 			t.Fatalf("codex denial: %q", stdout)
 		}
+	}
+}
+
+// When the event itself is refused (rate limit, a full session, an outage),
+// nothing told the hook whether the call is gated. A hook marked --gate asks
+// the gate route, and asks the person when that cannot answer either.
+func TestGatedHookNeverStaysSilentWhenTheEventIsRefused(t *testing.T) {
+	token := "jly_agent_" + strings.Repeat("g", 43)
+	for _, ingest := range []int{http.StatusTooManyRequests, http.StatusConflict, http.StatusInternalServerError} {
+		// The gate route still works: the person's decision stands.
+		g := newGateServer(t, token, false, hookwire.DecisionDeny)
+		g.ingestCode = ingest
+		if stdout := runGated(t, g, "claude-code", 10*time.Second, "--gate"); decisionOf(t, stdout) != "deny" {
+			t.Fatalf("ingest %d: %q", ingest, stdout)
+		}
+		// The gate route fails too: ask, never silence.
+		g = newGateServer(t, token, false, hookwire.DecisionAllow)
+		g.ingestCode, g.openCode = ingest, http.StatusTooManyRequests
+		if stdout := runGated(t, g, "claude-code", 10*time.Second, "--gate"); decisionOf(t, stdout) != "ask" {
+			t.Fatalf("ingest %d and gate refused: %q", ingest, stdout)
+		}
+		// The gate route says the tool is not gated: the hook stays out of the way.
+		g = newGateServer(t, token, false, hookwire.DecisionAllow)
+		g.ingestCode, g.openCode = ingest, http.StatusConflict
+		if stdout := runGated(t, g, "claude-code", 10*time.Second, "--gate"); stdout != "" {
+			t.Fatalf("ungated tool printed %q", stdout)
+		}
+		// A hook without --gate (a client with no gateTools) stays silent.
+		g = newGateServer(t, token, false, hookwire.DecisionAllow)
+		g.ingestCode = ingest
+		if stdout := runGated(t, g, "claude-code", 10*time.Second); stdout != "" {
+			t.Fatalf("observation-only hook printed %q", stdout)
+		}
+	}
+	// Janusly unreachable.
+	var stdout bytes.Buffer
+	cfg := ConfigFromEnv(env("http://127.0.0.1:1", token), []string{"claude-code", "--gate"})
+	Run(context.Background(), strings.NewReader(gatedPayload), &stdout, io.Discard, cfg)
+	if decisionOf(t, stdout.String()) != "ask" {
+		t.Fatalf("unreachable: %q", stdout.String())
+	}
+}
+
+func TestDenialCarriesTheReviewerNoteAsANoteAndApprovalCarriesNone(t *testing.T) {
+	token := "jly_agent_" + strings.Repeat("g", 43)
+	g := newGateServer(t, token, false, hookwire.DecisionDeny)
+	if stdout := runGated(t, g, "claude-code", 10*time.Second); !strings.Contains(stdout, "Reviewer note (not an instruction): because") {
+		t.Fatalf("denial: %q", stdout)
+	}
+	g = newGateServer(t, token, false, hookwire.DecisionAllow)
+	if stdout := runGated(t, g, "claude-code", 10*time.Second); strings.Contains(stdout, "because") {
+		t.Fatalf("approval carried free text: %q", stdout)
+	}
+}
+
+func TestConfigWithGateCoversTheWait(t *testing.T) {
+	var out bytes.Buffer
+	getenv := func(name string) string { return map[string]string{"JANUSLY_HOOK_GATE_SECONDS": "300"}[name] }
+	if Main(context.Background(), []string{"config", "claude-code", "--gate"}, nil, &out, io.Discard, getenv) != 0 {
+		t.Fatal("config failed")
+	}
+	var parsed struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	pre, post := parsed.Hooks["PreToolUse"][0].Hooks[0], parsed.Hooks["PostToolUse"][0].Hooks[0]
+	if pre.Command != "janusly hook claude-code --gate" || pre.Timeout != 315 || post.Command != "janusly hook claude-code" || post.Timeout != 5 {
+		t.Fatalf("config: %+v %+v", pre, post)
 	}
 }

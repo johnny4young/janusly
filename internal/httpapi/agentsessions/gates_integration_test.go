@@ -112,6 +112,15 @@ func TestGateOpensOnlyForGatedToolsAndAnswersTheDecision(t *testing.T) {
 		t.Fatalf("captured content must be scrubbed: %s", content)
 	}
 
+	// Input past the cap is stored as not captured, never cut off.
+	h.requested(t, client.Token, session, "t-big", "mcp__stripe__create_refund")
+	big := h.gateCall(t, client.Token, "POST", hookwire.GatesPath,
+		gateBody(session, "t-big", "mcp__stripe__create_refund", map[string]any{"memo": strings.Repeat("x", 9000)}))
+	var bigContent *string
+	if err := h.pool.QueryRow(t.Context(), `SELECT content::text FROM agent_session_gates WHERE id = $1`, big.body["gateId"]).Scan(&bigContent); err != nil || bigContent != nil {
+		t.Fatalf("oversized input was kept in part: %v %v", err, bigContent)
+	}
+
 	poll := hookwire.GatesPath + "/" + gateID + "/decision"
 	if res := h.gateCall(t, client.Token, "GET", poll, nil); res.body["decision"] != "pending" {
 		t.Fatalf("poll: %d %s", res.status, res.raw)
@@ -167,6 +176,33 @@ func TestGateIsolationLimitsAndDefaults(t *testing.T) {
 	_ = res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("signature over another path: %d", res.StatusCode)
+	}
+
+	// A decision answers only the call it was made for, and only for a moment.
+	h.requested(t, owner.Token, session, "t-bound", "Bash")
+	bound := h.gateCall(t, owner.Token, "POST", hookwire.GatesPath, gateBody(session, "t-bound", "Bash", nil))
+	boundID, _ := bound.body["gateId"].(string)
+	if _, err := h.pool.Exec(t.Context(), `UPDATE agent_session_gates SET status = 'approved', decided_by = 'someone', decided_at = now() WHERE id = $1`, boundID); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.gateCall(t, owner.Token, "POST", hookwire.GatesPath, gateBody(session, "t-bound", "Bash", nil)); res.body["decision"] != "allow" {
+		t.Fatalf("fresh approval of the same call: %s", res.raw)
+	}
+	other := gateBody(session, "t-bound", "Bash", nil)
+	other = []byte(strings.Replace(string(other), `"tool":"Bash"`, `"tool":"Bash","mcpServer":"evil"`, 1))
+	if res := h.gateCall(t, owner.Token, "POST", hookwire.GatesPath, other); res.body["decision"] != "ask" {
+		t.Fatalf("an approval answered a different call: %s", res.raw)
+	}
+	if _, err := h.pool.Exec(t.Context(), `UPDATE agent_session_gates SET decided_at = now() - interval '3 minutes' WHERE id = $1`, boundID); err != nil {
+		t.Fatal(err)
+	}
+	for _, res := range []reply{
+		h.gateCall(t, owner.Token, "POST", hookwire.GatesPath, gateBody(session, "t-bound", "Bash", nil)),
+		h.gateCall(t, owner.Token, "GET", hookwire.GatesPath+"/"+boundID+"/decision", nil),
+	} {
+		if res.body["decision"] != "ask" {
+			t.Fatalf("an old approval still allowed: %s", res.raw)
+		}
 	}
 
 	// An unanswered gate expires to "ask", never "allow".

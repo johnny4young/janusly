@@ -28,7 +28,7 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		case "doctor":
 			return Doctor(ctx, stdout, ConfigFromEnv(getenv, args[1:]))
 		case "config":
-			return printConfig(stdout, stderr, args[1:])
+			return printConfig(stdout, stderr, ConfigFromEnv(getenv, args[1:]))
 		}
 	}
 	// A terminal is not a hook runner: never wait on someone typing.
@@ -83,11 +83,10 @@ func Doctor(ctx context.Context, stdout io.Writer, cfg Config) int {
 	return 1
 }
 
-func printConfig(stdout, stderr io.Writer, args []string) int {
-	runtime := ""
-	if len(args) > 0 {
-		runtime = ConfigFromEnv(func(string) string { return "" }, args[:1]).Runtime
-	}
+// printConfig prints the hook settings. With --gate the PreToolUse hook asks
+// when Janusly cannot answer, and its timeout covers the configured wait.
+func printConfig(stdout, stderr io.Writer, cfg Config) int {
+	runtime := cfg.Runtime
 	events, ok := hookEvents[runtime]
 	if !ok {
 		_, _ = fmt.Fprintln(stderr, "usage: janusly hook config claude-code|codex")
@@ -97,15 +96,17 @@ func printConfig(stdout, stderr io.Writer, args []string) int {
 	for _, event := range events {
 		// The bridge gives up after two seconds; SessionEnd runs with a short
 		// budget, and PreToolUse may hold a gated call for a person.
-		timeout := 5
+		timeout, command := 5, "janusly hook "+runtime
 		switch event {
 		case "SessionEnd":
 			timeout = 3
 		case "PreToolUse":
-			timeout = int((DefaultGateWait + gateTimeoutSlack).Seconds())
+			if cfg.Gated {
+				timeout, command = int((cfg.GateWait + gateTimeoutSlack).Seconds()), command+" --gate"
+			}
 		}
 		hooks[event] = []any{map[string]any{"hooks": []any{map[string]any{
-			"type": "command", "command": "janusly hook " + runtime, "timeout": timeout,
+			"type": "command", "command": command, "timeout": timeout,
 		}}}}
 	}
 	encoded, _ := json.MarshalIndent(map[string]any{"hooks": hooks}, "", "  ")

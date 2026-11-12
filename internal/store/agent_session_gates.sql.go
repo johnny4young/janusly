@@ -98,6 +98,21 @@ func (q *Queries) ExpireAgentGates(ctx context.Context, now time.Time) (int64, e
 	return result.RowsAffected(), nil
 }
 
+const expireAgentGatesForClient = `-- name: ExpireAgentGatesForClient :exec
+UPDATE agent_session_gates SET status = 'expired'
+WHERE agent_client_id = $1 AND status = 'pending' AND expires_at <= $2::timestamptz
+`
+
+type ExpireAgentGatesForClientParams struct {
+	AgentClientID string
+	Now           time.Time
+}
+
+func (q *Queries) ExpireAgentGatesForClient(ctx context.Context, arg ExpireAgentGatesForClientParams) error {
+	_, err := q.db.Exec(ctx, expireAgentGatesForClient, arg.AgentClientID, arg.Now)
+	return err
+}
+
 const getAgentGate = `-- name: GetAgentGate :one
 SELECT g.id, g.org_id, g.agent_client_id, g.session_id, g.tool_use_id, g.tool, g.mcp_server, g.agent_id, g.content, g.status, g.decided_by, g.decided_at, g.reason, g.expires_at, g.created_at, c.created_by AS client_created_by, c.name AS agent_client_name
 FROM agent_session_gates g
@@ -188,7 +203,7 @@ func (q *Queries) GetAgentGateByCall(ctx context.Context, arg GetAgentGateByCall
 }
 
 const getAgentGateForClient = `-- name: GetAgentGateForClient :one
-SELECT id, status, reason, expires_at FROM agent_session_gates
+SELECT id, status, reason, expires_at, decided_at FROM agent_session_gates
 WHERE org_id = $1 AND agent_client_id = $2 AND id = $3
 `
 
@@ -203,6 +218,7 @@ type GetAgentGateForClientRow struct {
 	Status    string
 	Reason    pgtype.Text
 	ExpiresAt time.Time
+	DecidedAt *time.Time
 }
 
 // The agent's own read: only its client's gates.
@@ -214,6 +230,7 @@ func (q *Queries) GetAgentGateForClient(ctx context.Context, arg GetAgentGateFor
 		&i.Status,
 		&i.Reason,
 		&i.ExpiresAt,
+		&i.DecidedAt,
 	)
 	return i, err
 }
@@ -278,13 +295,15 @@ SELECT g.id, g.session_id, g.tool, g.expires_at, c.created_by AS client_created_
 FROM agent_session_gates g
 JOIN agent_clients c ON c.org_id = g.org_id AND c.id = g.agent_client_id
 WHERE g.org_id = $1 AND g.status = 'pending' AND g.expires_at > $2::timestamptz
+  AND ($3::text IS NULL OR c.created_by <> $3::text)
 ORDER BY g.created_at
 LIMIT 50
 `
 
 type ListPendingAgentGatesForOrgParams struct {
-	OrgID string
-	Now   time.Time
+	OrgID          string
+	Now            time.Time
+	ExcludeCreator pgtype.Text
 }
 
 type ListPendingAgentGatesForOrgRow struct {
@@ -297,7 +316,7 @@ type ListPendingAgentGatesForOrgRow struct {
 }
 
 func (q *Queries) ListPendingAgentGatesForOrg(ctx context.Context, arg ListPendingAgentGatesForOrgParams) ([]ListPendingAgentGatesForOrgRow, error) {
-	rows, err := q.db.Query(ctx, listPendingAgentGatesForOrg, arg.OrgID, arg.Now)
+	rows, err := q.db.Query(ctx, listPendingAgentGatesForOrg, arg.OrgID, arg.Now, arg.ExcludeCreator)
 	if err != nil {
 		return nil, err
 	}

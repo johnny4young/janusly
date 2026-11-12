@@ -14,7 +14,7 @@ SELECT * FROM agent_session_gates WHERE session_id = $1 AND tool_use_id = $2;
 
 -- The agent's own read: only its client's gates.
 -- name: GetAgentGateForClient :one
-SELECT id, status, reason, expires_at FROM agent_session_gates
+SELECT id, status, reason, expires_at, decided_at FROM agent_session_gates
 WHERE org_id = $1 AND agent_client_id = $2 AND id = $3;
 
 -- name: GetAgentGate :one
@@ -28,6 +28,10 @@ UPDATE agent_session_gates
 SET status = sqlc.arg(status), decided_by = sqlc.arg(decided_by), decided_at = sqlc.arg(decided_at), reason = sqlc.narg(reason)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'pending' AND expires_at > sqlc.arg(decided_at)
 RETURNING *;
+
+-- name: ExpireAgentGatesForClient :exec
+UPDATE agent_session_gates SET status = 'expired'
+WHERE agent_client_id = sqlc.arg(agent_client_id) AND status = 'pending' AND expires_at <= sqlc.arg(now)::timestamptz;
 
 -- name: ExpireAgentGates :execrows
 UPDATE agent_session_gates SET status = 'expired'
@@ -46,6 +50,7 @@ SELECT g.id, g.session_id, g.tool, g.expires_at, c.created_by AS client_created_
 FROM agent_session_gates g
 JOIN agent_clients c ON c.org_id = g.org_id AND c.id = g.agent_client_id
 WHERE g.org_id = sqlc.arg(org_id) AND g.status = 'pending' AND g.expires_at > sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(exclude_creator)::text IS NULL OR c.created_by <> sqlc.narg(exclude_creator)::text)
 ORDER BY g.created_at
 LIMIT 50;
 

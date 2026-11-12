@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,34 @@ const SecondPersonKey = "agents.publishRequiresSecondPerson"
 
 const gatePollInterval = time.Second
 
+// pollSlots bounds the long polls one client holds open in this process, so
+// polling costs at most that many queries a second per client.
+type pollSlots struct {
+	mu   sync.Mutex
+	held map[string]int
+}
+
+func (p *pollSlots) take(clientID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.held[clientID] >= agentsession.MaxOpenGatesPerClient {
+		return false
+	}
+	if p.held == nil {
+		p.held = map[string]int{}
+	}
+	p.held[clientID]++
+	return true
+}
+
+func (p *pollSlots) release(clientID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.held[clientID]--; p.held[clientID] <= 0 {
+		delete(p.held, clientID)
+	}
+}
+
 // OpenGate handles POST /agent-sessions/gates for an authenticated principal.
 func OpenGate(deps IngestDeps) func(http.ResponseWriter, *http.Request, *agentclient.Principal) {
 	now := clock(deps.Now)
@@ -54,12 +83,19 @@ func OpenGate(deps IngestDeps) func(http.ResponseWriter, *http.Request, *agentcl
 // It holds nothing beyond the request itself.
 func PollGate(deps IngestDeps) func(http.ResponseWriter, *http.Request, *agentclient.Principal) {
 	now := clock(deps.Now)
+	slots := &pollSlots{}
 	return func(w http.ResponseWriter, r *http.Request, principal *agentclient.Principal) {
 		if _, _, ok := admit(w, r, principal, deps.Limiter, now, 0); !ok {
 			return
 		}
 		wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
 		wait = min(max(wait, 0), hookwire.MaxGateWaitSeconds)
+		// Past the cap the poll answers at once instead of waiting.
+		if wait > 0 && slots.take(principal.ClientID) {
+			defer slots.release(principal.ClientID)
+		} else {
+			wait = 0
+		}
 		deadline := time.Now().Add(time.Duration(wait) * time.Second)
 		for {
 			reply, err := agentsession.ReadGate(r.Context(), deps.Pool, principal, r.PathValue("gateId"), now())
