@@ -17,6 +17,11 @@ export function isRunMap(value: unknown): value is Api.RunMap {
       status: isRunStatus,
       workflowVersionId: isString,
     }),
+    sessions: arrayOf(shape({
+      agentClientName: isString,
+      id: isString,
+      runtime: isString,
+    })),
     totals: shape({
       costUsd: isFiniteNumber,
       tokens: isInteger,

@@ -183,6 +183,24 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 		t.Fatalf("run map lanes: %+v", runMap["lanes"])
 	}
 	rec.record("GET /v1/runs/{runId}/map", h.call("GET", "/v1/runs/"+runID+"/map", nil, ""), http.StatusOK)
+	observed := seedAgentSession(t, h.org, runID)
+	linked := rec.record("GET /v1/runs/{runId}/map", h.call("GET", "/v1/runs/"+runID+"/map", nil, ""), http.StatusOK)
+	if sessions, _ := linked["sessions"].([]any); len(sessions) != 1 {
+		t.Fatalf("run map must link the observed session: %+v", linked["sessions"])
+	}
+	rec.record("GET /v1/agent-sessions", h.call("GET", "/v1/agent-sessions", nil, ""), http.StatusOK)
+	rec.record("POST /v1/agent-sessions/{sessionId}/draft", h.call("POST", "/v1/agent-sessions/"+observed.id+"/draft", nil, ""), http.StatusCreated)
+	heldGate := seedGate(t, h.org, observed, true)
+	withGate := rec.record("GET /v1/agent-sessions/{sessionId}/map", h.call("GET", "/v1/agent-sessions/"+observed.id+"/map", nil, ""), http.StatusOK)
+	if gates, _ := withGate["gates"].([]any); len(gates) != 1 {
+		t.Fatalf("session map must list the pending gate: %+v", withGate["gates"])
+	}
+	gateInbox := rec.record("GET /v1/needs-you", h.call("GET", "/v1/needs-you", nil, ""), http.StatusOK)
+	if raw, _ := json.Marshal(gateInbox); !strings.Contains(string(raw), "agent_gate") {
+		t.Fatalf("needs-you must list the gate: %s", raw)
+	}
+	rec.record("POST /v1/agent-sessions/gates/{gateId}/decide", h.call("POST", "/v1/agent-sessions/gates/"+heldGate+"/decide",
+		map[string]any{"decision": "approve", "reason": "ok"}, ""), http.StatusOK)
 	inbox := rec.record("GET /v1/needs-you", h.callWithHeaders("GET", "/v1/needs-you", nil, "", asDecider), http.StatusOK)
 	kinds := map[string]bool{}
 	for _, raw := range inbox["items"].([]any) {

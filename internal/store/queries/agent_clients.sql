@@ -1,12 +1,14 @@
 -- name: CreateAgentClient :one
 INSERT INTO agent_clients (
   id, org_id, name, capabilities, scope_workflow_ids, scope_tags,
-  token_digest, token_last4, rate_limit_per_minute, created_by, token_issued_at, expires_at
+  token_digest, token_last4, rate_limit_per_minute, created_by, token_issued_at, expires_at,
+  gate_tools, capture_content
 ) VALUES (
   sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(name), sqlc.arg(capabilities)::text[],
   sqlc.arg(scope_workflow_ids)::text[], sqlc.arg(scope_tags)::text[],
   sqlc.arg(token_digest), sqlc.arg(token_last4), sqlc.arg(rate_limit_per_minute),
-  sqlc.arg(created_by), sqlc.arg(token_issued_at), sqlc.arg(expires_at)
+  sqlc.arg(created_by), sqlc.arg(token_issued_at), sqlc.arg(expires_at),
+  sqlc.arg(gate_tools)::text[], sqlc.arg(capture_content)
 )
 RETURNING *;
 
@@ -32,7 +34,7 @@ UPDATE agent_clients
 SET token_digest = sqlc.arg(token_digest), token_last4 = sqlc.arg(token_last4),
     token_issued_at = sqlc.arg(token_issued_at), expires_at = sqlc.arg(expires_at)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND revoked_at IS NULL
-  AND expires_at > sqlc.arg(token_issued_at)
+  AND expires_at > sqlc.arg(token_issued_at) AND oauth_client_id IS NULL
 RETURNING *;
 
 -- name: RevokeAgentClient :one

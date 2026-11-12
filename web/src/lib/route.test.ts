@@ -21,6 +21,8 @@ describe('workspace route', () => {
       { tab: 'runs', focusDay: '2026-09-04' },
       { tab: 'recover', focusDay: '2026-09-04' },
       { tab: 'operations', opsSection: 'ai' },
+      { tab: 'multiAgent', agentSessions: true },
+      { tab: 'multiAgent', agentSessions: true, agentSessionId: 'sess-1' },
     ] as const
     for (const route of cases) {
       expect(parseRoute(formatRoute(route))).toEqual(route)
@@ -30,7 +32,7 @@ describe('workspace route', () => {
 
   it('refuses anything it did not spell', () => {
     for (const hash of ['', '#', '#/', '#/nope', '/runs', '#/runs/dlq/a/b', '#/runs/day', '#/runs/day/tomorrow', '#/recover/day/tomorrow', '#/recover/dlq/x',
-      '#/runs/other/x', '#/recoveryCase', '#/recoveryCase/', '#/home/extra', '#/runs/dlq/%E0%A4%A',
+      '#/runs/other/x', '#/multiAgent/sessions/a/b', '#/multiAgent/other', '#/recoveryCase', '#/recoveryCase/', '#/home/extra', '#/runs/dlq/%E0%A4%A',
       `#/recoveryCase/${'x'.repeat(257)}`]) {
       expect(parseRoute(hash), hash).toBeNull()
     }

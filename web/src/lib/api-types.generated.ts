@@ -11,6 +11,71 @@ export type BrowserApiError = {
   params?: Record<string, unknown>
 }
 
+export type AgentSession = {
+  "agentClientId": string
+  "agentClientName": string
+  "endedAt": string | null
+  "eventCount": number
+  "id": string
+  "lastEventAt": string
+  "model": string | null
+  "project": string | null
+  "runtime": string
+  "startedAt": string
+  "status": "running" | "idle" | "ended"
+  "truncated": boolean
+}
+
+export type AgentSessionMap = {
+  "canConvert": boolean
+  "conversion": {
+    "agents": number
+    "convertible": boolean
+    "convertibleSteps": number
+    "mcpServers": string[]
+    "totalSteps": number
+  }
+  "gates": ({
+    "agentId": string | null
+    "contentCaptured": boolean
+    "expiresAt": string
+    "id": string
+    "input": unknown
+    "mcpServer": string | null
+    "needsYou": boolean
+    "tool": string
+  })[]
+  "lanes": ({
+    "agentType": string | null
+    "kind": "external_agent" | "external_subagent"
+    "live": boolean
+    "nodeId": string
+    "parentId": string | null
+    "steps": {
+      "agent"?: string
+      "at": string
+      "index": number
+      "status"?: string
+      "tool"?: string
+      "type": string
+    }[]
+    "truncated": boolean
+  })[]
+  "liveSubagents": number
+  "refs": {
+    "draftIds": string[]
+    "runIds": string[]
+    "workflowIds": string[]
+  }
+  "session": AgentSession
+  "totals": {
+    "errors": number
+    "events": number
+    "mcpCalls": number
+    "toolCalls": number
+  }
+}
+
 export type AuthoringCapabilities = {
   "builtinTools": ToolCatalogEntry[]
   "credentials": {
@@ -378,6 +443,8 @@ export type NeedsYouItem = {
   "since"?: never
   "reasons"?: never
   "requestedBy"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
 } | {
   "kind": "approval" | "human_form"
   "nodeId": string
@@ -389,6 +456,8 @@ export type NeedsYouItem = {
   "tool"?: never
   "reasons"?: never
   "requestedBy"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
 } | {
   "expiresAt": string
   "id": string
@@ -400,6 +469,21 @@ export type NeedsYouItem = {
   "runId"?: never
   "tool"?: never
   "since"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
+} | {
+  "agentClientName": string
+  "expiresAt": string
+  "id": string
+  "kind": "agent_gate"
+  "sessionId": string
+  "tool": string
+  "nodeId"?: never
+  "runId"?: never
+  "workflowId"?: never
+  "since"?: never
+  "reasons"?: never
+  "requestedBy"?: never
 }
 
 export type NullableCount = number | null
@@ -939,6 +1023,11 @@ export type RunMap = {
     "status": RunStatus
     "workflowVersionId": string
   }
+  "sessions": {
+    "agentClientName": string
+    "id": string
+    "runtime": string
+  }[]
   "totals": {
     "costUsd": number
     "tokens": number
@@ -1549,6 +1638,10 @@ export interface ApiRequests {
   "GET /agent-clients": undefined
   /** One agent client with its tools, latest calls and open publish requests */
   "GET /agent-clients/{id}": undefined
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": undefined
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": undefined
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": undefined
   /** Bounded registered experience provenance for a saved workflow */
@@ -1629,6 +1722,13 @@ export interface ApiRequests {
   /** Replace an agent client's token; the response carries the new token once */
   "POST /agent-clients/{id}/rotate": {
     "expiresInDays"?: number
+  }
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": undefined
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": {
+    "decision": "approve" | "deny"
+    "reason"?: string
   }
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": {
@@ -1885,6 +1985,13 @@ export interface ApiResponses {
       "tool": string
     })[] | null
   }
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": {
+    "nextCursor": string | null
+    "sessions": AgentSession[]
+  }
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": AgentSessionMap
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": AuthoringCapabilities
   /** Bounded registered experience provenance for a saved workflow */
@@ -2165,6 +2272,35 @@ export interface ApiResponses {
     }
     "token": string
   }
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": {
+    "agents": {
+      "agentType"?: string
+      "nodeId": string
+      "suggestedTimeoutMs"?: number
+      "tools": string[]
+    }[]
+    "conversion": {
+      "agents": number
+      "convertible": boolean
+      "convertibleSteps": number
+      "mcpServers": string[]
+      "totalSteps": number
+    }
+    "digest": string
+    "draftId": string
+    "mcpServers": string[]
+    "next": string
+    "placeholders": string[]
+    "workflowId": string
+  }
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": {
+    "gate": {
+      "id": string
+      "status": "approved" | "denied"
+    }
+  }
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": WorkflowPatchResponse
   /** Compile a bounded deterministic workflow intent brief */
@@ -2305,6 +2441,10 @@ export interface ApiSuccessStatuses {
   "GET /agent-clients": 200
   /** One agent client with its tools, latest calls and open publish requests */
   "GET /agent-clients/{id}": 200
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": 200
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": 200
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": 200
   /** Bounded registered experience provenance for a saved workflow */
@@ -2375,6 +2515,10 @@ export interface ApiSuccessStatuses {
   "POST /agent-clients/{id}/revoke": 200
   /** Replace an agent client's token; the response carries the new token once */
   "POST /agent-clients/{id}/rotate": 200
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": 200
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": 200
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": 200
   /** Compile a bounded deterministic workflow intent brief */

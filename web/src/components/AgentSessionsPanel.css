@@ -1,0 +1,87 @@
+/* Styles for AgentSessionsPanel.tsx, shipped with its lazy chunk. */
+
+.agent-sessions {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-sessions__start { justify-self: start; }
+.agent-sessions__end { justify-self: end; }
+
+.agent-sessions__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-sessions__head h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-sessions__open {
+  background: none;
+  border: 0;
+  color: var(--we-primary);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-align: start;
+}
+
+.agent-sessions__totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.agent-sessions__totals [data-tone="danger"] { color: var(--we-danger, #b42318); font-weight: 600; }
+
+.agent-sessions__refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-sessions__gates h4 {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.agent-sessions__gates ul {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-sessions__gate {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-sessions__gate pre {
+  font-size: 12px;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-sessions__convert {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.agent-sessions__convert p { margin: 0; }

@@ -3657,6 +3657,15 @@ CREATE TABLE public.agent_clients (
     revoked_at timestamp with time zone,
     revoked_by text,
     last_used_at timestamp with time zone,
+    gate_tools text[] DEFAULT '{}' NOT NULL,
+    capture_content boolean DEFAULT false NOT NULL,
+    oauth_client_id text,
+    access_expires_at timestamp with time zone,
+    refresh_digest bytea,
+    CONSTRAINT agent_clients_oauth_check CHECK (
+        (oauth_client_id IS NOT NULL OR (access_expires_at IS NULL AND refresh_digest IS NULL))
+        AND (refresh_digest IS NULL OR octet_length(refresh_digest) = 32)),
+    CONSTRAINT agent_clients_gate_check CHECK (cardinality(gate_tools) <= 20 AND (NOT capture_content OR cardinality(gate_tools) > 0)),
     CONSTRAINT agent_clients_name_check CHECK (char_length(name) BETWEEN 1 AND 120),
     CONSTRAINT agent_clients_capabilities_check CHECK (
         cardinality(capabilities) BETWEEN 1 AND 6
@@ -3670,6 +3679,57 @@ CREATE TABLE public.agent_clients (
 );
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
 CREATE INDEX agent_clients_org_created_idx ON public.agent_clients (org_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients (refresh_digest) WHERE refresh_digest IS NOT NULL;
+
+-- Every refresh token a grant rotated away. Presenting one again means it
+-- leaked, however many rotations ago.
+CREATE TABLE public.oauth_refresh_history (
+    digest bytea PRIMARY KEY,
+    agent_client_id text NOT NULL,
+    rotated_at timestamp with time zone NOT NULL
+);
+CREATE INDEX oauth_refresh_history_rotated_idx ON public.oauth_refresh_history (rotated_at);
+
+-- A public OAuth client registered by an MCP client before anyone signed in.
+-- It belongs to no organization and grants nothing by itself.
+CREATE TABLE public.oauth_clients (
+    id text PRIMARY KEY,
+    client_name text NOT NULL,
+    redirect_uris text[] NOT NULL,
+    registered_from text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT oauth_clients_name_check CHECK (char_length(client_name) BETWEEN 1 AND 100),
+    CONSTRAINT oauth_clients_redirects_check CHECK (cardinality(redirect_uris) BETWEEN 1 AND 5)
+);
+CREATE INDEX oauth_clients_unused_idx ON public.oauth_clients (created_at) WHERE last_used_at IS NULL;
+
+-- One authorization request, from /oauth/authorize to the code exchange.
+-- Only the code's digest is stored; the code is single use.
+CREATE TABLE public.oauth_authorization_requests (
+    id text PRIMARY KEY,
+    oauth_client_id text NOT NULL REFERENCES public.oauth_clients(id) ON DELETE CASCADE,
+    redirect_uri text NOT NULL,
+    code_challenge text NOT NULL,
+    scopes text[] NOT NULL,
+    state text NOT NULL,
+    resource text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    org_id text,
+    decided_by text,
+    agent_client_id text,
+    code_digest bytea,
+    code_expires_at timestamp with time zone,
+    code_used_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oauth_requests_status_check CHECK (status IN ('pending', 'approved', 'denied')),
+    CONSTRAINT oauth_requests_approved_check CHECK ((status = 'approved') = (code_digest IS NOT NULL AND agent_client_id IS NOT NULL AND org_id IS NOT NULL)),
+    CONSTRAINT oauth_requests_challenge_check CHECK (char_length(code_challenge) = 43)
+);
+CREATE UNIQUE INDEX oauth_requests_code_idx ON public.oauth_authorization_requests (code_digest) WHERE code_digest IS NOT NULL;
+CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests (expires_at);
+CREATE INDEX oauth_requests_pending_idx ON public.oauth_authorization_requests (oauth_client_id, created_at) WHERE status = 'pending';
 
 -- An agent's proposed workflow document. A draft is never a version: nothing
 -- routes, schedules or triggers it until a publication appends it.
@@ -3683,10 +3743,12 @@ CREATE TABLE public.workflow_drafts (
     digest text NOT NULL,
     created_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    origin jsonb,
     CONSTRAINT workflow_drafts_digest_check CHECK (char_length(digest) = 64)
 );
 CREATE UNIQUE INDEX workflow_drafts_digest_idx ON public.workflow_drafts (org_id, workflow_id, created_by, digest);
 CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts (org_id, created_at DESC, id DESC);
+CREATE INDEX workflow_drafts_origin_session_idx ON public.workflow_drafts (org_id, (origin->>'sessionId')) WHERE (origin->>'sessionId') IS NOT NULL;
 
 -- The publish gate's receipt for one draft digest. Fixture runs are
 -- validation runs; the receipt settles when they reach a terminal state.
@@ -3733,5 +3795,95 @@ CREATE TABLE public.publish_requests (
 );
 CREATE UNIQUE INDEX publish_requests_live_idx ON public.publish_requests (org_id, workflow_id) WHERE status = 'pending';
 CREATE INDEX publish_requests_org_created_idx ON public.publish_requests (org_id, created_at DESC, id DESC);
+
+-- An external agent's session observed through the hooks bridge. Only ids,
+-- tool names, timing and Janusly references are kept; never paths,
+-- transcripts or tool inputs.
+CREATE TABLE public.agent_sessions (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    external_session_id text NOT NULL,
+    runtime text NOT NULL,
+    project text,
+    runtime_version text,
+    model text,
+    status text DEFAULT 'running'::text NOT NULL,
+    end_status text,
+    truncated boolean DEFAULT false NOT NULL,
+    event_count integer DEFAULT 0 NOT NULL,
+    last_seq bigint DEFAULT 0 NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    last_event_at timestamp with time zone NOT NULL,
+    ended_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_sessions_runtime_check CHECK (runtime IN ('claude-code', 'codex')),
+    CONSTRAINT agent_sessions_status_check CHECK (status IN ('running', 'ended')),
+    CONSTRAINT agent_sessions_ended_check CHECK ((status = 'ended') = (ended_at IS NOT NULL)),
+    CONSTRAINT agent_sessions_external_check CHECK (char_length(external_session_id) BETWEEN 1 AND 200),
+    CONSTRAINT agent_sessions_counts_check CHECK (event_count >= 0 AND last_seq >= 0)
+);
+CREATE UNIQUE INDEX agent_sessions_external_idx ON public.agent_sessions (org_id, agent_client_id, external_session_id);
+CREATE INDEX agent_sessions_org_recent_idx ON public.agent_sessions (org_id, last_event_at DESC, id DESC);
+CREATE INDEX agent_sessions_client_live_idx ON public.agent_sessions (agent_client_id, last_event_at) WHERE status = 'running';
+CREATE INDEX agent_sessions_last_event_idx ON public.agent_sessions (last_event_at);
+
+-- One receipt per (client, event id): a retried hook is stored once. seq is
+-- the server's order inside the session; a stale event has none.
+CREATE TABLE public.agent_session_events (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+    event_id text NOT NULL,
+    seq bigint,
+    outcome text NOT NULL,
+    type text NOT NULL,
+    agent_id text,
+    parent_agent_id text,
+    agent_type text,
+    tool_use_id text,
+    tool text,
+    tool_kind text,
+    mcp_server text,
+    status text,
+    duration_ms bigint,
+    janusly_refs jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_events_outcome_check CHECK ((outcome = 'applied') = (seq IS NOT NULL) AND outcome IN ('applied', 'stale')),
+    CONSTRAINT agent_session_events_id_check CHECK (event_id ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT agent_session_events_duration_check CHECK (duration_ms IS NULL OR duration_ms >= 0)
+);
+CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_events (agent_client_id, event_id);
+CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events (session_id, seq);
+-- A tool call an agent's hook holds until a person decides it from the map.
+-- content exists only when the client captures content for gated tools.
+CREATE TABLE public.agent_session_gates (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+    tool_use_id text NOT NULL,
+    tool text NOT NULL,
+    mcp_server text,
+    agent_id text,
+    content jsonb,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    reason text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_gates_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    CONSTRAINT agent_session_gates_decision_check CHECK ((status IN ('approved', 'denied')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
+    CONSTRAINT agent_session_gates_reason_check CHECK (reason IS NULL OR char_length(reason) <= 500)
+);
+CREATE UNIQUE INDEX agent_session_gates_call_idx ON public.agent_session_gates (session_id, tool_use_id);
+CREATE INDEX agent_session_gates_pending_idx ON public.agent_session_gates (org_id, created_at) WHERE status = 'pending';
+CREATE INDEX agent_session_gates_client_pending_idx ON public.agent_session_gates (agent_client_id) WHERE status = 'pending';
+CREATE INDEX agent_session_gates_content_idx ON public.agent_session_gates (created_at) WHERE content IS NOT NULL;
+
+CREATE INDEX agent_session_events_run_idx ON public.agent_session_events (org_id, (janusly_refs->>'runId')) WHERE (janusly_refs->>'runId') IS NOT NULL;
 
 -- +goose StatementEnd

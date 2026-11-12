@@ -28,7 +28,11 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/hookbridge"
+	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/httpapi"
+	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
+	"github.com/johnny4young/janusly/internal/httpapi/oauth"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
@@ -102,10 +106,24 @@ func requireBuildProvenance(production bool, identity buildinfo.Identity) error 
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		os.Exit(runHook())
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
+}
+
+// runHook serves `janusly hook` inside an agent's hook runner: no
+// configuration, database or logs, and a panic never fails the agent.
+func runHook() (code int) {
+	defer func() {
+		if recover() != nil {
+			code = 0
+		}
+	}()
+	return hookbridge.Main(context.Background(), os.Args[2:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
 }
 
 func run() error {
@@ -293,23 +311,40 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
-	var mcpHandler http.Handler
+	var mcpHandler, hookHandler, gateOpenHandler, gatePollHandler http.Handler
+	oauthIssuer := ""
 	if cfg.MCPHTTP.Enabled {
 		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
 		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
 			OnError: mcpTracker.RecordError, OnSuccess: mcpTracker.RecordRecovery,
 		})
+		agentHTTP := mcpserver.HTTPOptions{
+			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
+		}
+		// With a public base URL, remote MCP also takes OAuth grants.
+		if oauthIssuer = cfg.MCPHTTP.BaseURL; oauthIssuer != "" {
+			agentHTTP.ResourceMetadataURL = oauth.ResourceMetadataURL(oauthIssuer)
+		}
 		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
 			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,
 			WebBaseURL: os.Getenv("JANUSLY_WEB_BASE_URL"),
-		}, mcpserver.HTTPOptions{
-			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
-		})
-		logger.Info("remote mcp enabled", "path", "/mcp", "allowedHosts", cfg.MCPHTTP.AllowedHosts)
+		}, agentHTTP)
+		// The hooks bridge is the same remote agent surface: same switch,
+		// transport rules and token checks.
+		hookAuth := mcpserver.Deps{Audit: auditWriter, Pool: pool, Limiter: mcpLimiter, Transport: "hooks", Logger: logger}
+		hookDeps := agentsessions.IngestDeps{Pool: pool, Limiter: mcpLimiter, Logger: logger, NewID: uuid.NewString}
+		hookHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.Ingest(hookDeps)), agentHTTP)
+		gateOpenHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.OpenGate(hookDeps)), agentHTTP)
+		gatePollHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.PollGate(hookDeps)), agentHTTP)
+		logger.Info("remote mcp enabled", "path", "/mcp", "hooksPath", hookwire.Path, "allowedHosts", cfg.MCPHTTP.AllowedHosts)
 	}
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
 		MCPHandler:                  mcpHandler,
+		AgentHookHandler:            hookHandler,
+		AgentGateOpenHandler:        gateOpenHandler,
+		AgentGatePollHandler:        gatePollHandler,
+		OAuthIssuer:                 oauthIssuer,
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
 		Audit:                       auditWriter,

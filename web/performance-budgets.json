@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 651.7,
+  "artifactGzipKiB": 649.2,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 603.8
+    "maxGzipKiB": 601.6
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -128,7 +128,7 @@
     "MultiAgentTimeline.css": 1.06,
     "MultiAgentTimeline.js": 1.78,
     "OperationsPage.css": 1.36,
-    "OperationsPage.js": 6.5,
+    "OperationsPage.js": 5.95,
     "PermissionGrantsPanel.css": 0.88,
     "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,

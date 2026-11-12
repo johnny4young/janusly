@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/agentsession"
 	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/store"
@@ -56,6 +57,28 @@ func (e *Engine) ProcessRetentionSweep(ctx context.Context, retentionDays int) (
 			return total, err
 		}
 		total += int(deleted)
+	}
+	return total, nil
+}
+
+const agentSessionPurgeBatch = 200
+
+// PurgeExpiredAgentSessions drops hooks-bridge sessions silent past their
+// retention, with their events, in bounded batches.
+func (e *Engine) PurgeExpiredAgentSessions(ctx context.Context) (int, error) {
+	cutoff := e.now().UTC().Add(-agentsession.Retention)
+	total := 0
+	for range retentionMaxBatchesDefault {
+		deleted, err := store.New(e.pool).DeleteExpiredAgentSessionsBatch(ctx, store.DeleteExpiredAgentSessionsBatchParams{
+			Cutoff: cutoff, BatchSize: agentSessionPurgeBatch,
+		})
+		if err != nil {
+			return total, err
+		}
+		total += int(deleted)
+		if deleted < agentSessionPurgeBatch {
+			break
+		}
 	}
 	return total, nil
 }
@@ -119,6 +142,40 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 			passErr = errors.Join(passErr, err)
 			if ctx.Err() == nil {
 				logger.Error("authoring experience retention failed", "error", err)
+			}
+		}
+		if purged, err := e.PurgeExpiredAgentSessions(ctx); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("agent session retention failed", "error", err)
+			}
+		} else if purged > 0 {
+			logger.Info("retention purged agent sessions", "count", purged)
+		}
+		// OAuth registrations nobody used, and authorization requests past their life.
+		if _, err := store.New(e.pool).DeleteUnusedOAuthClients(ctx, e.now().UTC().Add(-24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).DeleteExpiredOAuthRequests(ctx, e.now().UTC().Add(-24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		// A consent whose code was never exchanged, and rotated refresh tokens
+		// older than any grant can live.
+		if _, err := store.New(e.pool).RevokeUnexchangedOAuthClients(ctx, e.now().UTC().Add(-10*time.Minute)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).DeleteOldOAuthRefreshHistory(ctx, e.now().UTC().Add(-91*24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		// Captured gate input is kept for a shorter window than its session.
+		gateNow := e.now().UTC()
+		if _, err := store.New(e.pool).ExpireAgentGates(ctx, gateNow); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).ClearExpiredAgentGateContent(ctx, gateNow.Add(-agentsession.GateContentRetention)); err != nil {
+			passErr = errors.Join(passErr, err)
+			if ctx.Err() == nil {
+				logger.Error("agent gate content retention failed", "error", err)
 			}
 		}
 		// Per-org data retention (run_events / audit_logs / usage_events).
