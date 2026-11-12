@@ -164,3 +164,39 @@ func TestReplayCampaignStepYieldsALostClaim(t *testing.T) {
 		t.Fatalf("lost claim leaked: item=%s replayed=%d failed=%d audits=%d", status, replayed, failed, audits)
 	}
 }
+
+// A failed pause-state read holds the item instead of replaying it as active.
+func TestReplayCampaignStepHoldsItemWhenPauseStateIsUnknown(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	campaignID := "camp-unknown-" + org
+	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaigns
+		(id, org_id, name, cluster_signature, filter_json, pacing_ms, status, total_count, created_by, next_dispatch_at, started_at)
+		VALUES ($1, $2, 'unknown pause', 'sig', '{}', 0, 'running', 1, 'test', now() - interval '1 day', now())`, campaignID, org); err != nil {
+		t.Fatalf("campaign: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO replay_campaign_items
+		(id, org_id, campaign_id, dead_letter_id, position) VALUES ($1, $2, $3, $4, 0)`,
+		campaignID+"-item", org, campaignID, "dl-"+org); err != nil {
+		t.Fatalf("item: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE replay_campaigns SET status = 'cancelled' WHERE id = $1`, campaignID)
+	})
+	eng.wrapTx = func(tx store.DBTX) store.DBTX {
+		return &statementHookTx{DBTX: tx, name: "GetDeadLetterWorkflowStatus", fail: true}
+	}
+
+	if _, err := eng.ProcessDueReplayCampaignStep(ctx); err == nil {
+		t.Fatal("a failed pause-state read must surface as an error")
+	}
+	var status string
+	var attempts, failed int
+	if err := pool.QueryRow(ctx, `SELECT i.status, i.attempt_count, c.failed_count
+		FROM replay_campaign_items i JOIN replay_campaigns c ON c.id = i.campaign_id
+		WHERE i.id = $1`, campaignID+"-item").Scan(&status, &attempts, &failed); err != nil {
+		t.Fatalf("read item: %v", err)
+	}
+	if status != "pending" || attempts != 0 || failed != 0 {
+		t.Fatalf("item=%s attempts=%d failed=%d, want it released untouched", status, attempts, failed)
+	}
+}

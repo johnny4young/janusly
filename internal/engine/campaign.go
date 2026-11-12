@@ -12,6 +12,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -94,19 +95,25 @@ func (e *Engine) ProcessDueReplayCampaignStep(ctx context.Context) (bool, error)
 		return true, err
 	}
 
-	// A paused workflow holds the campaign at this item until it resumes.
-	if status, err := q.GetDeadLetterWorkflowStatus(ctx, store.GetDeadLetterWorkflowStatusParams{
+	// A paused workflow holds the campaign at this item until it resumes, and
+	// so does a pause state that cannot be read. No row means an ad-hoc run.
+	status, err := store.New(e.wrapTx(e.pool)).GetDeadLetterWorkflowStatus(ctx, store.GetDeadLetterWorkflowStatusParams{
 		OrgID: campaign.OrgID, ID: item.DeadLetterID,
-	}); err == nil && status != "active" {
-		return true, q.ReleaseReplayCampaignItem(ctx, store.ReleaseReplayCampaignItemParams{
+	})
+	if (err == nil && status != "active") || (err != nil && !errors.Is(err, pgx.ErrNoRows)) {
+		release := q.ReleaseReplayCampaignItem(ctx, store.ReleaseReplayCampaignItemParams{
 			ID: item.ID, ClaimToken: pgtype.Text{String: claimToken, Valid: true},
 		})
+		if err != nil {
+			return true, errors.Join(fmt.Errorf("read workflow pause state: %w", err), release)
+		}
+		return true, release
 	}
 
 	// Per-item fault isolation: a failed replay settles the item and moves
 	// on; it never wedges the campaign.
 	var itemError pgtype.Text
-	status := "replayed"
+	status = "replayed"
 	if err := e.RedriveDeadLetterWithOptions(ctx, campaign.OrgID, item.DeadLetterID, RedriveOptions{Actor: campaign.CreatedBy}); err != nil {
 		status = "failed"
 		itemError = pgtype.Text{String: err.Error(), Valid: true}
