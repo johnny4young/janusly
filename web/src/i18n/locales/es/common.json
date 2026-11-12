@@ -2736,6 +2736,8 @@
   "publishRequests.field.reasons": "Por qué espera a una persona",
   "publishRequests.field.requestedBy": "Pedida por",
   "publishRequests.field.onBehalfOf": "En nombre de",
+  "publishRequests.field.proposedName": "Lo renombra a",
+  "publishRequests.effects.outputs": "Las salidas nombran un secreto",
   "publishRequests.reason.first_publish": "Primera publicación",
   "publishRequests.reason.writes": "Escribe en otros sistemas",
   "publishRequests.reason.outbound": "Llama a servicios externos",

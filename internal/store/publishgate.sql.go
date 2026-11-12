@@ -438,32 +438,59 @@ func (q *Queries) ListAgentClientNames(ctx context.Context, arg ListAgentClientN
 	return items, nil
 }
 
-const listDraftNames = `-- name: ListDraftNames :many
-SELECT id, COALESCE(document->>'name', '')::text AS name
-FROM workflow_drafts
-WHERE org_id = $1 AND id = ANY($2::text[])
+const listPublishRequestContext = `-- name: ListPublishRequestContext :many
+SELECT pr.id,
+       COALESCE(d.document->>'name', '')::text AS draft_name,
+       COALESCE((SELECT w.name FROM workflows w WHERE w.org_id = pr.org_id AND w.id = pr.workflow_id), '')::text AS live_name,
+       COALESCE(d.base_version_id, '')::text AS base_version_id,
+       COALESCE((SELECT wv.id FROM workflow_versions wv WHERE wv.org_id = pr.org_id AND wv.workflow_id = pr.workflow_id
+                 ORDER BY wv.version DESC LIMIT 1), '')::text AS latest_version_id,
+       COALESCE(q.status, '')::text AS receipt_status,
+       (q.id IS NOT NULL AND d.id IS NOT NULL AND q.draft_id = d.id AND q.digest = d.digest
+        AND q.created_at > $1::timestamptz)::bool AS receipt_current
+FROM publish_requests pr
+LEFT JOIN workflow_drafts d ON d.org_id = pr.org_id AND d.id = pr.draft_id
+LEFT JOIN draft_qualifications q ON q.org_id = pr.org_id AND q.id = pr.qualification_id
+WHERE pr.org_id = $2 AND pr.id = ANY($3::text[])
 `
 
-type ListDraftNamesParams struct {
-	OrgID string
-	Ids   []string
+type ListPublishRequestContextParams struct {
+	ReceiptCutoff time.Time
+	OrgID         string
+	Ids           []string
 }
 
-type ListDraftNamesRow struct {
-	ID   string
-	Name string
+type ListPublishRequestContextRow struct {
+	ID              string
+	DraftName       string
+	LiveName        string
+	BaseVersionID   string
+	LatestVersionID string
+	ReceiptStatus   string
+	ReceiptCurrent  bool
 }
 
-func (q *Queries) ListDraftNames(ctx context.Context, arg ListDraftNamesParams) ([]ListDraftNamesRow, error) {
-	rows, err := q.db.Query(ctx, listDraftNames, arg.OrgID, arg.Ids)
+// What a reviewer needs beside each request: the live and drafted names,
+// whether the receipt still backs the draft and whether the live version
+// moved since the draft was based on it.
+func (q *Queries) ListPublishRequestContext(ctx context.Context, arg ListPublishRequestContextParams) ([]ListPublishRequestContextRow, error) {
+	rows, err := q.db.Query(ctx, listPublishRequestContext, arg.ReceiptCutoff, arg.OrgID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDraftNamesRow
+	var items []ListPublishRequestContextRow
 	for rows.Next() {
-		var i ListDraftNamesRow
-		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+		var i ListPublishRequestContextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DraftName,
+			&i.LiveName,
+			&i.BaseVersionID,
+			&i.LatestVersionID,
+			&i.ReceiptStatus,
+			&i.ReceiptCurrent,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

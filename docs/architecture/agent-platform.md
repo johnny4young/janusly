@@ -361,12 +361,14 @@ described in `mcp-server.md`):
    publish), and the receipt's checks and fixture runs. Each request carries
    `viewer.canDecide` and the refusal the decide route would give
    (`permission`, `requester`, `second_person`, `creator_unknown`,
-   `policy_unavailable`, `settled`; the detail adds `stale` for an expired
-   receipt and `stale_base` when the live version moved), so the screen
-   offers only what the API allows and still shows a refusal it returns.
-   Approve and reject take a reason of at most 500 characters, stored on the
-   request and returned by `publish.status`; the screen asks for one before
-   a rejection. A pending request past its expiry reads and filters as
+   `policy_unavailable`, `stale` for a receipt that no longer backs the
+   draft, `stale_base` when the live version moved, `settled`), so the
+   screen offers only what the API allows and still shows a refusal it
+   returns. The title is the live workflow's name; a draft that renames it
+   shows the proposed name apart, so an agent cannot relabel what a person
+   approves. Approve and reject take a reason of at most 500 characters of
+   text, checked before any work, stored on the request and returned by
+   `publish.status`; the screen asks for one before a rejection. A pending request past its expiry reads and filters as
    expired.
 
 A passing gate proves the contracts and fixtures held, not that production

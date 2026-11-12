@@ -5,7 +5,8 @@ var publishRequestReason = strEnum([]string{
 })
 
 var publishRequest = closedObj(map[string]any{
-	"id": str(), "workflowId": str(), "workflowName": nullableString(), "draftId": str(), "qualificationId": str(),
+	"id": str(), "workflowId": str(), "workflowName": nullableString(), "proposedName": nullableString(),
+	"draftId": str(), "qualificationId": str(),
 	"reasons":     arr(publishRequestReason),
 	"requestedBy": str(), "requesterName": nullableString(), "onBehalfOf": str(),
 	"draftedBy": str(), "drafterName": nullableString(),
@@ -21,7 +22,7 @@ var publishRequest = closedObj(map[string]any{
 			"settled", "permission", "requester", "second_person", "creator_unknown", "policy_unavailable", "stale", "stale_base",
 		}),
 	}, "canDecide", "refusal"),
-}, "id", "workflowId", "workflowName", "draftId", "qualificationId", "reasons", "requestedBy", "requesterName",
+}, "id", "workflowId", "workflowName", "proposedName", "draftId", "qualificationId", "reasons", "requestedBy", "requesterName",
 	"onBehalfOf", "draftedBy", "drafterName", "status", "createdAt", "expiresAt", "decidedBy", "decidedAt",
 	"decisionReason", "publishedVersionId", "viewer")
 

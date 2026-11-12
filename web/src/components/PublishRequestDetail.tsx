@@ -108,11 +108,13 @@ export function PublishRequestDetail({
     setDeciding(decision)
     setRefusal(null)
     try {
-      const path = `/v1/publish-requests/${encodeURIComponent(request.id)}/${decision}`
+      const requestId = encodeURIComponent(request.id)
       const body = trimmed === '' ? {} : { reason: trimmed }
       const result = decision === 'approve'
-        ? await contractApi('POST /publish-requests/{id}/approve', path, body, { guard: isPostPublishRequestsIdApproveResponse })
-        : await contractApi('POST /publish-requests/{id}/reject', path, body, { guard: isPostPublishRequestsIdRejectResponse })
+        ? await contractApi('POST /publish-requests/{id}/approve', `/v1/publish-requests/${requestId}/approve`, body,
+          { guard: isPostPublishRequestsIdApproveResponse })
+        : await contractApi('POST /publish-requests/{id}/reject', `/v1/publish-requests/${requestId}/reject`, body,
+          { guard: isPostPublishRequestsIdRejectResponse })
       setLoad({ kind: 'ready', detail: { ...load.detail, request: result.request } })
       addToast(t(decision === 'approve' ? 'publishRequests.decision.approved' : 'publishRequests.decision.rejected', { name: title }), 'success')
       bumpPlatformVersion(DECISION_TAGS)
@@ -141,6 +143,12 @@ export function PublishRequestDetail({
       </header>
 
       <dl className="we-publish-request__facts">
+        {request.proposedName && (
+          <>
+            <dt>{t('publishRequests.field.proposedName')}</dt>
+            <dd data-testid="publish-request-renamed">{request.proposedName}</dd>
+          </>
+        )}
         <dt>{t('publishRequests.field.requestedBy')}</dt>
         <dd>{request.requesterName ?? actorLabel(request.requestedBy, names, t)}</dd>
         <dt>{t('publishRequests.field.onBehalfOf')}</dt>
@@ -161,11 +169,17 @@ export function PublishRequestDetail({
           <ul className="we-publish-request__effects" data-testid="publish-request-effects">
             {effects.map((effect) => (
               <li key={effect.nodeId}>
-                <code>{effect.nodeId}</code>
-                <span className="we-pill" data-tone={effect.writes ? 'warning' : 'neutral'}>
-                  {t(effect.writes ? 'publishRequests.effects.writes' : 'publishRequests.effects.reaches')}
-                </span>
-                <span>{effect.tool || effect.type}</span>
+                {effect.nodeId === '/outputs'
+                  ? <span>{t('publishRequests.effects.outputs')}</span>
+                  : (
+                    <>
+                      <code>{effect.nodeId}</code>
+                      <span className="we-pill" data-tone={effect.writes ? 'warning' : 'neutral'}>
+                        {t(effect.writes ? 'publishRequests.effects.writes' : 'publishRequests.effects.reaches')}
+                      </span>
+                      <span>{effect.tool || effect.type}</span>
+                    </>
+                  )}
                 {effect.target && <span className="we-publish-request__muted">{t('publishRequests.effects.target', { target: effect.target })}</span>}
                 {effect.credentials.length > 0 && (
                   <span className="we-publish-request__muted">

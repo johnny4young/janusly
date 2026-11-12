@@ -7854,6 +7854,12 @@
                                   "onBehalfOf": {
                                     "type": "string"
                                   },
+                                  "proposedName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
                                   "publishedVersionId": {
                                     "type": [
                                       "string",
@@ -7941,6 +7947,7 @@
                                   "id",
                                   "workflowId",
                                   "workflowName",
+                                  "proposedName",
                                   "draftId",
                                   "qualificationId",
                                   "reasons",
@@ -8240,6 +8247,12 @@
                                 "onBehalfOf": {
                                   "type": "string"
                                 },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
                                 "publishedVersionId": {
                                   "type": [
                                     "string",
@@ -8327,6 +8340,7 @@
                                 "id",
                                 "workflowId",
                                 "workflowName",
+                                "proposedName",
                                 "draftId",
                                 "qualificationId",
                                 "reasons",
@@ -8458,6 +8472,12 @@
                                 "onBehalfOf": {
                                   "type": "string"
                                 },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
                                 "publishedVersionId": {
                                   "type": [
                                     "string",
@@ -8545,6 +8565,7 @@
                                 "id",
                                 "workflowId",
                                 "workflowName",
+                                "proposedName",
                                 "draftId",
                                 "qualificationId",
                                 "reasons",
@@ -8672,6 +8693,12 @@
                                 "onBehalfOf": {
                                   "type": "string"
                                 },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
                                 "publishedVersionId": {
                                   "type": [
                                     "string",
@@ -8759,6 +8786,7 @@
                                 "id",
                                 "workflowId",
                                 "workflowName",
+                                "proposedName",
                                 "draftId",
                                 "qualificationId",
                                 "reasons",

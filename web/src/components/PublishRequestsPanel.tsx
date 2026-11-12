@@ -57,6 +57,9 @@ export function PublishRequestsPanel({
   const emails = useMemberEmails(canReadMembers)
   const [filter, setFilter] = useState<Filter>('pending')
   const [list, setList] = useState<Load>({ kind: 'loading' })
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const listRef = useRef(list)
+  listRef.current = list
   const [pending, setPending] = useState<PublishRequest[] | null>(null)
   const [tick, setTick] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(routedRequestId)
@@ -92,11 +95,16 @@ export function PublishRequestsPanel({
       .then((data) => {
         if (cancelled) return
         if (status === 'pending') setPending(data.requests)
+        setRefreshError(null)
         setList({ kind: 'ready', requests: filter === 'yours' ? data.requests.filter((request) => request.viewer.canDecide) : data.requests })
       })
       .catch((error: unknown) => {
         if (cancelled) return
-        setList(isForbiddenApiError(error) ? { kind: 'forbidden' } : { kind: 'error', message: tApiError(error) || t('publishRequests.error.load') })
+        const message = tApiError(error) || t('publishRequests.error.load')
+        const forbidden = isForbiddenApiError(error)
+        // A failed refresh keeps the rows and an open decision on screen.
+        if (listRef.current.kind === 'ready' && !forbidden) setRefreshError(message)
+        else setList(forbidden ? { kind: 'forbidden' } : { kind: 'error', message })
       })
     return () => { cancelled = true }
   }, [filter, nonce, tick, t])
@@ -113,6 +121,7 @@ export function PublishRequestsPanel({
 
   const choose = (next: Filter) => {
     if (next === filter) return
+    setRefreshError(null)
     setList({ kind: 'loading' })
     setFilter(next)
   }
@@ -146,6 +155,9 @@ export function PublishRequestsPanel({
         </Button>
       </div>
 
+      {refreshError && list.kind === 'ready' && (
+        <p className="we-publish-requests__error" role="status" data-testid="publish-requests-refresh-error">{refreshError}</p>
+      )}
       {list.kind === 'loading' && <LoadingSkeleton rows={3} label={t('common.loading')} />}
       {list.kind === 'forbidden' && (
         <EmptyState icon={<LockKeyhole size={18} />} kicker={t('publishRequests.forbidden.kicker')} body={t('publishRequests.forbidden.body')} testId="publish-requests-forbidden" />

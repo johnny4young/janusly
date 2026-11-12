@@ -2736,6 +2736,8 @@
   "publishRequests.field.reasons": "Why it waits for a person",
   "publishRequests.field.requestedBy": "Requested by",
   "publishRequests.field.onBehalfOf": "On behalf of",
+  "publishRequests.field.proposedName": "Renames it to",
+  "publishRequests.effects.outputs": "Outputs name a secret",
   "publishRequests.reason.first_publish": "First publish",
   "publishRequests.reason.writes": "Writes to other systems",
   "publishRequests.reason.outbound": "Calls outside services",

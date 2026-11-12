@@ -18,6 +18,7 @@ export function isPostPublishRequestsIdRejectResponse(value: unknown): value is 
       expiresAt: isString,
       id: isString,
       onBehalfOf: isString,
+      proposedName: nullable(isString),
       publishedVersionId: nullable(isString),
       qualificationId: isString,
       reasons: arrayOf(literal("writes", "first_publish", "outbound", "callers", "triggers_changed", "steps_removed", "outputs_removed")),

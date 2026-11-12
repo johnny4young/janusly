@@ -81,16 +81,22 @@ func TestPublishRequestViewerMatchesTheDecideRoute(t *testing.T) {
 	if got := detail.body["data"].(map[string]any)["request"].(map[string]any)["viewer"]; fmt.Sprint(got) != "map[canDecide:false refusal:stale]" {
 		t.Fatalf("a stale receipt must read as stale: %v", got)
 	}
+	if got := refusal(peer); got != "stale" {
+		t.Fatalf("the list must agree with the detail on a stale receipt: %v", got)
+	}
 	if res := h.callWithHeaders("POST", "/v1/publish-requests/"+requestID+"/approve", nil, "", as(peer)); res.status != 409 ||
 		res.body["error"].(map[string]any)["code"] != "publish_request_stale" {
 		t.Fatalf("approving a stale request: %d %v", res.status, res.body)
 	}
 
-	// A rejection keeps its reason for the agent and the screen.
-	if res := h.callWithHeaders("POST", "/v1/publish-requests/"+requestID+"/reject",
-		map[string]any{"reason": strings.Repeat("x", 501)}, "", as(peer)); res.status != 400 {
-		t.Fatalf("an oversized reason: %d %v", res.status, res.body)
+	// A reason the column cannot store is refused before anything happens.
+	for _, bad := range []string{strings.Repeat("x", 501), "ok\u0000", "bell\u0007"} {
+		if res := h.callWithHeaders("POST", "/v1/publish-requests/"+requestID+"/reject",
+			map[string]any{"reason": bad}, "", as(peer)); res.status != 400 || res.body["error"].(map[string]any)["code"] != "invalid_reason" {
+			t.Fatalf("reason %q: %d %v", bad, res.status, res.body)
+		}
 	}
+	// A rejection keeps its reason for the agent and the screen.
 	rejected := h.callWithHeaders("POST", "/v1/publish-requests/"+requestID+"/reject",
 		map[string]any{"reason": "  Needs a retry limit  "}, "", as(peer))
 	view := rejected.body["data"].(map[string]any)["request"].(map[string]any)
@@ -109,7 +115,11 @@ func TestPublishRequestViewerMatchesTheDecideRoute(t *testing.T) {
 	seed.workflowID = "wf-expired-" + suffix
 	expired := seed.insert()
 	listed := func(status string) string {
+		t.Helper()
 		res := h.callWithHeaders("GET", "/v1/publish-requests?status="+status, nil, "", as(peer))
+		if res.status != 200 {
+			t.Fatalf("list %s: %d %v", status, res.status, res.body)
+		}
 		return fmt.Sprint(res.body["data"])
 	}
 	if strings.Contains(listed("pending"), expired) || !strings.Contains(listed("expired"), expired) {
@@ -117,6 +127,24 @@ func TestPublishRequestViewerMatchesTheDecideRoute(t *testing.T) {
 	}
 	if res := h.callWithHeaders("GET", "/v1/publish-requests/"+expired, nil, "other-org-"+suffix, as(peer)); res.status != 404 {
 		t.Fatalf("another organization read the request: %d %v", res.status, res.body)
+	}
+}
+
+// A reason the column refuses never lets an approval publish without its
+// decision and audit record.
+func TestPublishRequestApprovalRefusesAnUnstorableReason(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	workflowID := "wf-nul-" + suffix
+	requestID := publishRequestSeed{t: t, h: h, agent: "agent:none-" + suffix, onBehalfOf: "someone", workflowID: workflowID,
+		document: makeLinearWorkflow(workflowID), digest: strings.Repeat("9", 64), suffix: "nul-" + suffix}.insert()
+	if res := h.call("POST", "/v1/publish-requests/"+requestID+"/approve", map[string]any{"reason": "fine\u0000"}, ""); res.status != 400 {
+		t.Fatalf("approval with a NUL reason: %d %v", res.status, res.body)
+	}
+	var versions int
+	if err := testPool(t).QueryRow(t.Context(), `SELECT count(*) FROM workflow_versions WHERE org_id = $1 AND workflow_id = $2`,
+		h.org, workflowID).Scan(&versions); err != nil || versions != 0 {
+		t.Fatalf("a refused approval published %d versions (%v)", versions, err)
 	}
 }
 
@@ -141,8 +169,14 @@ func TestPublishRequestDetailShowsEffectsAndChanges(t *testing.T) {
 		map[string]any{"id": "page", "type": "tool", "config": map[string]any{
 			"tool": "slack.post", "input": map[string]any{"credential": "SLACK_HOOK", "text": "done"},
 		}},
+		map[string]any{"id": "query", "type": "tool", "config": map[string]any{
+			"tool": "db.query", "credential": "WAREHOUSE", "input": map[string]any{"sql": "select 1"},
+			"headers": map[string]any{"X-Literal": "literal-value-never-shown"},
+		}},
 	}
-	draft["edges"] = []any{map[string]any{"from": "shape", "to": "post"}, map[string]any{"from": "post", "to": "page"}}
+	draft["edges"] = []any{map[string]any{"from": "shape", "to": "post"}, map[string]any{"from": "post", "to": "page"},
+		map[string]any{"from": "page", "to": "query"}}
+	draft["name"] = "Renamed by the agent"
 	requestID := publishRequestSeed{t: t, h: h, agent: "agent:none-" + suffix, onBehalfOf: "someone",
 		workflowID: "wf-effects-" + suffix, baseVersionID: saved.body["data"].(map[string]any)["versionId"].(string),
 		document: draft, digest: strings.Repeat("c", 64), suffix: "effects-" + suffix, reasons: "{writes,steps_removed,outputs_removed}"}.insert()
@@ -153,18 +187,40 @@ func TestPublishRequestDetailShowsEffectsAndChanges(t *testing.T) {
 	}
 	data := res.body["data"].(map[string]any)
 	effects := fmtJSON(data["effects"])
-	for _, want := range []string{`"nodeId":"post"`, `"target":"api.example.com"`, `"refunds_token"`, `"nodeId":"page"`, `"SLACK_HOOK"`, `"tool":"slack.post"`} {
+	for _, want := range []string{`"nodeId":"post"`, `"target":"api.example.com"`, `"refunds_token"`, `"nodeId":"page"`, `"SLACK_HOOK"`,
+		`"tool":"slack.post"`, `"WAREHOUSE"`} {
 		if !strings.Contains(effects, want) {
 			t.Fatalf("effects miss %s: %s", want, effects)
 		}
 	}
-	if strings.Contains(effects, "shape") {
-		t.Fatalf("a pure step is not an effect: %s", effects)
+	if strings.Contains(effects, "shape") || strings.Contains(effects, "literal-value") || strings.Contains(effects, "Bearer") {
+		t.Fatalf("effects carry a pure step or a configured value: %s", effects)
+	}
+	request := data["request"].(map[string]any)
+	if request["workflowName"] != "API linear" || request["proposedName"] != "Renamed by the agent" {
+		t.Fatalf("the live name leads and a rename shows apart: %v %v", request["workflowName"], request["proposedName"])
 	}
 	if changes := fmtJSON(data["changes"]); changes != `{"outputsRemoved":["verdict"],"stepsRemoved":["done"],"triggersChanged":[]}` {
 		t.Fatalf("changes: %s", changes)
 	}
-	if got := fmt.Sprint(data["request"].(map[string]any)["viewer"]); got != "map[canDecide:true refusal:<nil>]" {
+	if got := fmt.Sprint(request["viewer"]); got != "map[canDecide:true refusal:<nil>]" {
 		t.Fatalf("without the second-person policy the creator lookup is not needed: %s", got)
+	}
+}
+
+// Outputs that name a secret keep a draft from publishing alone; the detail
+// says so instead of reporting that nothing reaches out.
+func TestPublishRequestDetailNamesSecretOutputs(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	draft := makeLinearWorkflow("wf-outputs-" + suffix)
+	draft["outputs"] = map[string]any{"token": "{{secret.api_token}}"}
+	requestID := publishRequestSeed{t: t, h: h, agent: "agent:none-" + suffix, onBehalfOf: "someone",
+		workflowID: "wf-outputs-" + suffix, document: draft, digest: strings.Repeat("8", 64), suffix: "outputs-" + suffix,
+		reasons: "{first_publish,outbound}"}.insert()
+	res := h.call("GET", "/v1/publish-requests/"+requestID, nil, "")
+	effects := fmtJSON(res.body["data"].(map[string]any)["effects"])
+	if !strings.Contains(effects, `"nodeId":"/outputs"`) || !strings.Contains(effects, `"api_token"`) {
+		t.Fatalf("secret outputs must show as an effect: %s", effects)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -101,25 +102,13 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return internalError()
 	}
-	draftIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		draftIDs = append(draftIDs, row.DraftID)
-	}
-	names, err := q.ListDraftNames(ctx, store.ListDraftNamesParams{OrgID: rc.OrgID, Ids: draftIDs})
-	if err != nil {
-		return internalError()
-	}
-	workflowNames := make(map[string]string, len(names))
-	for _, name := range names {
-		workflowNames[name.ID] = name.Name
-	}
 	v, err := s.newViewer(ctx, rc, rows)
 	if err != nil {
 		return internalError()
 	}
 	requests := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		requests = append(requests, v.view(row, workflowNames[row.DraftID]))
+		requests = append(requests, v.view(row))
 	}
 	return httpkit.OK(map[string]any{"requests": requests})
 }
@@ -146,15 +135,13 @@ func (s *service) get(r *http.Request, rc httpkit.Request) httpkit.Result {
 		return internalError()
 	}
 	proposed := document(draft.Document)
-	name, _ := proposed["name"].(string)
 	v, err := s.newViewer(ctx, rc, []store.PublishRequest{request})
 	if err != nil {
 		return internalError()
 	}
-	view := v.view(request, name)
 	wf, _ := domain.Parse(draft.Document)
 	data := map[string]any{
-		"request": view, "proposed": proposed, "effects": []any{}, "changes": nil,
+		"proposed": proposed, "effects": []any{}, "changes": nil,
 		"qualification": map[string]any{"status": receipt.Status, "checks": jsonList(receipt.Checks), "fixtureRuns": jsonList(receipt.FixtureRuns)},
 	}
 	if wf != nil {
@@ -162,11 +149,9 @@ func (s *service) get(r *http.Request, rc httpkit.Request) httpkit.Result {
 	} else {
 		data["effects"] = nil
 	}
-	currentID := ""
 	latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: request.WorkflowID, OrgID: rc.OrgID})
 	switch {
 	case err == nil:
-		currentID = latest.ID
 		data["current"] = map[string]any{"versionId": latest.ID, "version": latest.Version, "document": document(latest.DagJson)}
 		if live, _ := domain.Parse(latest.DagJson); live != nil && wf != nil {
 			data["changes"] = shrinkView(publishgate.Shrinks(live, wf))
@@ -174,17 +159,7 @@ func (s *service) get(r *http.Request, rc httpkit.Request) httpkit.Result {
 	case !errors.Is(err, pgx.ErrNoRows):
 		return internalError()
 	}
-	// A request the decide route would refuse as stale says so before anyone
-	// tries; the route still checks on its own.
-	if view["status"] == "pending" && view["viewer"].(map[string]any)["refusal"] == nil {
-		switch {
-		case draft.BaseVersionID.String != currentID:
-			view["viewer"] = map[string]any{"canDecide": false, "refusal": "stale_base"}
-		case receipt.Status == "failed" || receipt.DraftID != draft.ID || receipt.Digest != draft.Digest ||
-			time.Now().After(receipt.CreatedAt.Add(publishgate.ReceiptLifetime)):
-			view["viewer"] = map[string]any{"canDecide": false, "refusal": "stale"}
-		}
-	}
+	data["request"] = v.view(request)
 	return httpkit.OK(data)
 }
 
@@ -211,32 +186,48 @@ func effects(wf *domain.Workflow) []map[string]any {
 			continue
 		}
 		tool, _ := node.Config["tool"].(string)
-		credentials := map[string]bool{}
-		if input, ok := node.Config["input"].(map[string]any); ok {
-			if name, ok := input["credential"].(string); ok && name != "" {
-				credentials[name] = true
-			}
-		}
-		raw, _ := json.Marshal(node.Config)
-		for _, match := range secretReference.FindAllStringSubmatch(string(raw), -1) {
-			credentials[match[1]] = true
-		}
 		out = append(out, map[string]any{
 			"nodeId": node.ID, "type": node.Type, "tool": tool, "target": target(node.Config),
-			"writes": engine.NodeMayHaveEffect(node), "credentials": slices.Sorted(maps.Keys(credentials)),
+			"writes": engine.NodeMayHaveEffect(node), "credentials": credentialNames(node.Config),
+		})
+	}
+	if reaching["/outputs"] {
+		out = append(out, map[string]any{
+			"nodeId": "/outputs", "type": "outputs", "tool": "", "target": "", "writes": false,
+			"credentials": credentialNames(map[string]any{"outputs": wf.Outputs}),
 		})
 	}
 	return out
 }
 
-// target is the host a step calls, when its URL is literal.
+// credentialNames lists the credentials a step names, directly, in its tool
+// input or as {{secret.NAME}}.
+func credentialNames(config map[string]any) []string {
+	names := map[string]bool{}
+	if name, ok := config["credential"].(string); ok && name != "" {
+		names[name] = true
+	}
+	if input, ok := config["input"].(map[string]any); ok {
+		if name, ok := input["credential"].(string); ok && name != "" {
+			names[name] = true
+		}
+	}
+	raw, _ := json.Marshal(config)
+	for _, match := range secretReference.FindAllStringSubmatch(string(raw), -1) {
+		names[match[1]] = true
+	}
+	return slices.Sorted(maps.Keys(names))
+}
+
+// target is the host a step calls, when its URL is literal, or the MCP
+// connection it uses.
 func target(config map[string]any) string {
 	raw, _ := config["url"].(string)
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Host == "" || strings.Contains(raw, "{{") {
-		return ""
+	if parsed, err := url.Parse(strings.TrimSpace(raw)); err == nil && parsed.Host != "" && !strings.Contains(raw, "{{") {
+		return parsed.Host
 	}
-	return parsed.Host
+	alias, _ := config["connectionAlias"].(string)
+	return strings.TrimSpace(alias)
 }
 
 // document decodes a stored workflow; a canonical document with no edges
@@ -276,8 +267,11 @@ func (s *service) decide(r *http.Request, rc httpkit.Request, approve bool) http
 		}
 	}
 	reason := strings.TrimSpace(body.Reason)
-	if utf8.RuneCountInString(reason) > maxReasonLength {
-		return httpkit.Error(http.StatusBadRequest, "invalid_reason", "reason must be at most 500 characters",
+	// Checked before any work: a value the column refuses must never fail
+	// the decision after the version is published.
+	if utf8.RuneCountInString(reason) > maxReasonLength || !utf8.ValidString(reason) ||
+		strings.ContainsFunc(reason, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\t' }) {
+		return httpkit.Error(http.StatusBadRequest, "invalid_reason", "reason must be at most 500 characters of text",
 			map[string]any{"max": maxReasonLength})
 	}
 	ctx := r.Context()
@@ -383,15 +377,13 @@ func (s *service) settle(ctx context.Context, rc httpkit.Request, request store.
 	}
 	maps.Copy(metadata, extra)
 	s.audit.Write(ctx, s.pool, rc.Auth, action, audit.Options{TargetType: "workflow", TargetID: request.WorkflowID, Metadata: metadata})
-	var name string
-	if draft, err := store.New(s.pool).GetWorkflowDraft(ctx, store.GetWorkflowDraftParams{OrgID: rc.OrgID, ID: row.DraftID}); err == nil {
-		name, _ = document(draft.Document)["name"].(string)
-	}
+	// The decision is committed: a failed read of names must not report it
+	// as lost.
 	v, err := s.newViewer(ctx, rc, []store.PublishRequest{row})
 	if err != nil {
-		return internalError()
+		v = &viewer{userID: rc.UserID, agents: map[string]store.ListAgentClientNamesRow{}, context: map[string]store.ListPublishRequestContextRow{}}
 	}
-	return httpkit.OK(map[string]any{"request": v.view(row, name)})
+	return httpkit.OK(map[string]any{"request": v.view(row)})
 }
 
 // secondPerson refuses the people accountable for the request, the creators
@@ -457,11 +449,12 @@ type viewer struct {
 	secondPerson bool
 	policyError  bool
 	agents       map[string]store.ListAgentClientNamesRow
+	context      map[string]store.ListPublishRequestContextRow
 }
 
 func (s *service) newViewer(ctx context.Context, rc httpkit.Request, rows []store.PublishRequest) (*viewer, error) {
 	q := store.New(s.pool)
-	v := &viewer{userID: rc.UserID, agents: map[string]store.ListAgentClientNamesRow{}}
+	v := &viewer{userID: rc.UserID, agents: map[string]store.ListAgentClientNamesRow{}, context: map[string]store.ListPublishRequestContextRow{}}
 	if rc.Auth != nil && auth.IsPersonMode(rc.Auth.Mode) {
 		role, err := auth.ResolveRoleFromMembership(ctx, q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
 		if err != nil {
@@ -478,6 +471,19 @@ func (s *service) newViewer(ctx context.Context, rc httpkit.Request, rows []stor
 	if v.permitted {
 		required, err := s.secondPersonRequired(ctx, rc.OrgID)
 		v.secondPerson, v.policyError = required, err != nil
+	}
+	requestIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		requestIDs = append(requestIDs, row.ID)
+	}
+	contexts, err := q.ListPublishRequestContext(ctx, store.ListPublishRequestContextParams{
+		OrgID: rc.OrgID, Ids: requestIDs, ReceiptCutoff: time.Now().Add(-publishgate.ReceiptLifetime),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range contexts {
+		v.context[row.ID] = row
 	}
 	ids := map[string]bool{}
 	for _, row := range rows {
@@ -513,19 +519,24 @@ func (v *viewer) refusal(row store.PublishRequest, status string) any {
 		if row.OnBehalfOf == v.userID {
 			return "second_person"
 		}
-		clientID, isAgent := strings.CutPrefix(row.DraftedBy, "agent:")
-		if !isAgent {
+		if clientID, isAgent := strings.CutPrefix(row.DraftedBy, "agent:"); !isAgent {
 			if row.DraftedBy == v.userID {
 				return "second_person"
 			}
-			return nil
-		}
-		agent, known := v.agents[clientID]
-		if !known {
+		} else if agent, known := v.agents[clientID]; !known {
 			return "creator_unknown"
-		}
-		if agent.CreatedBy == v.userID {
+		} else if agent.CreatedBy == v.userID {
 			return "second_person"
+		}
+	}
+	// What the decide route would refuse as stale says so before anyone
+	// tries; the route still checks on its own.
+	if context, known := v.context[row.ID]; known {
+		switch {
+		case context.BaseVersionID != context.LatestVersionID:
+			return "stale_base"
+		case context.ReceiptStatus == "failed" || !context.ReceiptCurrent:
+			return "stale"
 		}
 	}
 	return nil
@@ -542,22 +553,31 @@ func (v *viewer) agentName(actor string) any {
 
 // view renders a request; a pending request past its expiry reads as expired,
 // as publish.status reports it, until a decision attempt records it.
-func (v *viewer) view(row store.PublishRequest, workflowName string) map[string]any {
+func (v *viewer) view(row store.PublishRequest) map[string]any {
 	status := row.Status
 	if status == "pending" && !time.Now().Before(row.ExpiresAt) {
 		status = "expired"
 	}
 	refusal := v.refusal(row, status)
 	out := map[string]any{
-		"id": row.ID, "workflowId": row.WorkflowID, "workflowName": nil, "draftId": row.DraftID, "qualificationId": row.QualificationID,
+		"id": row.ID, "workflowId": row.WorkflowID, "workflowName": nil, "proposedName": nil, "draftId": row.DraftID, "qualificationId": row.QualificationID,
 		"reasons": nonNil(row.Reasons), "requestedBy": row.RequestedBy, "requesterName": v.agentName(row.RequestedBy),
 		"onBehalfOf": row.OnBehalfOf, "draftedBy": row.DraftedBy, "drafterName": v.agentName(row.DraftedBy), "status": status,
 		"createdAt": row.CreatedAt.UTC().Format(time.RFC3339), "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339),
 		"decidedBy": nil, "decidedAt": nil, "decisionReason": nil, "publishedVersionId": nil,
 		"viewer": map[string]any{"canDecide": refusal == nil, "refusal": refusal},
 	}
-	if workflowName != "" {
-		out["workflowName"] = workflowName
+	// The live name is the one people know; a draft that renames the
+	// workflow shows its proposed name apart, so an agent cannot relabel it.
+	context := v.context[row.ID]
+	switch {
+	case context.LiveName != "":
+		out["workflowName"] = context.LiveName
+		if context.DraftName != "" && context.DraftName != context.LiveName {
+			out["proposedName"] = context.DraftName
+		}
+	case context.DraftName != "":
+		out["workflowName"] = context.DraftName
 	}
 	if row.DecidedBy.Valid {
 		out["decidedBy"] = row.DecidedBy.String

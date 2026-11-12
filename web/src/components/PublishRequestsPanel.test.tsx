@@ -17,7 +17,7 @@ type Refusal = null | 'settled' | 'permission' | 'requester' | 'second_person' |
 
 function request(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'pub-1', workflowId: 'wf-refunds', workflowName: 'Refunds', draftId: 'draft-1', qualificationId: 'qual-1',
+    id: 'pub-1', workflowId: 'wf-refunds', workflowName: 'Refunds', proposedName: null as string | null, draftId: 'draft-1', qualificationId: 'qual-1',
     reasons: ['writes', 'steps_removed'], requestedBy: 'agent:c-1', requesterName: 'Claude Code', onBehalfOf: 'me',
     draftedBy: 'agent:c-1', drafterName: 'Claude Code',
     status: 'pending', createdAt: '2026-11-07T10:00:00Z', expiresAt: '2026-11-08T10:00:00Z',
@@ -240,5 +240,39 @@ describe('<PublishRequestsPanel />', () => {
     expect(paths.some((path) => path.endsWith('status=superseded'))).toBe(true)
     expect(article).toHaveTextContent('A newer request for this workflow replaced it.')
     expect(within(article).queryByTestId('publish-request-reject')).not.toBeInTheDocument()
+  })
+  it('keeps an open decision on screen when a refresh fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let failing = false
+    routeApi({
+      'GET /v1/publish-requests': () => {
+        if (failing) throw new ApiError('Service unavailable', { statusCode: 503 })
+        return { requests: [request()] }
+      },
+      'GET /v1/publish-requests/pub-1': () => detail(),
+    })
+    renderPanel()
+    const article = await openRequest()
+    fireEvent.change(within(article).getByLabelText('Reason'), { target: { value: 'half typed' } })
+
+    failing = true
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(await screen.findByTestId('publish-requests-refresh-error')).toHaveTextContent('Service unavailable')
+    expect(screen.getByTestId('publish-request-detail')).toBeInTheDocument()
+    expect(within(screen.getByTestId('publish-request-detail')).getByLabelText('Reason')).toHaveValue('half typed')
+  })
+
+  it('names a rename apart and lists outputs that name a secret', async () => {
+    const row = request({ proposedName: 'Daily digest' })
+    const renamed = { ...detail(row), effects: [{ nodeId: '/outputs', type: 'outputs', tool: '', target: '', writes: false, credentials: ['api_token'] }] }
+    routeApi({
+      'GET /v1/publish-requests': () => ({ requests: [row] }),
+      'GET /v1/publish-requests/pub-1': () => renamed,
+    })
+    renderPanel()
+    const article = await openRequest()
+    expect(within(article).getByRole('heading', { name: 'Refunds' })).toBeInTheDocument()
+    expect(within(article).getByTestId('publish-request-renamed')).toHaveTextContent('Daily digest')
+    expect(within(article).getByTestId('publish-request-effects')).toHaveTextContent(/Outputs name a secret.*with api_token/)
   })
 })

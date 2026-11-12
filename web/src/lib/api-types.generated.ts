@@ -1826,6 +1826,7 @@ export interface ApiResponses {
       "expiresAt": string
       "id": string
       "onBehalfOf": string
+      "proposedName": string | null
       "publishedVersionId": string | null
       "qualificationId": string
       "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
@@ -1888,6 +1889,7 @@ export interface ApiResponses {
       "expiresAt": string
       "id": string
       "onBehalfOf": string
+      "proposedName": string | null
       "publishedVersionId": string | null
       "qualificationId": string
       "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
@@ -2128,6 +2130,7 @@ export interface ApiResponses {
       "expiresAt": string
       "id": string
       "onBehalfOf": string
+      "proposedName": string | null
       "publishedVersionId": string | null
       "qualificationId": string
       "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
@@ -2155,6 +2158,7 @@ export interface ApiResponses {
       "expiresAt": string
       "id": string
       "onBehalfOf": string
+      "proposedName": string | null
       "publishedVersionId": string | null
       "qualificationId": string
       "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
