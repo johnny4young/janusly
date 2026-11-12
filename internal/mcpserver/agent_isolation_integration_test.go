@@ -327,6 +327,14 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(session, "revoked")
+	for range failedAuthLimit.Max + 5 {
+		expectInvalid(session, "revoked, retried")
+	}
+	var rejections int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'mcp.auth.rejected'
+		AND target_id = $2`, tenant.org, revoked.Client.ID).Scan(&rejections); err != nil || rejections != failedAuthLimit.Max {
+		t.Fatalf("retried rejections must be audited up to the limit: %d %v", rejections, err)
+	}
 
 	expired := issueAgentClient(t, pool, tenant, agentclient.IssueInput{})
 	if _, err := pool.Exec(ctx, `UPDATE agent_clients SET token_issued_at = now() - interval '2 days',
@@ -363,6 +371,15 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(operatorSession, "creator removed")
+
+	for clientID, want := range map[string]string{revoked.Client.ID: "revoked", expired.Client.ID: "expired", operator.Client.ID: "creator_removed"} {
+		var reason, transport string
+		if err := pool.QueryRow(ctx, `SELECT metadata->>'reason', metadata->>'transport' FROM audit_logs
+			WHERE org_id = $1 AND action = 'mcp.auth.rejected' AND target_id = $2 LIMIT 1`, tenant.org, clientID).Scan(&reason, &transport); err != nil ||
+			reason != want || transport != "stdio" {
+			t.Fatalf("rejection audit for %s: %q %q %v", want, reason, transport, err)
+		}
+	}
 }
 
 func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {

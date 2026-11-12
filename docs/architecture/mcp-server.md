@@ -84,6 +84,10 @@ call (a start, a redrive, a fix), its creator counts as a requester of the
 call's tool approval, so the person accountable for an agent cannot approve its
 writes alone. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
+It is the only tool that may name no permission; for any other tool an empty
+permission list denies. A rejected token writes `mcp.auth.rejected` (see
+`agent-platform.md`), and a store failure while resolving the agent answers
+with fixed text while the detail goes to the server log.
 
 ## Publish gate
 

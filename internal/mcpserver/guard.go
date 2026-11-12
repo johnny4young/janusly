@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ import (
 var defaultMCPReadPermissions = []string{
 	"workflows.read", "runs.read", "dlq.read", "recovery.read",
 }
+
+// permissionlessTools may pass an empty permission list; for any other tool an
+// empty list denies.
+var permissionlessTools = map[string]bool{"agent.info": true}
 
 func init() {
 	audit.RegisterRuntimeAction("mcp.tool.invoked")
@@ -89,7 +94,7 @@ func (d Deps) guardToolAny(
 		reason = "agent client lacks a capability that includes " + toolName + "; agent.info lists the tools it can call."
 	}
 	if allowed {
-		hasPermission := len(required) == 0
+		hasPermission := permissionlessTools[toolName] && len(required) == 0
 		for _, permission := range required {
 			if permission != "" && d.Permissions != nil && d.Permissions[permission] {
 				hasPermission = true
@@ -98,7 +103,9 @@ func (d Deps) guardToolAny(
 		}
 		if !hasPermission {
 			allowed = false
-			if len(required) == 1 {
+			if !slices.ContainsFunc(required, func(permission string) bool { return permission != "" }) {
+				reason = "MCP tool " + toolName + " names no permission."
+			} else if len(required) == 1 {
 				reason = "MCP actor lacks permission " + required[0] + "."
 			} else {
 				reason = "MCP actor lacks any required permission: " + strings.Join(required, ", ") + "."

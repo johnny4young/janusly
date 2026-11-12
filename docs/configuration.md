@@ -21,7 +21,7 @@ names. It distinguishes strict boot validation from feature-specific fallbacks.
 | `JANUSLY_INTERNAL_PORT` | `9464` | Internal metrics and diagnostics port. |
 | `JANUSLY_LOG_LEVEL` | `info` | Floor for the structured log (`debug`, `info`, `warn`, `error`); unknown values keep `info`. |
 | `JANUSLY_START_RATE_LIMIT_PER_MIN` | `30000` | Per-organization cap on `POST /v1/start` per minute; a runaway-client guard, not a quota. |
-| `JANUSLY_TRUSTED_PROXY` | `false` | When `true`, per-IP rate limits key on the first `X-Forwarded-For` hop instead of the socket peer. Set it only behind a proxy that overwrites that header; otherwise a client can pick its own bucket. |
+| `JANUSLY_TRUSTED_PROXY` | `false` | When `true`, per-IP rate limits key on the last `X-Forwarded-For` hop, the one the proxy in front of Janusly wrote, instead of the socket peer. Earlier hops come from the client and are ignored; a hop that is not an IP falls back to the socket peer. Set it only when exactly one proxy sits in front of the process. |
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | empty | Comma-separated explicit loopback HTTP origins added to browser CSP for local identity labs; non-loopback and non-HTTP values are ignored. |
 | `JANUSLY_WORKER_CONCURRENCY` | `8` | Concurrent workflow task limit, range 1–64. |
 | `JANUSLY_API_POOL_SIZE` | `10` | Public-request PostgreSQL pool size; integer range 1–100. |

@@ -16,6 +16,35 @@ import (
 // revoked token, or one whose creator left the organization.
 var ErrInvalidToken = errors.New("agent token is invalid, expired or revoked")
 
+// Rejection reasons for audit; the caller always sees ErrInvalidToken.
+const (
+	RejectMalformed      = "malformed"
+	RejectUnknown        = "unknown"
+	RejectRevoked        = "revoked"
+	RejectExpired        = "expired"
+	RejectCapabilities   = "invalid_capabilities"
+	RejectCreatorRemoved = "creator_removed"
+)
+
+// RejectedError is ErrInvalidToken plus why, and the client and organization
+// when the digest matched one.
+type RejectedError struct {
+	Reason   string
+	ClientID string
+	OrgID    string
+}
+
+func (e *RejectedError) Error() string        { return ErrInvalidToken.Error() }
+func (e *RejectedError) Is(target error) bool { return target == ErrInvalidToken }
+
+func rejected(reason string, row *store.AgentClient) error {
+	err := &RejectedError{Reason: reason}
+	if row != nil {
+		err.ClientID, err.OrgID = row.ID, row.OrgID
+	}
+	return err
+}
+
 // Principal is one agent client's authority for one call.
 type Principal struct {
 	ClientID           string
@@ -55,33 +84,36 @@ func (r Resolver) now() time.Time {
 	return time.Now()
 }
 
-// Resolve returns ErrInvalidToken for every credential failure and wraps
-// only store errors.
+// Resolve returns a *RejectedError, which matches ErrInvalidToken, for every
+// credential failure, and wraps only store errors.
 func (r Resolver) Resolve(ctx context.Context, token string) (*Principal, error) {
 	if !wellFormed(token) {
-		return nil, ErrInvalidToken
+		return nil, rejected(RejectMalformed, nil)
 	}
 	q := store.New(r.Pool)
 	row, err := q.GetAgentClientByTokenDigest(ctx, Digest(token))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrInvalidToken
+		return nil, rejected(RejectUnknown, nil)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if row.RevokedAt != nil || !r.now().Before(row.ExpiresAt) {
-		return nil, ErrInvalidToken
+	if row.RevokedAt != nil {
+		return nil, rejected(RejectRevoked, &row)
+	}
+	if !r.now().Before(row.ExpiresAt) {
+		return nil, rejected(RejectExpired, &row)
 	}
 	capabilities, err := ParseCapabilities(row.Capabilities)
 	if err != nil {
-		return nil, ErrInvalidToken
+		return nil, rejected(RejectCapabilities, &row)
 	}
 	held, err := CreatorPermissions(ctx, q, row.OrgID, row.CreatedBy)
 	if err != nil {
 		return nil, err
 	}
 	if held == nil {
-		return nil, ErrInvalidToken
+		return nil, rejected(RejectCreatorRemoved, &row)
 	}
 	permissions := map[string]bool{}
 	for permission := range CeilingPermissions(capabilities) {

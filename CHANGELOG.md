@@ -4,6 +4,20 @@
 
 - The JavaScript toolchain requires Node.js 26 LTS (26.13.1 or newer). Node 26
   no longer bundles corepack, so install it before `corepack enable`.
+- Agent access is tighter. The "needs you" feed (`GET /needs-you`,
+  `GET /v1/needs-you`) lists approval, form and tool-approval steps only to
+  people who also hold `runs.read`, so a custom role with only `runs.start` no
+  longer sees the organization's run, step and tool ids. An MCP tool that names
+  no permission is now refused instead of admitted; `agent.info` stays open to
+  every agent client. Each rejected agent token, on remote MCP or with
+  `JANUSLY_AGENT_TOKEN`, writes an `mcp.auth.rejected` audit row with the
+  reason and never the token, and remote MCP answers 429 after 20 rejected
+  tokens in a minute from one address. With `JANUSLY_TRUSTED_PROXY=true`, every
+  per-address limit (remote MCP, SSO start, public status pages) now keys on
+  the last `X-Forwarded-For` hop, the one your proxy wrote, so a client can no
+  longer choose its own bucket by sending the header itself. A database failure while checking an
+  agent token no longer reaches the MCP client; it gets a fixed "temporarily
+  unavailable" message and the detail stays in the server log.
 - While development auth headers are accepted (no identity provider outside
   production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
   `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless
