@@ -346,6 +346,10 @@ var Routes = []Route{
 		Response: runInvestigation},
 	{Method: "GET", Path: "/v1/runs/{runId}/map", Summary: "Per-step state, time, cost, stuck signal and agent lanes of one run",
 		Response: runMap},
+	{Method: "GET", Path: "/v1/agent-sessions", Summary: "External agent sessions observed through the hooks bridge, newest first",
+		Response: agentSessionList},
+	{Method: "GET", Path: "/v1/agent-sessions/{sessionId}/map", Summary: "Agent lanes, totals and Janusly references of one observed session",
+		Response: agentSessionMap},
 	{Method: "GET", Path: "/v1/needs-you", Summary: "Decisions waiting on the signed-in person",
 		Response: needsYou},
 }

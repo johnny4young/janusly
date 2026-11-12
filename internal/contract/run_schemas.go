@@ -75,7 +75,44 @@ var runMap = closedObj(map[string]any{
 	"nodes":  arr(runMapNode),
 	"lanes":  arr(runMapLane),
 	"totals": closedObj(map[string]any{"costUsd": num(), "tokens": countT()}, "costUsd", "tokens"),
-}, "run", "nodes", "lanes", "totals")
+	"sessions": arr(closedObj(map[string]any{
+		"id": str(), "agentClientName": str(), "runtime": str(),
+	}, "id", "agentClientName", "runtime")),
+}, "run", "nodes", "lanes", "totals", "sessions")
+
+var agentSession = closedObj(map[string]any{
+	"id": str(), "agentClientId": str(), "agentClientName": str(), "runtime": str(),
+	"project": nullableString(), "model": nullableString(),
+	"status":    strEnum([]string{"running", "idle", "ended"}),
+	"truncated": boolT(), "eventCount": countT(),
+	"startedAt": str(), "lastEventAt": str(), "endedAt": nullableString(),
+}, "id", "agentClientId", "agentClientName", "runtime", "project", "model", "status", "truncated",
+	"eventCount", "startedAt", "lastEventAt", "endedAt")
+
+var agentSessionList = closedObj(map[string]any{
+	"sessions": arr(agentSession), "nextCursor": nullableString(),
+}, "sessions", "nextCursor")
+
+var agentSessionLane = closedObj(map[string]any{
+	"nodeId": str(), "kind": strEnum([]string{"external_agent", "external_subagent"}),
+	"parentId": nullableString(), "agentType": nullableString(), "live": boolT(),
+	"steps": arr(closedObj(map[string]any{
+		"type": str(), "at": str(), "tool": str(), "status": str(), "agent": str(), "index": countT(),
+	}, "type", "at", "index")),
+	"truncated": boolT(),
+}, "nodeId", "kind", "parentId", "agentType", "live", "steps", "truncated")
+
+var agentSessionMap = closedObj(map[string]any{
+	"session": agentSession,
+	"lanes":   arr(agentSessionLane),
+	"totals": closedObj(map[string]any{
+		"events": countT(), "toolCalls": countT(), "mcpCalls": countT(), "errors": countT(),
+	}, "events", "toolCalls", "mcpCalls", "errors"),
+	"liveSubagents": countT(),
+	"refs": closedObj(map[string]any{
+		"workflowIds": arr(str()), "draftIds": arr(str()), "runIds": arr(str()),
+	}, "workflowIds", "draftIds", "runIds"),
+}, "session", "lanes", "totals", "liveSubagents", "refs")
 
 var needsYouItem = map[string]any{"oneOf": []any{
 	closedObj(map[string]any{

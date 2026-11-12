@@ -8,7 +8,9 @@
   tool inputs. Sessions are kept 14 days. `janusly hook claude-code` and
   `janusly hook codex` send them from the agent's hooks; `janusly hook doctor`
   checks the setup and `janusly hook config <runtime>` prints the hook
-  configuration.
+  configuration. The Agent activity tab lists the observed sessions and shows
+  each one's agents and subagents as lanes; a run started from a session links
+  to it.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the

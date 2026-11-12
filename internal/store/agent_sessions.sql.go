@@ -74,6 +74,54 @@ func (q *Queries) DeleteExpiredAgentSessionsBatch(ctx context.Context, arg Delet
 	return result.RowsAffected(), nil
 }
 
+const getAgentSession = `-- name: GetAgentSession :one
+SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+FROM agent_sessions s
+LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+WHERE s.org_id = $1 AND s.id = $2
+`
+
+type GetAgentSessionParams struct {
+	OrgID string
+	ID    string
+}
+
+type GetAgentSessionRow struct {
+	ID              string
+	AgentClientID   string
+	AgentClientName string
+	Runtime         string
+	Project         pgtype.Text
+	Model           pgtype.Text
+	Status          string
+	Truncated       bool
+	EventCount      int32
+	StartedAt       time.Time
+	LastEventAt     time.Time
+	EndedAt         *time.Time
+}
+
+func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams) (GetAgentSessionRow, error) {
+	row := q.db.QueryRow(ctx, getAgentSession, arg.OrgID, arg.ID)
+	var i GetAgentSessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.AgentClientID,
+		&i.AgentClientName,
+		&i.Runtime,
+		&i.Project,
+		&i.Model,
+		&i.Status,
+		&i.Truncated,
+		&i.EventCount,
+		&i.StartedAt,
+		&i.LastEventAt,
+		&i.EndedAt,
+	)
+	return i, err
+}
+
 const getAgentSessionReceipt = `-- name: GetAgentSessionReceipt :one
 SELECT session_id, outcome, seq, received_at FROM agent_session_events
 WHERE agent_client_id = $1 AND event_id = $2
@@ -217,6 +265,190 @@ func (q *Queries) InsertAgentSessionEvent(ctx context.Context, arg InsertAgentSe
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listAgentSessionEvents = `-- name: ListAgentSessionEvents :many
+SELECT seq, type, agent_id, parent_agent_id, agent_type, tool_use_id, tool, tool_kind, mcp_server,
+       status, duration_ms, janusly_refs, occurred_at
+FROM agent_session_events
+WHERE org_id = $1 AND session_id = $2 AND outcome = 'applied'
+ORDER BY seq
+LIMIT $3
+`
+
+type ListAgentSessionEventsParams struct {
+	OrgID     string
+	SessionID string
+	RowLimit  int32
+}
+
+type ListAgentSessionEventsRow struct {
+	Seq           pgtype.Int8
+	Type          string
+	AgentID       pgtype.Text
+	ParentAgentID pgtype.Text
+	AgentType     pgtype.Text
+	ToolUseID     pgtype.Text
+	Tool          pgtype.Text
+	ToolKind      pgtype.Text
+	McpServer     pgtype.Text
+	Status        pgtype.Text
+	DurationMs    pgtype.Int8
+	JanuslyRefs   json.RawMessage
+	OccurredAt    time.Time
+}
+
+func (q *Queries) ListAgentSessionEvents(ctx context.Context, arg ListAgentSessionEventsParams) ([]ListAgentSessionEventsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSessionEvents, arg.OrgID, arg.SessionID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentSessionEventsRow
+	for rows.Next() {
+		var i ListAgentSessionEventsRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Type,
+			&i.AgentID,
+			&i.ParentAgentID,
+			&i.AgentType,
+			&i.ToolUseID,
+			&i.Tool,
+			&i.ToolKind,
+			&i.McpServer,
+			&i.Status,
+			&i.DurationMs,
+			&i.JanuslyRefs,
+			&i.OccurredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSessions = `-- name: ListAgentSessions :many
+SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+FROM agent_sessions s
+LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+WHERE s.org_id = $1
+  AND (s.last_event_at, s.id) < ($2::timestamptz, $3::text)
+ORDER BY s.last_event_at DESC, s.id DESC
+LIMIT $4
+`
+
+type ListAgentSessionsParams struct {
+	OrgID     string
+	BeforeAt  time.Time
+	BeforeID  string
+	PageLimit int32
+}
+
+type ListAgentSessionsRow struct {
+	ID              string
+	AgentClientID   string
+	AgentClientName string
+	Runtime         string
+	Project         pgtype.Text
+	Model           pgtype.Text
+	Status          string
+	Truncated       bool
+	EventCount      int32
+	StartedAt       time.Time
+	LastEventAt     time.Time
+	EndedAt         *time.Time
+}
+
+func (q *Queries) ListAgentSessions(ctx context.Context, arg ListAgentSessionsParams) ([]ListAgentSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSessions,
+		arg.OrgID,
+		arg.BeforeAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentSessionsRow
+	for rows.Next() {
+		var i ListAgentSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentClientID,
+			&i.AgentClientName,
+			&i.Runtime,
+			&i.Project,
+			&i.Model,
+			&i.Status,
+			&i.Truncated,
+			&i.EventCount,
+			&i.StartedAt,
+			&i.LastEventAt,
+			&i.EndedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSessionsForRun = `-- name: ListAgentSessionsForRun :many
+SELECT DISTINCT s.id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.last_event_at
+FROM agent_session_events e
+JOIN agent_sessions s ON s.id = e.session_id AND s.org_id = e.org_id
+LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
+WHERE e.org_id = $1 AND e.janusly_refs->>'runId' = $2::text
+ORDER BY s.last_event_at DESC
+LIMIT 10
+`
+
+type ListAgentSessionsForRunParams struct {
+	OrgID string
+	RunID string
+}
+
+type ListAgentSessionsForRunRow struct {
+	ID              string
+	AgentClientName string
+	Runtime         string
+	LastEventAt     time.Time
+}
+
+// Sessions whose Janusly calls named this run.
+func (q *Queries) ListAgentSessionsForRun(ctx context.Context, arg ListAgentSessionsForRunParams) ([]ListAgentSessionsForRunRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSessionsForRun, arg.OrgID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentSessionsForRunRow
+	for rows.Next() {
+		var i ListAgentSessionsForRunRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentClientName,
+			&i.Runtime,
+			&i.LastEventAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockAgentClientSessions = `-- name: LockAgentClientSessions :exec

@@ -11,6 +11,53 @@ export type BrowserApiError = {
   params?: Record<string, unknown>
 }
 
+export type AgentSession = {
+  "agentClientId": string
+  "agentClientName": string
+  "endedAt": string | null
+  "eventCount": number
+  "id": string
+  "lastEventAt": string
+  "model": string | null
+  "project": string | null
+  "runtime": string
+  "startedAt": string
+  "status": "running" | "idle" | "ended"
+  "truncated": boolean
+}
+
+export type AgentSessionMap = {
+  "lanes": ({
+    "agentType": string | null
+    "kind": "external_agent" | "external_subagent"
+    "live": boolean
+    "nodeId": string
+    "parentId": string | null
+    "steps": {
+      "agent"?: string
+      "at": string
+      "index": number
+      "status"?: string
+      "tool"?: string
+      "type": string
+    }[]
+    "truncated": boolean
+  })[]
+  "liveSubagents": number
+  "refs": {
+    "draftIds": string[]
+    "runIds": string[]
+    "workflowIds": string[]
+  }
+  "session": AgentSession
+  "totals": {
+    "errors": number
+    "events": number
+    "mcpCalls": number
+    "toolCalls": number
+  }
+}
+
 export type AuthoringCapabilities = {
   "builtinTools": ToolCatalogEntry[]
   "credentials": {
@@ -939,6 +986,11 @@ export type RunMap = {
     "status": RunStatus
     "workflowVersionId": string
   }
+  "sessions": {
+    "agentClientName": string
+    "id": string
+    "runtime": string
+  }[]
   "totals": {
     "costUsd": number
     "tokens": number
@@ -1545,6 +1597,10 @@ export type WorkflowVersionSnapshot = {
 
 /** JSON request bodies by operation; bodyless operations resolve to undefined. */
 export interface ApiRequests {
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": undefined
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": undefined
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": undefined
   /** Bounded registered experience provenance for a saved workflow */
@@ -1785,6 +1841,13 @@ export interface ApiRequests {
 
 /** Parsed payloads by operation, after any v1 envelope is unwrapped. */
 export interface ApiResponses {
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": {
+    "nextCursor": string | null
+    "sessions": AgentSession[]
+  }
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": AgentSessionMap
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": AuthoringCapabilities
   /** Bounded registered experience provenance for a saved workflow */
@@ -2124,6 +2187,10 @@ export interface ApiResponses {
 
 /** Successful HTTP status codes declared for each operation. */
 export interface ApiSuccessStatuses {
+  /** External agent sessions observed through the hooks bridge, newest first */
+  "GET /agent-sessions": 200
+  /** Agent lanes, totals and Janusly references of one observed session */
+  "GET /agent-sessions/{sessionId}/map": 200
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": 200
   /** Bounded registered experience provenance for a saved workflow */

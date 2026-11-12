@@ -99,23 +99,58 @@ export function formatTokenCount(tokens: number, locale: string): string {
   return tokens.toLocaleString(locale, { notation: 'compact', maximumFractionDigits: 1 })
 }
 
+/** The step shape run lanes and observed-session lanes share. */
+export type LaneStep = Pick<RunMapLaneStep, 'type' | 'tool' | 'status' | 'agent' | 'name' | 'iteration' | 'index'> & { at?: string | null }
+export type LaneInput = {
+  nodeId: string
+  kind: string
+  steps: readonly LaneStep[]
+  truncated: boolean
+  parentId?: string | null
+  agentType?: string | null
+  live?: boolean
+}
+
 export type LaneStepLabel = { key: string; params: Record<string, string | number> }
-export type LaneStepView = { key: string; step: RunMapLaneStep; label: LaneStepLabel; tone: 'tool' | 'success' | 'error' | 'info' }
+export type LaneStepView = { key: string; step: LaneStep; label: LaneStepLabel; tone: 'tool' | 'success' | 'error' | 'info' }
 export type LaneTrack = { agent: string | null; steps: LaneStepView[] }
-export type AgentLaneView = { nodeId: string; kind: string; stepCount: number; truncated: boolean; tracks: LaneTrack[] }
+export type AgentLaneView = {
+  nodeId: string
+  kind: string
+  stepCount: number
+  truncated: boolean
+  tracks: LaneTrack[]
+  /** Nesting under the parent lane; 0 for top-level lanes. */
+  depth: number
+  agentType: string | null
+  live: boolean
+}
+
+const SESSION_LABELS: Record<string, string> = {
+  'agent.session.started': 'agentSessions.step.sessionStarted',
+  'agent.session.ended': 'agentSessions.step.sessionEnded',
+  'agent.prompt.submitted': 'agentSessions.step.prompt',
+  'agent.turn.stopped': 'agentSessions.step.turnStopped',
+}
 
 // The crew emits both `multi_agent.agent.started` and its inner loop's
 // `multi_agent.agent.<n>.started`; keep one.
 const INNER_LIFECYCLE = /^multi_agent\.agent\.\d+\.(started|completed)$/
 
 // Crew lifecycle events name their agent as `name`.
-const laneAgent = (step: RunMapLaneStep) => step.agent ?? step.name
+const laneAgent = (step: LaneStep) => step.agent ?? step.name
 
 /** Catalog key and params for one lane step; the caller translates. */
-export function laneStepLabel(step: RunMapLaneStep): LaneStepLabel {
+export function laneStepLabel(step: LaneStep): LaneStepLabel {
   const type = step.type
   const tool = step.tool ?? ''
   const name = laneAgent(step) ?? ''
+  const session = SESSION_LABELS[type]
+  if (session) return { key: session, params: {} }
+  if (type === 'agent.subagent.started') return { key: 'multiAgent.agentStarted', params: { name } }
+  if (type === 'agent.subagent.stopped') return { key: 'multiAgent.agentCompleted', params: { name } }
+  if (type === 'agent.tool.requested') return { key: 'multiAgent.toolStarted', params: { tool } }
+  if (type === 'agent.tool.completed' && step.status === 'denied') return { key: 'agentSessions.step.toolDenied', params: { tool } }
   if (type === 'multi_agent.started') return { key: 'runWorkspace.lanes.step.teamStarted', params: {} }
   if (type === 'multi_agent.completed') return { key: 'multiAgent.teamCompleted', params: {} }
   if (type === 'multi_agent.agent.started') return { key: 'multiAgent.agentStarted', params: { name } }
@@ -134,16 +169,56 @@ export function laneStepLabel(step: RunMapLaneStep): LaneStepLabel {
   return { key: 'runWorkspace.lanes.step.other', params: { type } }
 }
 
-function laneTone(step: RunMapLaneStep): LaneStepView['tone'] {
-  if (step.type.endsWith('.failed') || step.status === 'failed') return 'error'
+const FAILED_STATUSES = new Set(['failed', 'error', 'denied'])
+
+function laneTone(step: LaneStep): LaneStepView['tone'] {
+  if (step.type.endsWith('.failed') || FAILED_STATUSES.has(step.status ?? '')) return 'error'
   if (step.type.includes('.tool.')) return 'tool'
   if (step.type.endsWith('.completed')) return 'success'
   return 'info'
 }
 
+function laneDepths(lanes: readonly LaneInput[]): Map<string, number> {
+  const parents = new Map(lanes.map(lane => [lane.nodeId, lane.parentId ?? null]))
+  const depths = new Map<string, number>()
+  for (const lane of lanes) {
+    let depth = 0
+    let parent = lane.parentId ?? null
+    while (parent !== null && parents.has(parent) && depth < lanes.length) {
+      depth += 1
+      parent = parents.get(parent) ?? null
+    }
+    depths.set(lane.nodeId, depth)
+  }
+  return depths
+}
+
+/** Lanes ordered parent first, each child right after its parent. */
+function nestedOrder(lanes: readonly LaneInput[]): LaneInput[] {
+  const ids = new Set(lanes.map(lane => lane.nodeId))
+  const children = new Map<string | null, LaneInput[]>()
+  for (const lane of lanes) {
+    const parent = lane.parentId && ids.has(lane.parentId) && lane.parentId !== lane.nodeId ? lane.parentId : null
+    children.set(parent, [...(children.get(parent) ?? []), lane])
+  }
+  const out: LaneInput[] = []
+  const seen = new Set<string>()
+  const visit = (parent: string | null) => {
+    for (const lane of children.get(parent) ?? []) {
+      if (seen.has(lane.nodeId)) continue
+      seen.add(lane.nodeId)
+      out.push(lane)
+      visit(lane.nodeId)
+    }
+  }
+  visit(null)
+  return [...out, ...lanes.filter(lane => !seen.has(lane.nodeId))]
+}
+
 /** Lanes for the Agents tab: one per agent step, crews split into one track per agent. */
-export function projectAgentLanes(lanes: readonly RunMapLane[]): AgentLaneView[] {
-  return lanes.map((lane) => {
+export function projectAgentLanes(lanes: readonly LaneInput[]): AgentLaneView[] {
+  const depths = laneDepths(lanes)
+  return nestedOrder(lanes).map((lane) => {
     const tracks = new Map<string | null, LaneStepView[]>()
     let stepCount = 0
     lane.steps.forEach((step, index) => {
@@ -162,6 +237,9 @@ export function projectAgentLanes(lanes: readonly RunMapLane[]): AgentLaneView[]
       stepCount,
       truncated: lane.truncated,
       tracks: [...tracks].map(([agent, steps]) => ({ agent, steps })),
+      depth: depths.get(lane.nodeId) ?? 0,
+      agentType: lane.agentType ?? null,
+      live: lane.live ?? false,
     }
   })
 }

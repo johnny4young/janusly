@@ -128,12 +128,22 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return internalError()
 	}
+	linked, err := q.ListAgentSessionsForRun(ctx, store.ListAgentSessionsForRunParams{OrgID: rc.OrgID, RunID: runID})
+	if err != nil {
+		return internalError()
+	}
+	sessions := make([]map[string]any, 0, len(linked))
+	for _, session := range linked {
+		sessions = append(sessions, map[string]any{
+			"id": session.ID, "agentClientName": session.AgentClientName, "runtime": session.Runtime,
+		})
+	}
 	return httpkit.OK(map[string]any{
 		"run": map[string]any{
 			"id": run.ID, "status": run.Status, "workflowVersionId": run.WorkflowVersionID,
 			"parentRunId": optionalText(run.ParentRunID),
 		},
-		"nodes": views, "lanes": lanes, "totals": totals,
+		"nodes": views, "lanes": lanes, "totals": totals, "sessions": sessions,
 	})
 }
 

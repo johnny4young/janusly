@@ -57,6 +57,8 @@ var Components = []Component{
 	{"RunMapNode", runMapNode},
 	{"RunMapLane", runMapLane},
 	{"RunMap", runMap},
+	{"AgentSession", agentSession},
+	{"AgentSessionMap", agentSessionMap},
 	{"NeedsYouItem", needsYouItem},
 	{"NeedsYou", needsYou},
 
