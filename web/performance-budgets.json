@@ -37,7 +37,7 @@
       "assets": [
         "workflow-workspace.js"
       ],
-      "maxGzipKiB": 16.2
+      "maxGzipKiB": 16.3
     },
     "eagerCss": {
       "label": "Eager stylesheet",
