@@ -76,6 +76,16 @@ Website commands run from `/website` with npm (`npm run check`, `npm run build`)
 - AI calls must preserve deterministic fallback envelopes; telemetry failures
   may not break user requests.
 
+## Third-party code and CI
+
+- Never copy code from GPL or AGPL projects; read them for ideas only. Check
+  the license before bringing in any third-party code, Go module, npm package
+  or asset.
+- A temporary or diagnostic workflow, or a dispatch used as one, always sets
+  `timeout-minutes`; one that fans out (a matrix, repeated runs) also sets
+  `strategy.max-parallel: 2`. Keep probes on Linux runners: the account's five
+  macOS runners are shared by every repository.
+
 ## Feature references
 
 Read the relevant document before changing a feature:
