@@ -364,3 +364,54 @@ func TestEffectsDecideWhoPublishes(t *testing.T) {
 func runOutcome(status, output string, waiting bool) store.ListRunOutcomesForOrgRow {
 	return store.ListRunOutcomesForOrgRow{ID: "r", Status: status, OutputJson: json.RawMessage(output), Waiting: waiting}
 }
+
+func TestShrinksFlagsWhatADraftTakesFromTheLiveVersion(t *testing.T) {
+	scheduled := func() *domain.Workflow {
+		wf := readWorkflow("wf")
+		wf.Outputs["count"] = "{{context.upper.output.result.length}}"
+		wf.Nodes = append(wf.Nodes,
+			domain.Node{ID: "nightly", Type: "schedule", Config: map[string]any{"cron": "0 2 * * *"}},
+			domain.Node{ID: "pick", Type: "tool", Config: map[string]any{"tool": "json.pick"}})
+		return wf
+	}
+	cases := []struct {
+		name  string
+		edit  func(*domain.Workflow)
+		want  Shrink
+		codes []string
+	}{
+		{name: "additive", edit: func(wf *domain.Workflow) {
+			wf.Outputs["extra"] = "{{context.input.text}}"
+			wf.Nodes = append(wf.Nodes, domain.Node{ID: "noop", Type: "noop"})
+		}},
+		{name: "changed output expression", edit: func(wf *domain.Workflow) { wf.Outputs["text"] = "{{context.input.text}}" }},
+		{name: "trigger removed", edit: func(wf *domain.Workflow) {
+			wf.Nodes = slices.DeleteFunc(wf.Nodes, func(n domain.Node) bool { return n.ID == "nightly" })
+		},
+			want: Shrink{TriggersChanged: []string{"nightly"}}, codes: []string{"triggers_changed"}},
+		{name: "trigger reconfigured", edit: func(wf *domain.Workflow) { wf.Nodes[1].Config = map[string]any{"cron": "0 3 1 1 *"} },
+			want: Shrink{TriggersChanged: []string{"nightly"}}, codes: []string{"triggers_changed"}},
+		{name: "trigger added", edit: func(wf *domain.Workflow) {
+			wf.Nodes = append(wf.Nodes, domain.Node{ID: "hook", Type: "webhook_received", Config: map[string]any{"endpointKey": "k"}})
+		}, want: Shrink{TriggersChanged: []string{"hook"}}, codes: []string{"triggers_changed"}},
+		{name: "step swapped for another type", edit: func(wf *domain.Workflow) { wf.Nodes[0] = domain.Node{ID: wf.Nodes[0].ID, Type: "noop"} },
+			want: Shrink{StepsRemoved: []string{"upper"}}, codes: []string{"steps_removed"}},
+		{name: "tool swapped", edit: func(wf *domain.Workflow) { wf.Nodes[2].Config = map[string]any{"tool": "json.parse"} },
+			want: Shrink{StepsRemoved: []string{"pick"}}, codes: []string{"steps_removed"}},
+		{name: "noop replacement", edit: func(wf *domain.Workflow) {
+			wf.Nodes = []domain.Node{{ID: "noop", Type: "noop"}}
+			wf.Outputs = map[string]string{"text": "done"}
+		}, want: Shrink{TriggersChanged: []string{"nightly"}, StepsRemoved: []string{"pick", "upper"}, OutputsRemoved: []string{"count"}},
+			codes: []string{"triggers_changed", "steps_removed", "outputs_removed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := scheduled()
+			tc.edit(draft)
+			got := Shrinks(scheduled(), draft)
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) || !slices.Equal(got.Reasons(), tc.codes) || got.Empty() != (len(tc.codes) == 0) {
+				t.Fatalf("Shrinks = %+v reasons %v, want %+v %v", got, got.Reasons(), tc.want, tc.codes)
+			}
+		})
+	}
+}

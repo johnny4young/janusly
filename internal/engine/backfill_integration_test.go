@@ -12,8 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/store"
 )
+
+var backfillPerson = &auth.Context{UserID: "user-1", Mode: auth.ModeSupabase}
 
 // statementHookTx runs before on the first statement whose sqlc name matches,
 // and fails that statement when fail is set.
@@ -111,7 +114,7 @@ func TestBackfillPageStopsWhenPausedMidPage(t *testing.T) {
 		}}
 	}
 
-	outcome, lifted, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	outcome, lifted, err := eng.ResumeWorkflow(ctx, org, workflowID, backfillPerson)
 	if err != nil || lifted != WorkflowStatusPausedManual {
 		t.Fatalf("resume: lifted=%q err=%v", lifted, err)
 	}
@@ -130,7 +133,7 @@ func TestBackfillReleasesClaimWhenStartFails(t *testing.T) {
 	healthy := eng.wrapTx
 	eng.wrapTx = func(tx store.DBTX) store.DBTX { return &statementHookTx{DBTX: tx, name: "InsertRun", fail: true} }
 
-	outcome, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	outcome, _, err := eng.ResumeWorkflow(ctx, org, workflowID, backfillPerson)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -142,7 +145,7 @@ func TestBackfillReleasesClaimWhenStartFails(t *testing.T) {
 	}
 
 	eng.wrapTx = healthy
-	retried, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	retried, _, err := eng.ResumeWorkflow(ctx, org, workflowID, backfillPerson)
 	if err != nil || retried.Backfilled != 1 || retried.Remaining != 0 {
 		t.Fatalf("retry: %+v err=%v", retried, err)
 	}
@@ -172,7 +175,7 @@ func TestBackfillSettlesAnEventThatCanNeverStart(t *testing.T) {
 		}
 	}
 
-	outcome, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	outcome, _, err := eng.ResumeWorkflow(ctx, org, workflowID, backfillPerson)
 	if err != nil || outcome.Backfilled != 1 || outcome.Failed != 1 || outcome.Remaining != 0 {
 		t.Fatalf("resume: %+v err=%v", outcome, err)
 	}
@@ -196,7 +199,7 @@ func TestBackfillReleasesClaimsWhenTheResumeIsCancelled(t *testing.T) {
 	eng.wrapTx = func(tx store.DBTX) store.DBTX {
 		return &statementHookTx{DBTX: tx, name: "InsertRun", before: cancel}
 	}
-	if _, _, err := eng.ResumeWorkflow(request, org, workflowID, "user-1"); err != nil {
+	if _, _, err := eng.ResumeWorkflow(request, org, workflowID, backfillPerson); err != nil {
 		t.Fatalf("cancelled resume: %v", err)
 	}
 	if _, claimed, _ := bufferedState(t, ctx, pool, org); claimed != 0 {
@@ -204,7 +207,7 @@ func TestBackfillReleasesClaimsWhenTheResumeIsCancelled(t *testing.T) {
 	}
 
 	eng.wrapTx = healthy
-	retried, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	retried, _, err := eng.ResumeWorkflow(ctx, org, workflowID, backfillPerson)
 	if err != nil || retried.Backfilled != 3 || retried.Remaining != 0 {
 		t.Fatalf("retry: %+v err=%v", retried, err)
 	}

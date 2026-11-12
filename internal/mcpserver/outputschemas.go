@@ -31,7 +31,8 @@ var outputSchemas = map[string]*jsonschema.Schema{
 	"workflows.publish": outputObject(fields{
 		"status": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
 		"versionId": {kind: "string"}, "version": {kind: "integer"}, "publishRequestId": {kind: "string"},
-		"reasons": {kind: "array"}, "expiresAt": {kind: "string"}, "next": {kind: "string"},
+		"reasons": {kind: "array"}, "message": {kind: "string"}, "changes": {kind: "object"},
+		"expiresAt": {kind: "string"}, "next": {kind: "string"},
 	}),
 	"publish.status": outputObject(fields{
 		"publishRequestId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},

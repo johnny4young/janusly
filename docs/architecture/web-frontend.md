@@ -551,8 +551,13 @@ inside `WorkflowStepNode`, so the editor shows them too; actions come from
 action button is named after its step, and focusing one pans an off-screen
 node into view. Stuck is a dashed full border plus a clock icon and the word
 "Stuck"; a step that needs the viewer gets a full outline and the words
-"Needs you". The form and rerun dialogs load from the run panel's chunk,
-which the run map always shows beside the canvas.
+"Needs you". Approve and Deny open the shared confirm dialog with the tool
+and its parameters (`ToolApprovalDetails`, the same block the run panel shows)
+and submit the approval id and digest read when it opened; if the live
+request differs on confirm, nothing is sent, the map refreshes and the dialog
+opens again on the new request. The form and rerun dialogs and the approval
+details load from the run panel's chunk, which the run map always shows
+beside the canvas.
 
 ## Data invalidation
 

@@ -85,7 +85,7 @@ func registerLifecycleTools(server *mcp.Server, deps Deps) {
 	})
 	mcp.AddTool(server, writeTool(
 		"workflows.resume", "Resume workflow",
-		"Lift a manual or circuit-breaker pause and start the trigger events held while it was paused, oldest first.", false,
+		"Lift a manual pause and start the trigger events held while it was paused, oldest first. Only a person can lift a circuit-breaker pause.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args workflowLifecycleArgs) (*mcp.CallToolResult, any, error) {
 		return deps.at(ctx).resumeWorkflow(ctx, args.WorkflowID)
 	})
@@ -278,7 +278,7 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 	if utf8.RuneCountInString(args.Reason) > engine.MaxPauseReasonRunes {
 		return gateError("invalid_argument", "reason must be at most 500 characters", "/reason", "Shorten the reason to 500 characters or fewer.")
 	}
-	previous, stored, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, args.Reason)
+	pause, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, args.Reason)
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
@@ -286,14 +286,14 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 	default:
 		return nil, nil, err
 	}
-	changed := previous != engine.WorkflowStatusPausedManual
+	changed := pause.Previous != pause.Status
 	if changed {
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.paused", audit.Options{
 			TargetType: "workflow", TargetID: args.WorkflowID,
-			Metadata: map[string]any{"previousStatus": previous, "hasReason": stored != ""},
+			Metadata: map[string]any{"previousStatus": pause.Previous, "hasReason": pause.Reason != ""},
 		})
 	}
-	return ok(map[string]any{"workflowId": args.WorkflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed})
+	return ok(map[string]any{"workflowId": args.WorkflowID, "status": pause.Status, "changed": changed})
 }
 
 func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallToolResult, any, error) {
@@ -306,12 +306,15 @@ func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
 		return hiddenResult(err, "workflow not found")
 	}
-	outcome, lifted, err := d.Engine.ResumeWorkflow(ctx, d.OrgID, workflowID, d.UserID)
+	outcome, lifted, err := d.Engine.ResumeWorkflow(ctx, d.OrgID, workflowID, d.auditContext())
 	var notResumable *engine.ErrWorkflowNotResumable
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 		return expected("workflow not found")
+	case errors.Is(err, engine.ErrBreakerResumeNeedsPerson):
+		return gateError("permission_denied", "the circuit breaker paused this workflow after repeated failures; only a person can resume it",
+			"/workflowId", "Ask a person to review the failures and resume the workflow in Janusly.")
 	case errors.As(err, &notResumable):
 		return expected("an upstream this workflow depends on is degraded; it resumes when the upstream recovers (status: " + notResumable.Status + ")")
 	default:

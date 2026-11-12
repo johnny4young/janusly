@@ -128,8 +128,9 @@ digests and request bodies never enter audit or logs.
 For tool approvals, the creator counts as a requester of every call their
 agent caused (a start, a redrive, a fix), so the person accountable for an
 agent cannot approve its writes alone (see owner decision D4 for publish
-approvals). Approval and grant decisions accept only modes that prove a
-person.
+approvals). The same holds for recovery approvals: the creator of the agent
+that produced a candidate or its validation cannot approve it. Approval and
+grant decisions accept only modes that prove a person.
 
 ### Isolation tests
 
@@ -334,8 +335,11 @@ described in `mcp-server.md`):
 4. **Publish.** `workflows.publish` takes the draft and a passing receipt,
    revalidates under the workflow's version lock, and then:
    - publishes directly when every step is pure (no write, no outbound
-     call, no trigger), the workflow already has a published version, and no
-     other workflow calls it;
+     call, no trigger), the workflow already has a published version, no
+     other workflow calls it, and the draft only adds to the live version: a
+     draft that removes, adds or changes a trigger, or removes a step or a
+     declared output, waits for a person, so an agent cannot replace a
+     production workflow with a no-op;
    - otherwise opens a publish request and returns `approval_required` with a
      link. A person with `workflows.write` reviews the diff against
      production, the receipt and the effect list, and approves or rejects.
@@ -396,8 +400,11 @@ the run is open, so elapsed time and the stuck signal advance; it stops
 ticking once the run is terminal, and a failed read keeps the last map. Node
 status stays with the live run projection. Elapsed time counts on in the
 browser from the moment the map arrived. A decision is offered only while the
-live step still waits and its binding is complete: a tool approval posts its
-approval id and parameter digest to `POST /runs/tool-approvals/decide`, an
+live step still waits and its binding is complete, and always through a
+confirm dialog showing the tool and its parameters: a tool approval posts the
+approval id and parameter digest read when the dialog opened to
+`POST /runs/tool-approvals/decide` (a request that changed meanwhile is
+refused, refreshed and shown again), an
 approval step resumes through `POST /resume` (there is no reject route for an
 approval step), and a form opens the existing form dialog bound to the
 step's resume token: the dialog closes when the step stops waiting or its
@@ -483,7 +490,8 @@ the gate.
 | Stolen token | Expiry, revocation, rotation, per-client rate limit, scope; digest-only storage; prefix for secret scanning |
 | Cross-organization access | Organization from the token only; foreign ids answer as missing; negative test matrix over every tool |
 | Privilege escalation | Ceiling ∩ creator's live permissions on every call; grants limited to the creator's own permissions |
-| Agent approving its own work | No approval tool; decide routes refuse agent and service tokens; creator counts as requester for tool approvals |
+| Agent approving its own work | No approval tool; decide routes refuse agent and service tokens; creator counts as requester for tool and recovery approvals |
+| Agent disarming production | Publishing a draft that removes or changes triggers, or removes steps or outputs, waits for a person; only a person lifts a circuit-breaker pause |
 | Gate bypass through `workflows.save` | Not in any capability, and the guard admits only capability tools; production changes from agents only by publication |
 | Prompt injection through workflow data | Documents and outputs are untrusted data for the agent; scrubbing and size bounds; writes still need the gate and consent |
 | DNS rebinding and browser CSRF | Host allowlist, Origin refusal, cross-origin protection |

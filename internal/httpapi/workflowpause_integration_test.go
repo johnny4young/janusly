@@ -358,6 +358,47 @@ func TestReplayCampaignWaitsForAPausedWorkflow(t *testing.T) {
 	}
 }
 
+// A circuit-breaker pause waits for someone to look at the failures, so a
+// service token cannot lift it; a person can.
+func TestCircuitBreakerPauseLiftsOnlyForAPerson(t *testing.T) {
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-breaker-resume-token")
+	h := newAPIHarnessWithoutWorkers(t)
+	workflowID := fmt.Sprintf("breaker-hook-%d", time.Now().UnixNano())
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(workflowID, "breaker-hook"), ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `UPDATE workflows SET status = 'paused_circuit_breaker' WHERE org_id = $1 AND id = $2`,
+		h.org, workflowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, 'automation', 'editor')`,
+		"m-automation-"+workflowID, h.org); err != nil {
+		t.Fatal(err)
+	}
+	service := map[string]string{"Authorization": "Bearer svc-breaker-resume-token", "x-user-id": "automation"}
+	refused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", service)
+	if refused.status != http.StatusForbidden || !strings.Contains(fmt.Sprint(refused.body), "workflow_circuit_breaker_resume_requires_person") {
+		t.Fatalf("a service token lifted a circuit-breaker pause: %d %+v", refused.status, refused.body)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "paused_circuit_breaker" {
+		t.Fatalf("after the refused resume: %s", status)
+	}
+	// A manual pause keeps the breaker pause, so pausing first does not open a way around it.
+	paused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{}, "", service)
+	if data, _ := paused.body["data"].(map[string]any); paused.status != http.StatusOK || data["status"] != "paused_circuit_breaker" || data["changed"] != false {
+		t.Fatalf("pause over a breaker pause: %d %+v", paused.status, paused.body)
+	}
+	if res := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", service); res.status != http.StatusForbidden {
+		t.Fatalf("a service token lifted a breaker pause after pausing it: %d %+v", res.status, res.body)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/resume", nil, ""); res.status != http.StatusOK {
+		t.Fatalf("a person's resume: %d %+v", res.status, res.body)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "active" {
+		t.Fatalf("after a person's resume: %s", status)
+	}
+}
+
 // A reason that sanitizes to nothing is audited as no reason.
 func TestWorkflowPauseBlankReasonIsNotAudited(t *testing.T) {
 	h := newAPIHarnessWithoutWorkers(t)

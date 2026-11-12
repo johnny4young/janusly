@@ -5,6 +5,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -277,4 +278,82 @@ func mustParse(t *testing.T, document map[string]any) *domain.Workflow {
 		t.Fatalf("parse: %v", issues)
 	}
 	return wf
+}
+
+// An agent may extend a published workflow alone, but removing a trigger,
+// a step or an output waits for a person, so it cannot swap production for
+// a no-op.
+func TestAgentCannotShrinkAPublishedWorkflowAlone(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	dispatcher := eng.NewDispatcher(grammar.RenderOptions{})
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	workersDone := make(chan struct{})
+	go func() {
+		defer close(workersDone)
+		_ = eng.RunWorkers(workerCtx, 2, 30*time.Millisecond, dispatcher.Execute, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+	t.Cleanup(func() { stopWorkers(); <-workersDone })
+	tenant := seedAgentTenant(t, pool, eng, "shrink")
+	issued := issueAgentClient(t, pool, tenant, agentclient.IssueInput{Capabilities: []string{"propose", "test", "publish"}})
+	session := agentSession(t, pool, eng, issued.Token)
+
+	personSaves := func(id string, document map[string]any) {
+		t.Helper()
+		document["id"] = id
+		if _, err := eng.SaveWorkflowVersion(t.Context(), engine.SaveWorkflowVersionInput{
+			OrgID: tenant.org, UserID: tenant.creator, NewID: uuid.NewString, Workflow: mustParse(t, document),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish := func(workflowID string, document map[string]any) (bool, map[string]any, string) {
+		t.Helper()
+		ok, draft, text := gateCall(t, session, "drafts.save", map[string]any{"workflowId": workflowID, "workflow": document, "fixtures": shoutFixture("HI")})
+		if !ok {
+			t.Fatalf("drafts.save: %s", text)
+		}
+		_, receipt, _ := gateCall(t, session, "workflows.qualify", map[string]any{"draftId": draft["draftId"]})
+		if settled := waitQualification(t, session, receipt["qualificationId"].(string)); settled["status"] != "passed" {
+			t.Fatalf("qualification: %v", settled)
+		}
+		return gateCall(t, session, "workflows.publish", map[string]any{"draftId": draft["draftId"], "qualificationId": receipt["qualificationId"]})
+	}
+
+	scheduled := uppercaseDraft("", true)
+	scheduled["nodes"] = append(scheduled["nodes"].([]any), map[string]any{"id": "tick", "type": "schedule", "config": map[string]any{"cronExpression": "0 3 * * *"}})
+	scheduled["edges"] = []any{map[string]any{"from": "tick", "to": "upper"}}
+	nightly := tenant.org + "-nightly"
+	personSaves(nightly, scheduled)
+	ok, out, text := publish(nightly, uppercaseDraft("", true))
+	changes, _ := out["changes"].(map[string]any)
+	if !ok || out["status"] != "approval_required" || !strings.Contains(text, "triggers_changed") ||
+		fmt.Sprint(changes["triggersChanged"]) != "[tick]" || !strings.Contains(fmt.Sprint(out["message"]), "removes, adds or changes triggers") {
+		t.Fatalf("removing the trigger did not wait for a person: %s", text)
+	}
+	if versions := countVersions(t, pool, tenant.org, nightly); versions != 1 {
+		t.Fatalf("the trigger was removed without a person: %d versions", versions)
+	}
+
+	pure := uppercaseDraft("", true)
+	pure["outputs"].(map[string]any)["echo"] = "{{context.input.text}}"
+	pure["nodes"] = append(pure["nodes"].([]any), map[string]any{"id": "tail", "type": "noop", "config": map[string]any{}})
+	pure["edges"] = []any{map[string]any{"from": "upper", "to": "tail"}}
+	shout := tenant.org + "-shout"
+	personSaves(shout, pure)
+	ok, out, text = publish(shout, uppercaseDraft("", true))
+	changes, _ = out["changes"].(map[string]any)
+	if !ok || out["status"] != "approval_required" || !strings.Contains(text, "steps_removed") || !strings.Contains(text, "outputs_removed") ||
+		fmt.Sprint(changes["stepsRemoved"]) != "[tail]" || fmt.Sprint(changes["outputsRemoved"]) != "[echo]" {
+		t.Fatalf("removing a step and an output did not wait for a person: %s", text)
+	}
+
+	extended := uppercaseDraft("", true)
+	for key, value := range pure["outputs"].(map[string]any) {
+		extended["outputs"].(map[string]any)[key] = value
+	}
+	extended["outputs"].(map[string]any)["again"] = "{{context.upper.output.result.value}}"
+	extended["nodes"], extended["edges"] = pure["nodes"], pure["edges"]
+	if ok, out, text := publish(shout, extended); !ok || out["status"] != "published" {
+		t.Fatalf("an additive read-only change waited for a person: %s", text)
+	}
 }

@@ -58,6 +58,9 @@ func recoveryMutationError(err error) opResult {
 	case errors.Is(err, engine.ErrRecoveryHumanApprovalRequired):
 		return opError(http.StatusForbidden, "recovery_human_approval_required",
 			"Recovery approval requires a human-authenticated session", nil)
+	case errors.Is(err, engine.ErrRecoverySelfApproval):
+		return opError(http.StatusForbidden, "recovery_self_approval",
+			"Another member must approve a fix your agent prepared", nil)
 	case errors.Is(err, engine.ErrRecoveryPolicyBlocked):
 		return opError(http.StatusForbidden, "recovery_policy_blocked",
 			"The workflow recovery contract does not permit this action", nil)

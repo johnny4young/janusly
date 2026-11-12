@@ -239,15 +239,24 @@ func normalize(value any) any {
 }
 
 // Reasons names why a person must approve a publication; none means the
-// receipt alone may publish it.
-func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf *domain.Workflow) ([]string, error) {
+// receipt alone may publish it. The shrink says what a draft takes away from
+// the live version.
+func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf *domain.Workflow) ([]string, Shrink, error) {
 	reasons := []string{}
-	latest, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{WorkflowID: workflowID, OrgID: orgID})
-	if err != nil {
-		return nil, err
-	}
-	if latest == 0 {
+	shrink := Shrink{}
+	live, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		reasons = append(reasons, "first_publish")
+	case err != nil:
+		return nil, shrink, err
+	default:
+		liveWorkflow, issues := domain.Parse(live.DagJson)
+		if liveWorkflow == nil {
+			return nil, shrink, fmt.Errorf("live workflow version %s is unreadable: %v", live.ID, issues)
+		}
+		shrink = Shrinks(liveWorkflow, wf)
+		reasons = append(reasons, shrink.Reasons()...)
 	}
 	if len(EffectNodes(wf)) > 0 {
 		reasons = append(reasons, "writes")
@@ -257,12 +266,12 @@ func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf
 	}
 	callers, err := q.WorkflowHasCallers(ctx, store.WorkflowHasCallersParams{OrgID: orgID, WorkflowID: workflowID})
 	if err != nil {
-		return nil, err
+		return nil, shrink, err
 	}
 	if callers {
 		reasons = append(reasons, "callers")
 	}
-	return reasons, nil
+	return reasons, shrink, nil
 }
 
 // ErrStaleBase rejects a draft whose workflow gained a version since it was

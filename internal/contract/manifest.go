@@ -146,7 +146,7 @@ var Routes = []Route{
 		}),
 		Response: closedObj(map[string]any{
 			"ok": map[string]any{"const": true}, "workflowId": str(),
-			"status": map[string]any{"const": "paused_manual"}, "changed": boolT(),
+			"status": strEnum([]string{"paused_manual", "paused_circuit_breaker"}), "changed": boolT(),
 		}, "ok", "workflowId", "status", "changed")},
 	{Method: "GET", Path: "/v1/workflows", Summary: "Keyset-paginated workflow list",
 		Response: boundedPage(workflowListItem)},

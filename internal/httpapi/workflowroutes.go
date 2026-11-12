@@ -441,12 +441,15 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 	if workflowID == "" {
 		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
 	}
-	outcome, lifted, err := s.engine.ResumeWorkflow(r.Context(), rc.orgID, workflowID, rc.userID)
+	outcome, lifted, err := s.engine.ResumeWorkflow(r.Context(), rc.orgID, workflowID, rc.authContext)
 	if err != nil {
 		var notResumable *engine.ErrWorkflowNotResumable
 		switch {
 		case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		case errors.Is(err, engine.ErrBreakerResumeNeedsPerson):
+			return opError(http.StatusForbidden, "workflow_circuit_breaker_resume_requires_person",
+				"Only a person can resume a workflow its circuit breaker paused", nil)
 		case errors.As(err, &notResumable) && notResumable.Status == "paused_upstream_degraded":
 			return opError(http.StatusConflict, "upstream_degraded",
 				"An upstream this workflow depends on is degraded; it resumes when the upstream recovers",
@@ -495,7 +498,7 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 	if len([]rune(reason)) > engine.MaxPauseReasonRunes {
 		return opError(http.StatusBadRequest, "workflows_pause_reason_invalid", "reason must be at most 500 characters", nil)
 	}
-	previous, stored, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
+	pause, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
@@ -503,15 +506,15 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 	default:
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	changed := previous != engine.WorkflowStatusPausedManual
+	changed := pause.Previous != pause.Status
 	if changed {
 		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.paused", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
-			Metadata: map[string]any{"previousStatus": previous, "hasReason": stored != ""},
+			Metadata: map[string]any{"previousStatus": pause.Previous, "hasReason": pause.Reason != ""},
 		})
 	}
 	return opOK(map[string]any{
-		"ok": true, "workflowId": workflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed,
+		"ok": true, "workflowId": workflowID, "status": pause.Status, "changed": changed,
 	})
 }
 

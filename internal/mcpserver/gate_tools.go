@@ -123,7 +123,7 @@ func registerGateTools(server *mcp.Server, deps Deps) {
 		return deps.at(ctx).getQualification(ctx, args.QualificationID)
 	})
 	mcp.AddTool(server, writeTool("workflows.publish", "Publish draft",
-		"Publish a qualified draft. A read-only change to a published workflow is published at once; a workflow that writes or was never published waits for a person's approval.", false,
+		"Publish a qualified draft. An additive read-only change to a published workflow is published at once; a workflow that writes or was never published, or a change that removes or changes triggers, or removes steps or outputs, waits for a person's approval.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args publishArgs) (*mcp.CallToolResult, any, error) {
 		return deps.at(ctx).publishDraft(ctx, args)
 	})
@@ -557,7 +557,7 @@ func (d Deps) publishDraft(ctx context.Context, args publishArgs) (*mcp.CallTool
 		return nil, nil, err
 	}
 	q := store.New(d.Pool)
-	reasons, err := publishgate.Reasons(ctx, q, d.OrgID, draft.WorkflowID, wf)
+	reasons, shrink, err := publishgate.Reasons(ctx, q, d.OrgID, draft.WorkflowID, wf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -572,10 +572,33 @@ func (d Deps) publishDraft(ctx context.Context, args publishArgs) (*mcp.CallTool
 		})
 		return ok(map[string]any{"status": "published", "workflowId": draft.WorkflowID, "versionId": saved.VersionID, "version": saved.Version})
 	}
-	return d.requestPublication(ctx, draft, receipt, reasons)
+	return d.requestPublication(ctx, draft, receipt, reasons, shrink)
 }
 
-func (d Deps) requestPublication(ctx context.Context, draft store.WorkflowDraft, receipt store.DraftQualification, reasons []string) (*mcp.CallToolResult, any, error) {
+var reasonText = map[string]string{
+	"first_publish":    "the workflow was never published",
+	"writes":           "a step may change something outside Janusly",
+	"outbound":         "a step or trigger reaches outside Janusly",
+	"callers":          "other workflows call this one",
+	"triggers_changed": "it removes, adds or changes triggers of the live version",
+	"steps_removed":    "it removes steps of the live version",
+	"outputs_removed":  "it removes outputs of the live version",
+}
+
+func publishWaitMessage(reasons []string) string {
+	parts := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		text, known := reasonText[reason]
+		if !known {
+			text = reason
+		}
+		parts = append(parts, text)
+	}
+	return "A person must approve this publication because " + strings.Join(parts, "; ") +
+		". The live version keeps running unchanged until then."
+}
+
+func (d Deps) requestPublication(ctx context.Context, draft store.WorkflowDraft, receipt store.DraftQualification, reasons []string, shrink publishgate.Shrink) (*mcp.CallToolResult, any, error) {
 	q := store.New(d.Pool)
 	onBehalfOf := d.UserID
 	if principal := d.agent(); principal != nil {
@@ -616,11 +639,15 @@ func (d Deps) requestPublication(ctx context.Context, draft store.WorkflowDraft,
 		TargetType: "workflow", TargetID: draft.WorkflowID,
 		Metadata: map[string]any{"publishRequestId": request.ID, "draftId": draft.ID, "reasons": reasons},
 	})
-	return ok(map[string]any{
+	view := map[string]any{
 		"status": "approval_required", "workflowId": draft.WorkflowID, "publishRequestId": request.ID,
-		"reasons": reasons, "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
+		"reasons": reasons, "message": publishWaitMessage(reasons), "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
 		"next": "a person with workflows.write approves it in Janusly; poll publish.status",
-	})
+	}
+	if !shrink.Empty() {
+		view["changes"] = shrink
+	}
+	return ok(view)
 }
 
 // scopeTag keeps a workflow a scoped client creates inside its scope.

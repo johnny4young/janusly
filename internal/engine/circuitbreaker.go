@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/orgconfig"
 	"github.com/johnny4young/janusly/internal/recovery"
@@ -183,6 +184,10 @@ const upstreamPausedStatus = "paused_upstream_degraded"
 // ErrWorkflowNotFoundForResume covers absent/tombstoned workflows.
 var ErrWorkflowNotFoundForResume = errors.New("workflow not found")
 
+// ErrBreakerResumeNeedsPerson refuses an agent or service token lifting a
+// circuit-breaker pause: someone has to look at the failures first.
+var ErrBreakerResumeNeedsPerson = errors.New("only a person can resume a workflow its circuit breaker paused")
+
 // BackfillOutcome summarizes one resume's buffered drain.
 type BackfillOutcome struct {
 	Backfilled int `json:"backfilled"`
@@ -196,11 +201,15 @@ const backfillPageLimit = 50
 
 // ResumeWorkflow lifts a manual or circuit-breaker pause and then drains the
 // buffered trigger events oldest-first. It returns the status it lifted, or
-// "" when the workflow was already active. A breaker resume is audited in the
-// same transaction; the caller audits a manual resume. The backfill never
-// fails the resume: the workflow is active by then.
-func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID, userID string) (BackfillOutcome, string, error) {
+// "" when the workflow was already active. A breaker resume needs a person
+// and is audited in the same transaction; the caller audits a manual resume.
+// The backfill never fails the resume: the workflow is active by then.
+func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID string, actor *auth.Context) (BackfillOutcome, string, error) {
 	outcome := BackfillOutcome{}
+	userID := ""
+	if actor != nil {
+		userID = actor.UserID
+	}
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return outcome, "", fmt.Errorf("begin: %w", err)
@@ -219,6 +228,9 @@ func (e *Engine) ResumeWorkflow(ctx context.Context, orgID, workflowID, userID s
 	case "active":
 		// A previous resume may have left a capped buffered window.
 	case WorkflowStatusPausedManual, recovery.WorkflowStatusPausedCircuitBreaker:
+		if status == recovery.WorkflowStatusPausedCircuitBreaker && (actor == nil || !auth.IsPersonMode(actor.Mode)) {
+			return outcome, "", ErrBreakerResumeNeedsPerson
+		}
 		if status == WorkflowStatusPausedManual {
 			degraded, err := txq.GetDegradedUpstreamForWorkflow(ctx, store.GetDegradedUpstreamForWorkflowParams{
 				OrgID: orgID, WorkflowID: workflowID,

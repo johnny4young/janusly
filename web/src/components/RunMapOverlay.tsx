@@ -10,7 +10,7 @@ import { Button } from './ui/Button'
 
 export type RunMapActions = {
   pendingNodeId: string | null
-  decide: (nodeId: string, decision: 'approve' | 'deny') => void
+  decide: (nodeId: string, decision: 'approve' | 'deny', step: string) => void
   openForm: (nodeId: string) => void
   rerun: (nodeId: string) => void
   openRun: (runId: string) => void
@@ -70,10 +70,10 @@ export function RunMapNodeFacts({ nodeId, title, overlay }: { nodeId: string; ti
   const { decision, childRunId } = overlay
   const buttons: NodeAction[] = []
   if (decision?.kind === 'tool_approval' || decision?.kind === 'approval') {
-    buttons.push({ id: 'approve', label: t('rightPanel.runs.toolApproval.approve'), name: t('canvas.runMap.approveAria', { step: title }), variant: 'primary', decides: true, run: a => a.decide(nodeId, 'approve') })
+    buttons.push({ id: 'approve', label: t('rightPanel.runs.toolApproval.approve'), name: t('canvas.runMap.approveAria', { step: title }), variant: 'primary', decides: true, run: a => a.decide(nodeId, 'approve', title) })
   }
   if (decision?.kind === 'tool_approval') {
-    buttons.push({ id: 'deny', label: t('rightPanel.runs.toolApproval.deny'), name: t('canvas.runMap.denyAria', { step: title }), variant: 'danger', decides: true, run: a => a.decide(nodeId, 'deny') })
+    buttons.push({ id: 'deny', label: t('rightPanel.runs.toolApproval.deny'), name: t('canvas.runMap.denyAria', { step: title }), variant: 'danger', decides: true, run: a => a.decide(nodeId, 'deny', title) })
   }
   if (decision?.kind === 'human_form') {
     buttons.push({ id: 'form', label: t('canvas.runMap.fillForm'), name: t('canvas.runMap.fillFormAria', { step: title }), variant: 'primary', decides: true, run: a => a.openForm(nodeId) })

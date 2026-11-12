@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- An agent can no longer disarm a published workflow on its own. A
+  `workflows.publish` that removes, adds or changes a trigger, or removes a
+  step, swaps it for another type or tool, or removes a declared output of the
+  live version, now opens a publish request
+  for a person, like a workflow that writes. The response lists what the draft
+  takes away (`changes`) and says, in `message`, why it waits; the live version
+  keeps running until a person approves. Purely additive read-only changes
+  still publish at once.
+- The person who created an agent client can no longer approve a recovery fix
+  that agent prepared, over stdio or remote MCP. Another member approves it;
+  the approve route answers `403 recovery_self_approval` to the creator.
+- Only a person can lift a circuit-breaker pause. An agent's or the stdio
+  operator's `workflows.resume` answers `permission_denied`, and a service
+  token gets `403 workflow_circuit_breaker_resume_requires_person`. Pausing a
+  workflow its circuit breaker paused now keeps that pause (the response
+  reports `status: paused_circuit_breaker`), so pausing first is no way
+  around it. Agents can still resume the manual pauses they are allowed to.
+- Approve and Deny on the run map open a dialog with the requested tool and
+  its exact parameters, and decide the request the dialog showed. If the
+  request changed while it was open, nothing is decided: the map refreshes and
+  the dialog shows the new request.
 - The JavaScript toolchain requires Node.js 26 LTS (26.13.1 or newer). Node 26
   no longer bundles corepack, so install it before `corepack enable`.
 - Agent access is tighter. The "needs you" feed (`GET /needs-you`,

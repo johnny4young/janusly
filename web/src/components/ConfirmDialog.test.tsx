@@ -47,6 +47,16 @@ describe('<ConfirmProvider /> / useConfirm', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
   })
 
+  it('renders details below the question', async () => {
+    function DetailsHarness() {
+      const confirm = useConfirm()
+      return <button onClick={() => void confirm({ body: 'Approve?', details: <pre>{'{"amount": 5}'}</pre> })}>details</button>
+    }
+    render(<ConfirmProvider><DetailsHarness /></ConfirmProvider>)
+    fireEvent.click(screen.getByText('details'))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('{"amount": 5}')
+  })
+
   it('resolves false when cancelled', async () => {
     const results = renderHarness()
     fireEvent.click(screen.getByText('open'))

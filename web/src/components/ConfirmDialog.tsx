@@ -28,6 +28,7 @@ import { Button } from './ui/Button'
 export type ConfirmOptions = {
   title?: string
   body: string
+  details?: React.ReactNode
   confirmLabel?: string
   cancelLabel?: string
   tone?: 'default' | 'danger'
@@ -116,6 +117,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 <p id="confirm-dialog-body" className="helper-text">{options.body}</p>
               </div>
             </header>
+            {options.details && <div className="run-input-dialog__body">{options.details}</div>}
             <footer className="run-input-dialog__footer">
               <Button ref={cancelButtonRef} variant="secondary" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
                 {options.cancelLabel ?? (t('common.cancel'))}
@@ -123,7 +125,8 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               <Button
                 ref={confirmButtonRef}
                 variant={options.tone === 'danger' ? 'danger' : 'primary'}
-                onClick={() => close(true)}
+                // The second click of a double click must not confirm a dialog reopened under it.
+                onClick={(event) => { if (event.detail < 2) close(true) }}
                 data-testid="confirm-dialog-confirm"
               >
                 {options.confirmLabel ?? (t('confirmDialog.confirm'))}
