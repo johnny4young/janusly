@@ -375,14 +375,21 @@ func TestCircuitBreakerPauseLiftsOnlyForAPerson(t *testing.T) {
 		"m-automation-"+workflowID, h.org); err != nil {
 		t.Fatal(err)
 	}
-	refused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", map[string]string{
-		"Authorization": "Bearer svc-breaker-resume-token", "x-user-id": "automation",
-	})
+	service := map[string]string{"Authorization": "Bearer svc-breaker-resume-token", "x-user-id": "automation"}
+	refused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", service)
 	if refused.status != http.StatusForbidden || !strings.Contains(fmt.Sprint(refused.body), "workflow_circuit_breaker_resume_requires_person") {
 		t.Fatalf("a service token lifted a circuit-breaker pause: %d %+v", refused.status, refused.body)
 	}
 	if status, _ := workflowStatus(t, h.org, workflowID); status != "paused_circuit_breaker" {
 		t.Fatalf("after the refused resume: %s", status)
+	}
+	// A manual pause keeps the breaker pause, so pausing first does not open a way around it.
+	paused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/pause", map[string]any{}, "", service)
+	if data, _ := paused.body["data"].(map[string]any); paused.status != http.StatusOK || data["status"] != "paused_circuit_breaker" || data["changed"] != false {
+		t.Fatalf("pause over a breaker pause: %d %+v", paused.status, paused.body)
+	}
+	if res := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", service); res.status != http.StatusForbidden {
+		t.Fatalf("a service token lifted a breaker pause after pausing it: %d %+v", res.status, res.body)
 	}
 	if res := h.call("POST", "/v1/workflows/"+workflowID+"/resume", nil, ""); res.status != http.StatusOK {
 		t.Fatalf("a person's resume: %d %+v", res.status, res.body)

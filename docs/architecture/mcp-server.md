@@ -132,7 +132,8 @@ through the gate, whose tools return failures as
    `outbound` (a step that is not pure, triggers included, because a read can
    still carry data out), `callers` (another workflow calls this one, so
    the change reaches it), and, against the live version, `triggers_changed`
-   (a trigger removed, added or reconfigured), `steps_removed` and
+   (a trigger removed, added or reconfigured), `steps_removed` (a step removed
+   or swapped for another type or tool) and
    `outputs_removed`, so an agent cannot swap production for a no-op. The
    response carries a `message` naming every reason and, for the last three,
    `changes` with the trigger, step and output ids. A newer request for the same workflow supersedes an

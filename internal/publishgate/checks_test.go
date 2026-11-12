@@ -394,6 +394,10 @@ func TestShrinksFlagsWhatADraftTakesFromTheLiveVersion(t *testing.T) {
 		{name: "trigger added", edit: func(wf *domain.Workflow) {
 			wf.Nodes = append(wf.Nodes, domain.Node{ID: "hook", Type: "webhook_received", Config: map[string]any{"endpointKey": "k"}})
 		}, want: Shrink{TriggersChanged: []string{"hook"}}, codes: []string{"triggers_changed"}},
+		{name: "step swapped for another type", edit: func(wf *domain.Workflow) { wf.Nodes[0] = domain.Node{ID: wf.Nodes[0].ID, Type: "noop"} },
+			want: Shrink{StepsRemoved: []string{"upper"}}, codes: []string{"steps_removed"}},
+		{name: "tool swapped", edit: func(wf *domain.Workflow) { wf.Nodes[2].Config = map[string]any{"tool": "json.parse"} },
+			want: Shrink{StepsRemoved: []string{"pick"}}, codes: []string{"steps_removed"}},
 		{name: "noop replacement", edit: func(wf *domain.Workflow) {
 			wf.Nodes = []domain.Node{{ID: "noop", Type: "noop"}}
 			wf.Outputs = map[string]string{"text": "done"}

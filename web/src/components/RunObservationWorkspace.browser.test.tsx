@@ -136,9 +136,11 @@ describe('run map canvas (browser mode)', () => {
     ;(await screen.findByRole('button', { name: 'Deny Charge card' })).click()
     const dialog = await screen.findByRole('alertdialog', { name: 'Deny Charge card' })
     rerender(view(execution, [runNodes[0], waitingGate({ approvalId: 'ta-2', paramsDigest: 'digest-2', params: { amount: 500 } })]))
-    within(dialog).getByTestId('confirm-dialog-confirm').click()
+    within(dialog).getByTestId('confirm-dialog-confirm').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
     await waitFor(() => expect(screen.getByRole('alertdialog', { name: 'Deny Charge card' })).toHaveTextContent('This request changed'))
     const again = screen.getByRole('alertdialog', { name: 'Deny Charge card' })
+    // The second click of a double click lands on the reopened dialog and must not decide.
+    within(again).getByTestId('confirm-dialog-confirm').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
     expect(await within(again).findByTestId('tool-approval-params-gate')).toHaveTextContent('"amount": 500')
     expect(execution.onApproveNode).not.toHaveBeenCalled()
     within(again).getByTestId('confirm-dialog-confirm').click()

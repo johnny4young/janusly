@@ -498,7 +498,7 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 	if len([]rune(reason)) > engine.MaxPauseReasonRunes {
 		return opError(http.StatusBadRequest, "workflows_pause_reason_invalid", "reason must be at most 500 characters", nil)
 	}
-	previous, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
+	previous, current, err := s.engine.PauseWorkflow(r.Context(), rc.orgID, workflowID, reason)
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
@@ -506,7 +506,7 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 	default:
 		return opError(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 	}
-	changed := previous != engine.WorkflowStatusPausedManual
+	changed := previous != current
 	if changed {
 		s.audit.Write(r.Context(), s.pool, rc.authContext, "workflow.paused", audit.Options{
 			TargetType: "workflow", TargetID: workflowID,
@@ -514,7 +514,7 @@ func (s *V1Server) pauseWorkflowCore(r *http.Request, rc v1Request, workflowID s
 		})
 	}
 	return opOK(map[string]any{
-		"ok": true, "workflowId": workflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed,
+		"ok": true, "workflowId": workflowID, "status": current, "changed": changed,
 	})
 }
 

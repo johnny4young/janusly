@@ -17,7 +17,7 @@
  */
 
 import { ReactFlowProvider, addEdge, applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import '../styles/canvas.css'
@@ -31,6 +31,7 @@ import { refreshRunMap, useRunMap } from '../hooks/useRunMap'
 import { projectRunMapOverlays, type RunMapNodeOverlay } from '../run-map'
 import { getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, readHumanFormWaiting } from '../run-observability'
 import { useConfirm } from './ConfirmDialog'
+import { useAliveRef } from '../hooks/useAliveRef'
 import { useT } from '../i18n'
 import type { RunNode, RunSummary, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 
@@ -150,8 +151,9 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
   const onSubmitHumanForm = execution?.onSubmitHumanForm
   const onOpenRun = execution?.onOpenRun
   const confirm = useConfirm()
+  const alive = useAliveRef()
   const live = useRef({ overlays, runNodes })
-  useEffect(() => { live.current = { overlays, runNodes } })
+  live.current = { overlays, runNodes }
   const actions = useMemo<RunMapActions | null>(() => onApproveNode && onOpenRun ? {
     pendingNodeId,
     // The person decides the request the dialog showed; a request that changed meanwhile is shown again.
@@ -172,7 +174,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
         confirmLabel: t(`rightPanel.runs.toolApproval.${choice}`),
         tone: choice === 'deny' ? 'danger' : 'default',
       })
-      if (!confirmed) return
+      if (!confirmed || !alive.current) return
       const current = live.current.overlays.get(nodeId)?.decision
       const unchanged = current?.kind === 'tool_approval'
         ? request?.approvalId === current.approvalId && request.paramsDigest === current.paramsDigest
@@ -191,7 +193,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
     openForm: nodeId => setForm({ nodeId, errors: [], submitting: false }),
     rerun: setRerunNodeId,
     openRun: (childRunId) => { void onOpenRun(childRunId) },
-  } : null, [confirm, onApproveNode, onOpenRun, pendingNodeId, runId, t])
+  } : null, [alive, confirm, onApproveNode, onOpenRun, pendingNodeId, runId, t])
   const summary = useMemo(
     () => snapshot && <RunMapTotals map={snapshot.map} overlays={overlays} />,
     [overlays, snapshot],

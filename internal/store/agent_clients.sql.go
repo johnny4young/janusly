@@ -198,18 +198,18 @@ func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowFo
 
 const listAgentClientCreators = `-- name: ListAgentClientCreators :many
 SELECT DISTINCT created_by FROM agent_clients
-WHERE org_id = $1 AND 'agent:' || id = ANY($2::text[])
+WHERE org_id = $1 AND id = ANY($2::text[])
 ORDER BY created_by
 `
 
 type ListAgentClientCreatorsParams struct {
-	OrgID    string
-	ActorIds []string
+	OrgID     string
+	ClientIds []string
 }
 
-// The people accountable for the agent clients among these actor ids.
+// The people accountable for these agent clients.
 func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClientCreatorsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.ActorIds)
+	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.ClientIds)
 	if err != nil {
 		return nil, err
 	}

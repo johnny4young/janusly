@@ -77,10 +77,13 @@ campaign waits at the paused workflow's first item, and runs already in
 progress continue. Draft tests keep the start gates and are refused too. A pause never touches versions, schedule entries or an
 active rollout, which only an explicit rollout decision finishes.
 
-A manual pause replaces a system pause, and each automatic resume only
-matches its own status, so no automatic resume lifts a manual pause.
+A manual pause replaces an upstream pause, and each automatic resume only
+matches its own status, so no automatic resume lifts a manual pause. A
+breaker pause stays as it is (`status: paused_circuit_breaker`), so an agent
+cannot turn it into a manual pause it may lift.
 `POST /workflows/{id}/resume` (`workflows.resume`) lifts manual and breaker
-pauses, then starts the buffered events oldest first in pages of 50. An
+pauses (a breaker pause only for a person), then starts the buffered events
+oldest first in pages of 50. An
 upstream pause is refused with a 409 `upstream_degraded` because it clears
 itself; resuming a manual pause while a subscribed upstream is degraded hands
 the workflow to that upstream pause instead. Pause reasons are one line of at

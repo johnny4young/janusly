@@ -566,6 +566,16 @@ func TestAgentClientPausesAndResumesWithinScope(t *testing.T) {
 	if got := status(tenant.workflowID); got != "paused_circuit_breaker" {
 		t.Fatalf("after refused resumes: %s", got)
 	}
+	// A manual pause cannot turn the breaker pause into one the agent may lift.
+	if res, _ := callTool(t, session, "workflows.pause", map[string]any{"workflowId": tenant.workflowID}); res.IsError {
+		t.Fatalf("pause over breaker: %q", resultText(res))
+	}
+	if res, _ := callTool(t, session, "workflows.resume", map[string]any{"workflowId": tenant.workflowID}); !res.IsError {
+		t.Fatalf("agent lifted a breaker pause through a manual pause: %q", resultText(res))
+	}
+	if got := status(tenant.workflowID); got != "paused_circuit_breaker" {
+		t.Fatalf("after pause and resume: %s", got)
+	}
 }
 
 // operatorSession is cmd/mcp without an agent token: the operator ceiling

@@ -326,9 +326,13 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 		!currentRecoveryValidation(validationPayload.CaseRevision, caseRow.Revision) {
 		return store.RecoveryApprovalGrant{}, ErrRecoveryCaseConflict
 	}
-	creators, err := q.ListAgentClientCreators(ctx, store.ListAgentClientCreatorsParams{
-		OrgID: input.Auth.OrgID, ActorIds: []string{candidate.ActorID.String, validation.ActorID.String},
-	})
+	clientIDs := []string{}
+	for _, actor := range []pgtype.Text{candidate.ActorID, validation.ActorID} {
+		if id, isAgent := strings.CutPrefix(actor.String, "agent:"); isAgent {
+			clientIDs = append(clientIDs, id)
+		}
+	}
+	creators, err := q.ListAgentClientCreators(ctx, store.ListAgentClientCreatorsParams{OrgID: input.Auth.OrgID, ClientIds: clientIDs})
 	if err != nil {
 		return store.RecoveryApprovalGrant{}, fmt.Errorf("read recovery requesters: %w", err)
 	}

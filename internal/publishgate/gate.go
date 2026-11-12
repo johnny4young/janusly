@@ -244,20 +244,16 @@ func normalize(value any) any {
 func Reasons(ctx context.Context, q *store.Queries, orgID, workflowID string, wf *domain.Workflow) ([]string, Shrink, error) {
 	reasons := []string{}
 	shrink := Shrink{}
-	latest, err := q.CountWorkflowVersions(ctx, store.CountWorkflowVersionsParams{WorkflowID: workflowID, OrgID: orgID})
-	if err != nil {
-		return nil, shrink, err
-	}
-	if latest == 0 {
+	live, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
 		reasons = append(reasons, "first_publish")
-	} else {
-		live, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{WorkflowID: workflowID, OrgID: orgID})
-		if err != nil {
-			return nil, shrink, err
-		}
-		liveWorkflow, _ := domain.Parse(live.DagJson)
+	case err != nil:
+		return nil, shrink, err
+	default:
+		liveWorkflow, issues := domain.Parse(live.DagJson)
 		if liveWorkflow == nil {
-			return nil, shrink, errors.New("live workflow version is unreadable")
+			return nil, shrink, fmt.Errorf("live workflow version %s is unreadable: %v", live.ID, issues)
 		}
 		shrink = Shrinks(liveWorkflow, wf)
 		reasons = append(reasons, shrink.Reasons()...)

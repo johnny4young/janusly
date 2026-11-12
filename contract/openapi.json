@@ -10475,7 +10475,11 @@
                               "const": true
                             },
                             "status": {
-                              "const": "paused_manual"
+                              "enum": [
+                                "paused_manual",
+                                "paused_circuit_breaker"
+                              ],
+                              "type": "string"
                             },
                             "workflowId": {
                               "type": "string"

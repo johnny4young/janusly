@@ -9,7 +9,7 @@ export function isPostWorkflowsIdPauseResponse(value: unknown): value is Api.Api
   return isShape(value, {
     changed: isBoolean,
     ok: literal(true),
-    status: literal("paused_manual"),
+    status: literal("paused_manual", "paused_circuit_breaker"),
     workflowId: isString,
   })
 }

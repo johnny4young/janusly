@@ -125,7 +125,8 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               <Button
                 ref={confirmButtonRef}
                 variant={options.tone === 'danger' ? 'danger' : 'primary'}
-                onClick={() => close(true)}
+                // The second click of a double click must not confirm a dialog reopened under it.
+                onClick={(event) => { if (event.detail < 2) close(true) }}
                 data-testid="confirm-dialog-confirm"
               >
                 {options.confirmLabel ?? (t('confirmDialog.confirm'))}

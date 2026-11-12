@@ -342,7 +342,8 @@ func ReachesOut(wf *domain.Workflow) []string {
 }
 
 // Shrink is what a draft takes away from the live version: triggers removed,
-// added or reconfigured, and steps or declared outputs removed.
+// added or reconfigured, steps removed or swapped for another type or tool,
+// and declared outputs removed.
 type Shrink struct {
 	TriggersChanged []string `json:"triggersChanged,omitempty"`
 	StepsRemoved    []string `json:"stepsRemoved,omitempty"`
@@ -386,7 +387,7 @@ func Shrinks(live, draft *domain.Workflow) Shrink {
 			}
 			continue
 		}
-		if !kept {
+		if !kept || next.Type != node.Type || toolName(next) != toolName(node) {
 			shrink.StepsRemoved = append(shrink.StepsRemoved, node.ID)
 		}
 	}
@@ -403,4 +404,9 @@ func Shrinks(live, draft *domain.Workflow) Shrink {
 	slices.Sort(shrink.TriggersChanged)
 	slices.Sort(shrink.StepsRemoved)
 	return shrink
+}
+
+func toolName(node domain.Node) string {
+	name, _ := node.Config["tool"].(string)
+	return name
 }

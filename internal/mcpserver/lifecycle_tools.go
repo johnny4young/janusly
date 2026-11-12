@@ -275,7 +275,7 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 		return hiddenResult(err, "workflow not found")
 	}
 	reason := boundedMCPText(args.Reason, engine.MaxPauseReasonRunes)
-	previous, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, reason)
+	previous, current, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, reason)
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
@@ -283,14 +283,14 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 	default:
 		return nil, nil, err
 	}
-	changed := previous != engine.WorkflowStatusPausedManual
+	changed := previous != current
 	if changed {
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.paused", audit.Options{
 			TargetType: "workflow", TargetID: args.WorkflowID,
 			Metadata: map[string]any{"previousStatus": previous, "hasReason": reason != ""},
 		})
 	}
-	return ok(map[string]any{"workflowId": args.WorkflowID, "status": engine.WorkflowStatusPausedManual, "changed": changed})
+	return ok(map[string]any{"workflowId": args.WorkflowID, "status": current, "changed": changed})
 }
 
 func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallToolResult, any, error) {

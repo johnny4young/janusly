@@ -588,7 +588,11 @@ var reasonText = map[string]string{
 func publishWaitMessage(reasons []string) string {
 	parts := make([]string, 0, len(reasons))
 	for _, reason := range reasons {
-		parts = append(parts, reasonText[reason])
+		text, known := reasonText[reason]
+		if !known {
+			text = reason
+		}
+		parts = append(parts, text)
 	}
 	return "A person must approve this publication because " + strings.Join(parts, "; ") +
 		". The live version keeps running unchanged until then."

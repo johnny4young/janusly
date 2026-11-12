@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/johnny4young/janusly/internal/domain"
+	"github.com/johnny4young/janusly/internal/recovery"
 	"github.com/johnny4young/janusly/internal/signature"
 	"github.com/johnny4young/janusly/internal/store"
 )
@@ -197,33 +198,33 @@ const MaxPauseReasonRunes = 500
 // PauseWorkflow stops new runs without touching versions, schedule entries or
 // rollouts: schedule ticks are dropped and trigger events are buffered until
 // ResumeWorkflow. A manual pause replaces a system pause so that no automatic
-// resume lifts it. It returns the status it replaced; pausing an already
-// manually paused workflow changes nothing.
-func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason string) (string, error) {
+// resume lifts it, except a circuit-breaker pause, which only a person lifts.
+// It returns the status it found and the status the workflow now has.
+func (e *Engine) PauseWorkflow(ctx context.Context, orgID, workflowID, reason string) (string, string, error) {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := store.New(e.wrapTx(tx))
 	status, err := q.LockWorkflowPauseState(ctx, store.LockWorkflowPauseStateParams{OrgID: orgID, ID: workflowID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrWorkflowLifecycleNotFound
+			return "", "", ErrWorkflowLifecycleNotFound
 		}
-		return "", err
+		return "", "", err
 	}
-	if status == WorkflowStatusPausedManual {
-		return status, nil
+	if status == WorkflowStatusPausedManual || status == recovery.WorkflowStatusPausedCircuitBreaker {
+		return status, status, nil
 	}
 	reason = sanitizePauseReason(reason)
 	if err := q.SetWorkflowPauseState(ctx, store.SetWorkflowPauseStateParams{
 		OrgID: orgID, ID: workflowID, Status: WorkflowStatusPausedManual,
 		PausedReason: pgtype.Text{String: reason, Valid: reason != ""},
 	}); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return status, tx.Commit(ctx)
+	return status, WorkflowStatusPausedManual, tx.Commit(ctx)
 }
 
 // sanitizePauseReason keeps the reason one bounded line without secret-shaped

@@ -2086,7 +2086,7 @@ export interface ApiResponses {
   "POST /workflows/{id}/pause": {
     "changed": boolean
     "ok": true
-    "status": "paused_manual"
+    "status": "paused_manual" | "paused_circuit_breaker"
     "workflowId": string
   }
   /** Resume a manually paused or circuit-breaker-paused workflow */
