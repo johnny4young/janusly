@@ -79,6 +79,9 @@ type MCPHTTP struct {
 	AllowedHosts []string
 	// RefuseForwardedHTTP is set in production behind a trusted proxy.
 	RefuseForwardedHTTP bool
+	// BaseURL is JANUSLY_WEB_BASE_URL as scheme://host[:port]. It is the OAuth
+	// issuer; without it remote MCP takes static agent tokens only.
+	BaseURL string
 }
 
 // IsProduction is the single process-environment gate for production-only

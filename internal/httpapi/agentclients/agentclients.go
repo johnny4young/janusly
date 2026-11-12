@@ -205,6 +205,10 @@ func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
 			return httpkit.Error(http.StatusBadRequest, "invalid_body", "request body is not a valid rotation", nil)
 		}
 	}
+	// An OAuth grant has no static token to hand out; its client refreshes it.
+	if existing.OauthClientID.Valid {
+		return httpkit.Error(http.StatusConflict, "agent_client_oauth", "this agent client was connected with OAuth; revoke it and connect again", nil)
+	}
 	now := s.now()
 	// Expiry ends a client like revocation does; rotation never revives it.
 	if existing.RevokedAt == nil && !now.Before(existing.ExpiresAt) {
@@ -317,6 +321,7 @@ func view(row store.AgentClient, now time.Time) map[string]any {
 		"scope":              map[string]any{"workflowIds": nonNil(row.ScopeWorkflowIds), "tags": nonNil(row.ScopeTags)},
 		"rateLimitPerMinute": row.RateLimitPerMinute,
 		"gateTools":          nonNil(row.GateTools), "captureContent": row.CaptureContent,
+		"origin":        map[bool]string{true: "oauth", false: "static"}[row.OauthClientID.Valid],
 		"tokenLast4":    row.TokenLast4,
 		"createdBy":     row.CreatedBy,
 		"createdAt":     row.CreatedAt.UTC().Format(time.RFC3339),

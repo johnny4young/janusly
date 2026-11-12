@@ -30,6 +30,7 @@ import (
 	"github.com/johnny4young/janusly/internal/httpapi/agentclients"
 	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
 	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
+	"github.com/johnny4young/janusly/internal/httpapi/oauth"
 	"github.com/johnny4young/janusly/internal/httpapi/publishrequests"
 	"github.com/johnny4young/janusly/internal/httpapi/runmap"
 	"github.com/johnny4young/janusly/internal/httpapi/scim"
@@ -100,6 +101,7 @@ type V1Server struct {
 	mcp                        *mcpclient.Client
 	workos                     workosClient
 	feedbackMemory             *feedbackMemoryPool
+	oauthIssuer                string
 }
 
 // V1ServerOptions describes process-owned audit policy and feedback-memory work.
@@ -137,6 +139,9 @@ type V1ServerOptions struct {
 	// requests under the same rules.
 	AgentGateOpenHandler http.Handler
 	AgentGatePollHandler http.Handler
+	// OAuthIssuer, when set, mounts the OAuth authorization server for remote
+	// MCP under this public base URL.
+	OAuthIssuer string
 	// rateLimitNow is the package-local fixed-window clock seam for tests.
 	rateLimitNow func() time.Time
 }
@@ -177,7 +182,8 @@ func newV1HandlerWithWorkOS(
 		authoringExperienceMode:    experienceMode,
 		experienceReader:           options.ExperienceReader,
 		engine:                     eng, pool: pool, audit: options.Audit, resolver: auth.NewResolver(pool, auth.ConfigFromEnv()),
-		newID: uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
+		oauthIssuer: options.OAuthIssuer,
+		newID:       uuid.NewString, hub: newStreamHub(), workos: client, feedbackMemory: feedbackMemory,
 	}
 	if server.experienceReader == nil {
 		server.experienceReader = server.experienceRegistry()
@@ -405,6 +411,9 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	publishrequests.Mount(mux, publishrequests.Deps{Pool: s.pool, Audit: s.audit, Engine: s.engine, Routes: s})
 	runmap.Mount(mux, runmap.Deps{Pool: s.pool, Routes: s})
 	agentsessions.Mount(mux, agentsessions.Deps{Audit: s.audit, Pool: s.pool, Routes: s})
+	oauth.Mount(mux, oauth.Deps{
+		Audit: s.audit, Pool: s.pool, Limiter: s.limiter, Routes: s, Issuer: s.oauthIssuer,
+	})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)

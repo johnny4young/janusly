@@ -3652,6 +3652,12 @@ CREATE TABLE public.agent_clients (
     last_used_at timestamp with time zone,
     gate_tools text[] DEFAULT '{}' NOT NULL,
     capture_content boolean DEFAULT false NOT NULL,
+    oauth_client_id text,
+    access_expires_at timestamp with time zone,
+    refresh_digest bytea,
+    CONSTRAINT agent_clients_oauth_check CHECK (
+        (oauth_client_id IS NOT NULL OR (access_expires_at IS NULL AND refresh_digest IS NULL))
+        AND (refresh_digest IS NULL OR octet_length(refresh_digest) = 32)),
     CONSTRAINT agent_clients_gate_check CHECK (cardinality(gate_tools) <= 20 AND (NOT capture_content OR cardinality(gate_tools) > 0)),
     CONSTRAINT agent_clients_name_check CHECK (char_length(name) BETWEEN 1 AND 120),
     CONSTRAINT agent_clients_capabilities_check CHECK (
@@ -3666,6 +3672,57 @@ CREATE TABLE public.agent_clients (
 );
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients (token_digest);
 CREATE INDEX agent_clients_org_created_idx ON public.agent_clients (org_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients (refresh_digest) WHERE refresh_digest IS NOT NULL;
+
+-- Every refresh token a grant rotated away. Presenting one again means it
+-- leaked, however many rotations ago.
+CREATE TABLE public.oauth_refresh_history (
+    digest bytea PRIMARY KEY,
+    agent_client_id text NOT NULL,
+    rotated_at timestamp with time zone NOT NULL
+);
+CREATE INDEX oauth_refresh_history_rotated_idx ON public.oauth_refresh_history (rotated_at);
+
+-- A public OAuth client registered by an MCP client before anyone signed in.
+-- It belongs to no organization and grants nothing by itself.
+CREATE TABLE public.oauth_clients (
+    id text PRIMARY KEY,
+    client_name text NOT NULL,
+    redirect_uris text[] NOT NULL,
+    registered_from text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT oauth_clients_name_check CHECK (char_length(client_name) BETWEEN 1 AND 100),
+    CONSTRAINT oauth_clients_redirects_check CHECK (cardinality(redirect_uris) BETWEEN 1 AND 5)
+);
+CREATE INDEX oauth_clients_unused_idx ON public.oauth_clients (created_at) WHERE last_used_at IS NULL;
+
+-- One authorization request, from /oauth/authorize to the code exchange.
+-- Only the code's digest is stored; the code is single use.
+CREATE TABLE public.oauth_authorization_requests (
+    id text PRIMARY KEY,
+    oauth_client_id text NOT NULL REFERENCES public.oauth_clients(id) ON DELETE CASCADE,
+    redirect_uri text NOT NULL,
+    code_challenge text NOT NULL,
+    scopes text[] NOT NULL,
+    state text NOT NULL,
+    resource text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    org_id text,
+    decided_by text,
+    agent_client_id text,
+    code_digest bytea,
+    code_expires_at timestamp with time zone,
+    code_used_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oauth_requests_status_check CHECK (status IN ('pending', 'approved', 'denied')),
+    CONSTRAINT oauth_requests_approved_check CHECK ((status = 'approved') = (code_digest IS NOT NULL AND agent_client_id IS NOT NULL AND org_id IS NOT NULL)),
+    CONSTRAINT oauth_requests_challenge_check CHECK (char_length(code_challenge) = 43)
+);
+CREATE UNIQUE INDEX oauth_requests_code_idx ON public.oauth_authorization_requests (code_digest) WHERE code_digest IS NOT NULL;
+CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests (expires_at);
+CREATE INDEX oauth_requests_pending_idx ON public.oauth_authorization_requests (oauth_client_id, created_at) WHERE status = 'pending';
 
 -- An agent's proposed workflow document. A draft is never a version: nothing
 -- routes, schedules or triggers it until a publication appends it.

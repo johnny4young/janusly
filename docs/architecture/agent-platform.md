@@ -299,6 +299,84 @@ claude mcp add --transport http janusly https://janusly.example.com/mcp \
   --header "Authorization: Bearer $JANUSLY_AGENT_TOKEN"
 ```
 
+### OAuth for remote MCP
+
+A static agent token still connects every client. OAuth adds a connection a
+person approves in the browser, for MCP clients that speak the MCP
+authorization flow. It exists only with `JANUSLY_MCP_HTTP_ENABLED=true` and a
+`JANUSLY_WEB_BASE_URL`, which is the issuer (`internal/httpapi/oauth`).
+
+1. `/mcp` without a token answers `401` with
+   `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource/mcp"`.
+2. Protected resource metadata (RFC 9728) names the authorization server;
+   `/.well-known/oauth-authorization-server` (RFC 8414) names the endpoints.
+3. `POST /oauth/register` (RFC 7591): public clients only, no secret.
+4. `GET /oauth/authorize` with `code_challenge` (`S256`), `state`, `scope` and
+   `resource`. It stores the request and sends the browser to the web app.
+5. **Consent**, in Settings → Access of the signed-in app. Anyone can
+   register a client under any name and send a person the consent link, so
+   the screen is the defence: the name is plain ASCII and marked unverified,
+   the address the code goes to is shown (with a warning when it is not this
+   computer), and only `read` starts ticked. A capability the person cannot
+   grant is disabled with the permission they lack.
+6. Approving creates an ordinary agent client (`createdBy` the person,
+   `origin: oauth`) and returns a single-use code that lives 60 seconds.
+7. `POST /oauth/token` exchanges it for an access token (15 minutes) and a
+   rotating refresh token.
+
+| Scope | Capability |
+|---|---|
+| `janusly:read` | `read` (implied by every other) |
+| `janusly:propose` | `propose` |
+| `janusly:test` | `test` |
+| `janusly:publish` | `publish` |
+| `janusly:operate` | `operate` |
+
+`report` is never offered: the hooks bridge has no browser and uses a static
+token.
+
+- **Opaque tokens.** The access token is an agent token (`jly_agent_…`),
+  found by its digest and resolved by the same code as a static one, so
+  revocation, expiry, a removed creator and the live intersection with the
+  creator's permissions all apply on the next call. Codes and refresh tokens
+  are stored as digests.
+- **Refreshing never extends the grant.** The client keeps its lifetime
+  (at most 90 days); after that the person consents again. A grant holds one
+  access token at a time.
+- **Replay ends the grant.** A code presented again, or any refresh token
+  the grant ever rotated away (every one is kept as a digest), revokes the
+  client and is audited (`oauth.code_reused`, `oauth.refresh_reused`). The
+  exception is 30 seconds after use, and only for a retry that proves it is
+  the same client (same client id, and for a code the same redirect and PKCE
+  verifier): it gets `invalid_grant` and keeps its grant.
+- **Redirects.** Exact match; `http` only on a loopback address, where the
+  port may differ (RFC 8252); `https` otherwise; no private schemes, wildcards,
+  fragments or credentials. Hosts are lowercase ASCII, so an internationalized
+  name has to arrive as visible punycode. An unknown client or redirect is answered on the
+  page, never redirected.
+- **Audience.** `resource` must be this server's `/mcp`; nothing else is
+  issued for, and Janusly accepts no third-party tokens.
+- **Organization.** The grant belongs to the organization the person is in
+  when they consent; nothing in an OAuth request names one.
+- **Registration is unauthenticated,** so it is bounded: 10 per hour per
+  address (an IPv6 caller counts by its /64), 1000 unused registrations in
+  total, where a new one evicts an older one (first those without a request
+  waiting for consent, never one younger than 10 minutes), and one nobody
+  used within 24 hours is swept. Authorize and token are limited per address
+  too. A client holds at most 20 requests waiting for consent, and past
+  10 000 in total the oldest makes room, so neither cap can be used to lock
+  others out.
+- **Loose ends are closed.** A consent whose code is never exchanged is
+  revoked within minutes by the retention sweep.
+- **Not in this cut:** client metadata documents by URL (CIMD), private
+  redirect schemes, scoping by workflow or tag on the consent screen (the API
+  takes it), and an `insufficient_scope` challenge on a refused tool.
+- A client connected with OAuth cannot be rotated into a static token, by the
+  route or by the query; revoke it and connect again.
+- Known limits: no CORS headers for browser-based MCP clients; an expired
+  token's `401` carries no `error="invalid_token"`; the organization is shown
+  by id; a signed-out person may lose the consent link through SSO sign-in.
+
 ## 4. Publish gate
 
 What exists: saving a version makes it the latest, and the latest version

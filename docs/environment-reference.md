@@ -81,7 +81,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_ORG` | Process | string; `default`; organization bound to the stdio MCP server | `cmd/mcp/main.go` |
 | `JANUSLY_AGENT_TOKEN` | Secret | `jly_agent_` token; unset; makes the stdio MCP server act as that agent client and its organization, re-checked on every call, instead of `JANUSLY_ORG` and `JANUSLY_MCP_PERMISSIONS` | `cmd/mcp/main.go` |
 | `JANUSLY_SSO_CALLBACK_URL` | Process | URL string; empty; required by WorkOS SSO flows; must match provider registration | `httpapi/sso.go` |
-| `JANUSLY_WEB_BASE_URL` | Process | URL string; empty; browser-session secure-cookie fallback and SSO return origin | `httpapi/sso.go; browsersession/browsersession.go` |
+| `JANUSLY_WEB_BASE_URL` | Process | URL string; empty; browser-session secure-cookie fallback and SSO return origin; with remote MCP enabled it is also the OAuth issuer, and without it remote MCP takes static agent tokens only | `httpapi/sso.go; browsersession/browsersession.go` |
 | `JANUSLY_PUBLIC_APP_URL` | Process | URL string; empty; optional report-link prefix; no provider discovery or implicit deployment | `httpapi/reports.go` |
 | `JANUSLY_OBJECT_STORE_BUCKET` | Process | string; empty; required to select S3 storage | `objectstore/objectstore.go; objectstore/sigv4.go` |
 | `JANUSLY_OBJECT_STORE_REGION` | Process | string; `us-east-1`; SigV4 region | `objectstore/sigv4.go` |

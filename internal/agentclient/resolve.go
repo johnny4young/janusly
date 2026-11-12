@@ -121,6 +121,10 @@ func (r Resolver) Resolve(ctx context.Context, token string) (*Principal, error)
 	if !r.now().Before(row.ExpiresAt) {
 		return nil, rejected(RejectExpired, &row)
 	}
+	// An OAuth grant's access token is short-lived inside the client's lifetime.
+	if row.AccessExpiresAt != nil && !r.now().Before(*row.AccessExpiresAt) {
+		return nil, rejected(RejectExpired, &row)
+	}
 	capabilities, err := ParseCapabilities(row.Capabilities)
 	if err != nil {
 		return nil, rejected(RejectCapabilities, &row)
