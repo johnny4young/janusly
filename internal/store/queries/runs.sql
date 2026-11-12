@@ -368,7 +368,7 @@ SELECT r.id, r.org_id, r.workflow_version_id, r.status,
          WHERE rn.run_id = r.id AND rn.status = 'waiting'
        ) AS has_waiting_nodes
 FROM runs r
-LEFT JOIN workflows w ON w.id = r.workflow_id
+LEFT JOIN workflows w ON w.id = r.workflow_id AND w.org_id = r.org_id
 WHERE r.org_id = $1
   AND (r.created_at, r.id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
   AND (sqlc.narg(filter_workflow_id)::text IS NULL OR r.workflow_id = sqlc.narg(filter_workflow_id))

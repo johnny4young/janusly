@@ -60,7 +60,7 @@ func TestAuthoringExperienceGenerateKeepsBudgetAndRateAdmission(t *testing.T) {
 		t.Run(gate, func(t *testing.T) {
 			for _, mode := range []config.AuthoringExperienceMode{config.AuthoringExperienceOff, config.AuthoringExperienceShadow, config.AuthoringExperienceReview} {
 				t.Run(string(mode), func(t *testing.T) {
-					h, request, _, calls := experienceProposalIntegrationFixture(t, mode)
+					h, request, _, calls := experienceProposalIntegrationFixture(t, mode, func(o *V1ServerOptions) { *o = frozenRateLimitClock(*o) })
 					pool := testPool(t)
 					if gate == "budget" {
 						if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs(id,org_id,key,value_json,category,description,value_type) VALUES ($1,$2,'ai.budgetMonthlyUsd','0.5','ai','test','number'),($3,$2,'ai.budgetExceededPolicy','"block"','ai','test','string')`, h.org+"-budget", h.org, h.org+"-policy"); err != nil {
