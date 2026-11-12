@@ -13,6 +13,16 @@
   whose document reused a workflow id saved in a different organization took
   that workflow's name, in the API and in the MCP `runs.list`; the name now
   comes only from the run's own organization.
+- External agents get their own credentials. A member creates an agent client
+  for Claude Code, Codex or another agent with a capability ceiling (read,
+  operate, and the propose, test, publish and report capabilities that later
+  tools use), an optional scope of workflows or tags, an expiry of up to 90
+  days and a call limit. The token is shown once; rotate and revoke take
+  effect on the agent's next call. The agent acts for its creator and never
+  holds more than their current permissions, never sees another organization
+  or a workflow outside its scope, and every call is audited under its own
+  name. The local MCP server uses one with `JANUSLY_AGENT_TOKEN`, and the new
+  `agent.info` tool tells an agent what it may do.
 - Cancelling a run while an operator applies a semantic recovery decision to
   it no longer fails one of the two with a database deadlock error. The
   decision and the cancellation now take turns: whichever starts first

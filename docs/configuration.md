@@ -251,6 +251,9 @@ settings fail at boot and invalid new tenant/workflow writes are rejected.
 - `JANUSLY_MCP_PERMISSIONS`, a comma/space-separated explicit permission
   ceiling for `cmd/mcp`; omission is read-only and write consent never expands
   this set
+- `JANUSLY_AGENT_TOKEN`, an agent client token for `cmd/mcp`; when set, the
+  client's organization, capabilities, scope and its creator's live permissions
+  replace `JANUSLY_ORG` and `JANUSLY_MCP_PERMISSIONS`
 - `JANUSLY_PUBLIC_APP_URL` for shareable report links
 - `JANUSLY_RETENTION_DEAD_LETTERS_DAYS` (org key `retention.deadLettersDays`,
   default 180, range 30..730) ages out settled dead letters (`replayed`,

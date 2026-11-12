@@ -161,6 +161,9 @@ func (d Deps) assureWorkflow(ctx context.Context, workflowID string) (*mcp.CallT
 	if !validMCPIdentifier(workflowID) {
 		return expected("workflowId is required and must be at most 256 characters")
 	}
+	if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
+		return hiddenResult(err, "workflow not found")
+	}
 	q := store.New(d.Pool)
 	workflow, err := q.GetWorkflow(ctx, store.GetWorkflowParams{ID: workflowID, OrgID: d.OrgID})
 	if err != nil {

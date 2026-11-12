@@ -121,6 +121,7 @@ func assertBaseline(ctx context.Context, db *sql.DB) error {
 		"public.schedule_entries",
 		"public.tool_approval_requests",
 		"public.run_actors",
+		"public.agent_clients",
 		"public.run_event_sequences",
 		"public.run_events_run_seq_idx",
 		"public.workflows_active_search_trgm_idx",

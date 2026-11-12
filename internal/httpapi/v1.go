@@ -26,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/httpapi/agentclients"
 	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
 	"github.com/johnny4young/janusly/internal/httpapi/scim"
 	"github.com/johnny4young/janusly/internal/mcpclient"
@@ -367,6 +368,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	s.mountCredentialRoutes(mux)
 	s.mountSlackInteractionRoutes(mux)
 	externalruntime.Mount(mux, externalruntime.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
+	agentclients.Mount(mux, agentclients.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)

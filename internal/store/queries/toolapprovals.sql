@@ -23,8 +23,8 @@ RETURNING *;
 -- it, whose steps can feed this call, but not in sibling or child runs. Plus
 -- the creators up the lineage, everyone an earlier request for the step
 -- excluded, and, when no person started this run or a subworkflow parent (a
--- replay or rerun source does not count), whoever saved its versions. Walks
--- stop at max_depth.
+-- replay or rerun source does not count), whoever saved its versions. An
+-- agent client counts with the member it acts for. Walks stop at max_depth.
 -- name: ListToolApprovalRequesters :many
 WITH RECURSIVE lineage (id, parent_run_id, follow, via_subworkflow, own, depth) AS (
   SELECT r.id, r.parent_run_id,
@@ -49,8 +49,9 @@ tree (id, depth) AS (
 ),
 started AS (
   SELECT r.id, r.created_by, r.trigger_kind, r.workflow_version_id, l.own FROM runs r JOIN lineage l ON r.id = l.id
-)
-SELECT DISTINCT actor::text FROM (
+),
+found AS (
+SELECT DISTINCT actor::text AS actor FROM (
   SELECT created_by AS actor FROM started
   UNION ALL
   SELECT a.actor FROM run_actors a JOIN tree t ON a.run_id = t.id WHERE a.role <> 'redrive'
@@ -68,6 +69,12 @@ SELECT DISTINCT actor::text FROM (
   )
 ) actors
 WHERE actor IS NOT NULL AND actor <> ''
+)
+SELECT f.actor FROM found f
+UNION
+SELECT ac.created_by FROM found f
+JOIN agent_clients ac ON f.actor LIKE 'agent:%' AND ac.id = substr(f.actor, 7)
+  AND ac.org_id = (SELECT r.org_id FROM runs r WHERE r.id = sqlc.arg(run_id))
 ORDER BY actor;
 
 -- name: HasLiveToolApproval :one

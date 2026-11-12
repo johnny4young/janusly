@@ -48,6 +48,8 @@ const (
 	ModeSupabase       Mode = "supabase"
 	ModeServiceToken   Mode = "service-token"
 	ModeDevHeaders     Mode = "dev-headers"
+	// ModeAgent is an external agent client; only the MCP surface resolves it.
+	ModeAgent Mode = "agent"
 )
 
 // Source is the caller surface label — informational ONLY, never an
@@ -77,6 +79,8 @@ type Context struct {
 	// dev-headers and service tokens it remains empty because those transports
 	// do not prove ownership of an email address.
 	Email string
+	// AgentClientID names the agent client behind a ModeAgent context.
+	AgentClientID string
 }
 
 // Identity is provider-verified identity before tenant membership. Only
@@ -200,6 +204,16 @@ func NewResolver(pool *pgxpool.Pool, cfg Config) *Resolver {
 // Tests that exercise extraction in isolation may leave it nil.
 func (rv *Resolver) SetPolicyEvaluator(evaluate PolicyEvaluator) { rv.evaluatePolicy = evaluate }
 
+// IsPersonMode reports a mode that proves a person is acting. Human decisions
+// (approvals, grants) accept only these, so a new automation mode stays out
+// by default.
+func IsPersonMode(mode Mode) bool {
+	return mode == ModeJanuslySession || mode == ModeSupabase || mode == ModeDevHeaders
+}
+
+// AgentTokenPrefix starts every agent client token.
+const AgentTokenPrefix = "jly_agent_"
+
 func constantTimeBearerMatch(header, expected string) bool {
 	if header == "" || expected == "" {
 		return false
@@ -234,6 +248,11 @@ func (rv *Resolver) extract(ctx context.Context, r *http.Request) (*principal, e
 		if !errorsIsNoRows(err) {
 			return nil, err
 		}
+	}
+	// Agent tokens authenticate only the MCP surface. Refusing them here
+	// also keeps them from being forwarded to the identity provider.
+	if strings.Contains(strings.ToLower(r.Header.Get("Authorization")), AgentTokenPrefix) {
+		return nil, nil
 	}
 	// 2. Supabase JWT.
 	if rv.supabaseURL != "" {

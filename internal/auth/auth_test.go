@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,5 +194,37 @@ func TestBootGate(t *testing.T) {
 	}
 	if err := (Config{}).BootError(); err != nil {
 		t.Fatalf("dev must boot: %v", err)
+	}
+}
+
+// An agent token is never sent to the identity provider and never falls
+// through to development headers, even when it happens to equal the
+// service token.
+func TestAgentTokenIsRefusedBeforeEveryProvider(t *testing.T) {
+	agentToken := AgentTokenPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	rv := makeResolver(Config{
+		SupabaseURL: "https://sb.example", SupabaseKey: "k", ServiceToken: agentToken, AllowDevHeaders: true,
+	})
+	rv.verifySupabase = func(context.Context, string) (string, string, bool) {
+		t.Fatal("agent token reached the identity provider")
+		return "", "", false
+	}
+	for _, header := range []string{"Bearer " + agentToken, "Bearer  " + agentToken, "bearer " + agentToken, "Bearer \t" + agentToken, "Bearer " + strings.ToUpper(agentToken)} {
+		if p := principalFor(t, rv, map[string]string{
+			"Authorization": header, "x-org-id": "org-a", "x-user-id": "u1",
+		}); p != nil {
+			t.Fatalf("agent token authenticated a general route via %q: %+v", header, p)
+		}
+	}
+}
+
+func TestOnlyPersonModesDecide(t *testing.T) {
+	for mode, person := range map[Mode]bool{
+		ModeJanuslySession: true, ModeSupabase: true, ModeDevHeaders: true,
+		ModeServiceToken: false, ModeAgent: false, "": false,
+	} {
+		if IsPersonMode(mode) != person {
+			t.Fatalf("IsPersonMode(%q) = %v", mode, !person)
+		}
 	}
 }

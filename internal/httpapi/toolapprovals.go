@@ -45,7 +45,7 @@ func (s *V1Server) decideToolApprovalCore(r *http.Request, rc v1Request) opResul
 	if err := decodeBody(r, &body); err != nil || body.ApprovalID == "" || body.ParamsDigest == "" || status[body.Decision] == "" {
 		return opError(http.StatusBadRequest, "invalid_input", "Invalid request body", nil)
 	}
-	if rc.authContext == nil || rc.authContext.Mode == auth.ModeServiceToken || rc.authContext.UserID == "" {
+	if rc.authContext == nil || !auth.IsPersonMode(rc.authContext.Mode) || rc.authContext.UserID == "" {
 		return opError(http.StatusForbidden, "tool_approval_human_required", "Only a person can decide a tool approval", nil)
 	}
 	row, replayed, err := s.engine.DecideToolApproval(r.Context(), engine.ToolApprovalDecision{

@@ -52,12 +52,23 @@ type Deps struct {
 	// Limiter bounds MCP writes per the contract's guardMcpWrite: bucket
 	// `mcp.<actionKey>`, org key, 60/min. Nil skips the check (tests).
 	Limiter *ratelimit.Limiter
+	// ResolveActor, when set, makes every tools call act as the agent client
+	// it authenticates instead of the operator fields above.
+	ResolveActor ActorResolver
+	// Transport labels audit rows: "stdio" or "http".
+	Transport string
+
+	actor *callActor
 }
 
-// auditContext derives the audit identity for MCP-originated writes: the
-// contract's MCP proxy reaches the API with the service token and the mcp
-// source tag, which is exactly what the audit trail must show.
+// auditContext derives the audit identity for MCP-originated writes. An
+// agent client is recorded as itself; the operator actor keeps the service
+// token identity the MCP proxy has always used.
 func (d Deps) auditContext() *auth.Context {
+	if principal := d.agent(); principal != nil {
+		return &auth.Context{OrgID: d.OrgID, UserID: d.UserID,
+			Mode: auth.ModeAgent, Source: auth.SourceMcp, AgentClientID: principal.ClientID}
+	}
 	return &auth.Context{OrgID: d.OrgID, UserID: d.UserID,
 		Mode: auth.ModeServiceToken, Source: auth.SourceMcp}
 }
@@ -81,14 +92,14 @@ func NewServer(deps Deps) *mcp.Server {
 		"workflows.save", "Save workflow",
 		"Validate a workflow document and save it as a new immutable version.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args saveArgs) (*mcp.CallToolResult, any, error) {
-		return deps.saveWorkflow(ctx, args.Workflow)
+		return deps.at(ctx).saveWorkflow(ctx, args.Workflow)
 	})
 
 	mcp.AddTool(server, writeTool(
 		"runs.start", "Start run",
 		"Start a run from a saved workflowId or a workflow document; returns the run id. Pass idempotencyKey to make retries safe.", false,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args startArgs) (*mcp.CallToolResult, any, error) {
-		return deps.startRun(ctx, args)
+		return deps.at(ctx).startRun(ctx, args)
 	})
 
 	type runArgs struct {
@@ -98,13 +109,13 @@ func NewServer(deps Deps) *mcp.Server {
 		"runs.status", "Run status",
 		"Read a bounded run status projection: final status plus per-node status and attempts.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
-		return deps.runStatus(ctx, args.RunID)
+		return deps.at(ctx).runStatus(ctx, args.RunID)
 	})
 	mcp.AddTool(server, readTool(
 		"runs.inspect", "Inspect run",
 		"Read a bounded run projection with node status, redacted error summaries, and recent event types; never returns the workflow DAG or raw payloads.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args runArgs) (*mcp.CallToolResult, any, error) {
-		return deps.runInspect(ctx, args.RunID)
+		return deps.at(ctx).runInspect(ctx, args.RunID)
 	})
 
 	type pageArgs struct {
@@ -121,13 +132,13 @@ func NewServer(deps Deps) *mcp.Server {
 		"runs.list", "List runs",
 		"List the organization's runs newest first, keyset-paginated; optional workflowId and status filters.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args runsListArgs) (*mcp.CallToolResult, any, error) {
-		return deps.runsList(ctx, args.Limit, args.Cursor, args.WorkflowID, args.Status)
+		return deps.at(ctx).runsList(ctx, args.Limit, args.Cursor, args.WorkflowID, args.Status)
 	})
 	mcp.AddTool(server, readTool(
 		"workflows.list", "List workflows",
 		"List the organization's active workflows newest first, keyset-paginated.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
-		return deps.workflowsList(ctx, args.Limit, args.Cursor)
+		return deps.at(ctx).workflowsList(ctx, args.Limit, args.Cursor)
 	})
 
 	type assureArgs struct {
@@ -137,14 +148,14 @@ func NewServer(deps Deps) *mcp.Server {
 		"workflows.assure", "Assure workflow",
 		"Inspect the latest workflow version's Intent, Recovery, Qualification, validation, and readiness evidence without exposing its DAG or credentials.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args assureArgs) (*mcp.CallToolResult, any, error) {
-		return deps.assureWorkflow(ctx, args.WorkflowID)
+		return deps.at(ctx).assureWorkflow(ctx, args.WorkflowID)
 	})
 
 	mcp.AddTool(server, readTool(
 		"dlq.list", "List dead letters",
 		"List bounded dead-letter summaries for the organization newest first, keyset-paginated.",
 	), func(ctx context.Context, req *mcp.CallToolRequest, args pageArgs) (*mcp.CallToolResult, any, error) {
-		return deps.dlqList(ctx, args.Limit, args.Cursor)
+		return deps.at(ctx).dlqList(ctx, args.Limit, args.Cursor)
 	})
 
 	type redriveArgs struct {
@@ -154,9 +165,10 @@ func NewServer(deps Deps) *mcp.Server {
 		"dlq.redrive", "Redrive dead letter",
 		"Claim one dead letter and revive its run: the failed node requeues and workers take over.", true,
 	), func(ctx context.Context, req *mcp.CallToolRequest, args redriveArgs) (*mcp.CallToolResult, any, error) {
-		return deps.redrive(ctx, args.DeadLetterID)
+		return deps.at(ctx).redrive(ctx, args.DeadLetterID)
 	})
 
+	registerAgentTools(server, deps)
 	registerOperatorTools(server, deps)
 	registerAuthoringTools(server, deps)
 	registerLifecycleTools(server, deps)
@@ -269,9 +281,22 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	if (workflowID == "") == (document == nil) {
 		return expected("pass exactly one of workflowId or workflow; workflows.list shows saved ids")
 	}
+	if principal := d.agent(); principal != nil {
+		if document != nil {
+			// An unsaved document would reach production without publication.
+			return expected("an agent client starts saved workflows by workflowId; it cannot run an unsaved document")
+		}
+		if idempotencyKey != "" {
+			// A per-client key space: a replay never returns someone else's run.
+			idempotencyKey = principal.ActorID() + ":" + idempotencyKey
+		}
+	}
 	if workflowID != "" {
 		if requestedVersionID != "" {
 			return expected("workflowVersionId only applies to a workflow document; workflowId runs the latest version")
+		}
+		if visible, err := d.workflowVisible(ctx, workflowID); err != nil || !visible {
+			return hiddenResult(err, "workflow not found or deactivated; workflows.list shows active workflows")
 		}
 		latest, result := d.latestWorkflowDocument(ctx, workflowID)
 		if result != nil {
@@ -295,6 +320,11 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 	}
 	if !validOptionalMCPIdentifier(wf.ID) {
 		return expected("workflow id must be at most 256 characters")
+	}
+	if visible, err := d.workflowVisible(ctx, wf.ID); err != nil {
+		return nil, nil, err
+	} else if !visible {
+		return expected("a scoped agent client starts only workflows in its scope; pass a workflowId from workflows.list")
 	}
 	var startInput any
 	if input != nil {
@@ -321,6 +351,11 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		return nil, nil, err
 	}
 	if started.Replayed {
+		if d.agent() != nil && !d.startedBySelf(ctx, started.RunID) {
+			// Someone else claimed this key in the agent's namespace; never
+			// hand their run to the agent.
+			return expected("idempotencyKey was already used by another caller; choose a new key")
+		}
 		return ok(map[string]any{"runId": started.RunID, "replayed": true})
 	}
 	startAction := audit.Action("run.started")
@@ -335,6 +370,11 @@ func (d Deps) startRun(ctx context.Context, args startArgs) (*mcp.CallToolResult
 		},
 	})
 	return ok(map[string]any{"runId": started.RunID})
+}
+
+func (d Deps) startedBySelf(ctx context.Context, runID string) bool {
+	run, err := store.New(d.Pool).GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
+	return err == nil && run.CreatedBy.Valid && run.CreatedBy.String == d.UserID
 }
 
 type latestWorkflow struct {
@@ -377,6 +417,9 @@ func (d Deps) runStatus(ctx context.Context, runID string) (*mcp.CallToolResult,
 	if !validMCPIdentifier(runID) {
 		return expected("runId is required and must be at most 256 characters")
 	}
+	if visible, err := d.runVisible(ctx, runID); err != nil || !visible {
+		return hiddenResult(err, "run not found")
+	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
 	if err != nil {
@@ -409,6 +452,9 @@ func (d Deps) runInspect(ctx context.Context, runID string) (*mcp.CallToolResult
 	}
 	if !validMCPIdentifier(runID) {
 		return expected("runId is required and must be at most 256 characters")
+	}
+	if visible, err := d.runVisible(ctx, runID); err != nil || !visible {
+		return hiddenResult(err, "run not found")
 	}
 	q := store.New(d.Pool)
 	run, err := q.GetRun(ctx, store.GetRunParams{ID: runID, OrgID: d.OrgID})
@@ -468,6 +514,9 @@ func (d Deps) dlqList(ctx context.Context, limit int, cursor string) (*mcp.CallT
 	if problem != "" {
 		return expected(problem)
 	}
+	if d.scoped() {
+		return d.scopedDeadLetters(ctx, page)
+	}
 	params := store.ListDeadLetterSummariesParams{OrgID: d.OrgID, PageLimit: page.limit + 1}
 	if cursor != "" {
 		params.BeforeCreatedAt = &page.before
@@ -503,6 +552,9 @@ func (d Deps) redrive(ctx context.Context, deadLetterID string) (*mcp.CallToolRe
 	}
 	if !validMCPIdentifier(deadLetterID) {
 		return expected("deadLetterId is required and must be at most 256 characters")
+	}
+	if visible, err := d.deadLetterVisible(ctx, deadLetterID); err != nil || !visible {
+		return hiddenResult(err, "dead letter not found")
 	}
 	err := d.Engine.RedriveDeadLetterWithOptions(ctx, d.OrgID, deadLetterID, engine.RedriveOptions{Actor: d.UserID})
 	switch {
@@ -608,6 +660,9 @@ func (d Deps) runsList(ctx context.Context, limit int, cursor, workflowID, statu
 	if problem != "" {
 		return expected(problem)
 	}
+	if d.scoped() {
+		return d.scopedRuns(ctx, page, workflowID, status)
+	}
 	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListRunSummaries(ctx, store.ListRunSummariesParams{
 		OrgID: d.OrgID, BeforeCreatedAt: page.before, BeforeID: page.beforeID,
@@ -650,6 +705,9 @@ func (d Deps) workflowsList(ctx context.Context, limit int, cursor string) (*mcp
 	page, problem := pageBounds(limit, cursor)
 	if problem != "" {
 		return expected(problem)
+	}
+	if d.scoped() {
+		return d.scopedWorkflows(ctx, page)
 	}
 	pageLimit := page.limit
 	rows, err := store.New(d.Pool).ListWorkflowRows(ctx, store.ListWorkflowRowsParams{

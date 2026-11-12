@@ -91,7 +91,7 @@ func TestMCPToolCatalogHasTruthfulAnnotationsAndNoApprovalTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tools) != 23 {
+	if len(listed.Tools) != 24 {
 		t.Fatalf("tool catalog drifted: got %d", len(listed.Tools))
 	}
 	byName := map[string]*mcp.Tool{}

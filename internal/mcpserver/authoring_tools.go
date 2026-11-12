@@ -110,16 +110,16 @@ func registerAuthoringTools(server *mcp.Server, deps Deps) {
 		"catalog.describe", "Describe capabilities",
 		"Describe what a workflow can use: document shape, step types with examples, built-in tools, triggers, saved subworkflows, and credential names with status. Never returns secret values.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args catalogArgs) (*mcp.CallToolResult, any, error) {
-		return deps.describeCatalog(ctx, args.Section, args.Tool)
+		return deps.at(ctx).describeCatalog(ctx, args.Section, args.Tool)
 	})
 	mcp.AddTool(server, readTool(
 		"workflows.validate", "Validate workflow",
 		"Check a workflow document against the gate workflows.save applies, plus readiness and tenant bindings. Returns every issue with a suggestion and saves nothing.",
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args validateArgs) (*mcp.CallToolResult, any, error) {
-		if allowed, message := deps.guardTool(ctx, "workflows.validate", "workflows.read", false); !allowed {
+		if allowed, message := deps.at(ctx).guardTool(ctx, "workflows.validate", "workflows.read", false); !allowed {
 			return expected(message)
 		}
-		return ok(deps.validationReport(ctx, args.Workflow))
+		return ok(deps.at(ctx).validationReport(ctx, args.Workflow))
 	})
 }
 
@@ -134,7 +134,10 @@ func (d Deps) describeCatalog(ctx context.Context, section, toolName string) (*m
 	if toolName != "" && section != "tools" {
 		return expected("tool is only valid with section=tools")
 	}
-	catalog := authoring.NewBuilder(d.Pool, d.CatalogSource).Build(ctx, d.OrgID)
+	catalog, err := d.tenantCatalog(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	view := map[string]any{"catalogVersion": catalog.Version}
 	switch section {
 	case "":
@@ -220,13 +223,38 @@ func (d Deps) validationReport(ctx context.Context, document map[string]any) map
 	// Binding alternatives name tenant credentials, which catalog.describe
 	// also gates behind credentials.read.
 	if d.Permissions["credentials.read"] {
-		catalog := authoring.NewBuilder(d.Pool, d.CatalogSource).Build(ctx, d.OrgID)
+		catalog, err := d.tenantCatalog(ctx)
+		if err != nil {
+			report["bindingsWithheld"] = "tenant bindings are temporarily unavailable"
+			return report
+		}
 		bindings, _, _ := authoring.BindWorkflowJSON(catalog, document)
 		report["bindings"] = mcpBindingReportView(bindings)
 	} else {
 		report["bindingsWithheld"] = "tenant bindings name credentials and require credentials.read"
 	}
 	return report
+}
+
+// tenantCatalog is the organization's capability catalog with subworkflows
+// narrowed to a scoped client's workflows.
+func (d Deps) tenantCatalog(ctx context.Context) (authoring.Catalog, error) {
+	catalog := authoring.NewBuilder(d.Pool, d.CatalogSource).Build(ctx, d.OrgID)
+	if !d.scoped() {
+		return catalog, nil
+	}
+	set, err := d.scopeSet(ctx)
+	if err != nil {
+		return catalog, err
+	}
+	visible := make([]authoring.SubworkflowCapability, 0, len(catalog.Subworkflows))
+	for _, entry := range catalog.Subworkflows {
+		if set[entry.WorkflowID] {
+			visible = append(visible, entry)
+		}
+	}
+	catalog.Subworkflows = visible
+	return authoring.Redigest(catalog), nil
 }
 
 func actionableIssues(issues []domain.Issue) []map[string]any {

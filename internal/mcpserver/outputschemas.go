@@ -10,6 +10,13 @@ import (
 // can rely on field names and types. Nested values stay open; the SDK checks
 // every successful result against its schema.
 var outputSchemas = map[string]*jsonschema.Schema{
+	"agent.info": outputObject(fields{
+		"kind": {kind: "string", required: true}, "organizationId": {kind: "string", required: true},
+		"capabilities": {kind: "array", required: true}, "tools": {kind: "array", required: true},
+		"permissions": {kind: "array", required: true}, "scope": {kind: "object", required: true},
+		"clientId": {kind: "string"}, "name": {kind: "string"}, "missingPermissions": {kind: "array"},
+		"expiresAt": {kind: "string"}, "rateLimitPerMinute": {kind: "integer"},
+	}),
 	"workflows.save": outputObject(fields{
 		"workflowId": {kind: "string", required: true}, "versionId": {kind: "string", required: true},
 		"version": {kind: "integer", required: true},

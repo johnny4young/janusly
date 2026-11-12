@@ -46,6 +46,9 @@ func enrich(authCtx *auth.Context, metadata map[string]any) map[string]any {
 		if authCtx.ServiceTokenSuffix != "" {
 			actor["serviceTokenSuffix"] = authCtx.ServiceTokenSuffix
 		}
+		if authCtx.AgentClientID != "" {
+			actor["agentClientId"] = authCtx.AgentClientID
+		}
 		enriched["actor"] = actor
 	}
 	return enriched

@@ -16,9 +16,9 @@ func TestRolesCrudAndOverrides(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 
-	// Catalog surface: 41 keys + the mandatory floor.
+	// Catalog surface: 43 keys + the mandatory floor.
 	catalog := h.call("GET", "/org/permissions/catalog", nil, "")
-	if rows := catalog.body["catalog"].([]any); len(rows) != 41 {
+	if rows := catalog.body["catalog"].([]any); len(rows) != 43 {
 		t.Fatalf("catalog: %d", len(rows))
 	}
 	floor := catalog.body["mandatoryAdminPermissions"].([]any)

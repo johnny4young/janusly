@@ -12,19 +12,46 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/johnny4young/janusly/internal/agentclient"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 )
 
-const mcpCallMethod = "tools/call"
+const (
+	mcpCallMethod = "tools/call"
+	mcpListMethod = "tools/list"
+)
+
+// errAgentUnauthenticated is the single wire answer for any agent credential
+// failure; the reason stays server side.
+var errAgentUnauthenticated = errors.New("agent token is invalid, expired or revoked")
 
 // requestGuard bounds the complete raw tools/call envelope before the SDK's
 // typed tool schema and Janusly business parsing. It also makes the common
 // authority envelope fail closed: an unknown tool, malformed typed request, or
 // accidentally unguarded handler is denial-rate-limited and audited once.
-func (d Deps) requestGuard(next mcp.MethodHandler) mcp.MethodHandler {
+func (server Deps) requestGuard(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		if method != mcpCallMethod {
+		if method != mcpCallMethod && method != mcpListMethod {
 			return next(ctx, method, req)
+		}
+		if server.ResolveActor != nil {
+			principal, err := server.ResolveActor(ctx, req)
+			if err != nil {
+				if errors.Is(err, agentclient.ErrInvalidToken) {
+					err = errAgentUnauthenticated
+				}
+				if method == mcpCallMethod && errors.Is(err, errAgentUnauthenticated) {
+					result, _, _ := expected(err.Error())
+					return result, nil
+				}
+				return nil, err
+			}
+			ctx = withCallActor(ctx, principal)
+		}
+		d := server.at(ctx)
+		if method == mcpListMethod {
+			result, err := next(ctx, method, req)
+			return d.visibleTools(result), err
 		}
 		params, ok := req.GetParams().(*mcp.CallToolParamsRaw)
 		if !ok || params == nil {
@@ -76,6 +103,25 @@ func decodeFailureDetail(toolName string, result mcp.Result, err error) string {
 		return ""
 	}
 	return fmt.Sprintf("invalid arguments for %s (inputSchema in tools/list): %s", toolName, detail.String())
+}
+
+// visibleTools hides tools an agent client's capabilities do not reach, so
+// tools/list matches what it may call.
+func (d Deps) visibleTools(result mcp.Result) mcp.Result {
+	principal := d.agent()
+	list, ok := result.(*mcp.ListToolsResult)
+	if principal == nil || !ok || list == nil {
+		return result
+	}
+	visible := make([]*mcp.Tool, 0, len(list.Tools))
+	for _, tool := range list.Tools {
+		if principal.Tools[tool.Name] {
+			visible = append(visible, tool)
+		}
+	}
+	filtered := *list
+	filtered.Tools = visible
+	return &filtered
 }
 
 func auditToolName(value string) string {
