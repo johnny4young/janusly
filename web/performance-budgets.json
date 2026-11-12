@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 658.7,
+  "artifactGzipKiB": 669.2,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 610.2
+    "maxGzipKiB": 619.9
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -108,7 +108,7 @@
     "ConnectionsPanel.css": 0.82,
     "ConnectionsPanel.js": 4.52,
     "ExperimentsPanel.css": 1.05,
-    "ExperimentsPanel.js": 5.27,
+    "ExperimentsPanel.js": 5.81,
     "ExternalRuntimePanel.css": 0.89,
     "ExternalRuntimePanel.js": 2.54,
     "FailureClustersCard.css": 0.61,
