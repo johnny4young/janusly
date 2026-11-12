@@ -66,6 +66,7 @@ var secretShapes = []secretShape{
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(github_pat_[A-Za-z0-9_]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(gh[ousr]_[A-Za-z0-9]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})`)},
+	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(jly_agent_[A-Za-z0-9_-]{20,})`)},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})($|[^A-Za-z0-9])`), hasTrailing: true},
 	{pattern: regexp.MustCompile(`(^|[^A-Za-z0-9])(AIza[A-Za-z0-9_-]{35})($|[^A-Za-z0-9])`), hasTrailing: true},
 	{pattern: regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])(Bearer\s+[A-Za-z0-9_\-.]{16,})`)},

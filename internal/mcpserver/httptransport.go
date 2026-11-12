@@ -126,6 +126,11 @@ func (w *challengeWriter) Flush() {
 	}
 }
 
+// GuardAgentHTTP applies the transport rules every agent-token endpoint
+// shares: no credentials in the URL, https behind a proxy, an allowed Host and
+// no browser origins.
+func GuardAgentHTTP(next http.Handler, opts HTTPOptions) http.Handler { return guardHTTP(next, opts) }
+
 func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	hosts := map[string]bool{}
 	for _, host := range opts.AllowedHosts {
@@ -134,13 +139,13 @@ func guardHTTP(next http.Handler, opts HTTPOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if name, found := tokenInQuery(r); found {
 			if opts.Logger != nil {
-				opts.Logger.Warn("mcp request refused: credential in query string", "param", name)
+				opts.Logger.Warn("agent request refused: credential in query string", "param", name)
 			}
 			http.Error(w, "credentials belong in the Authorization header, never in the URL", http.StatusBadRequest)
 			return
 		}
 		if opts.RefuseForwardedHTTP && forwardedPlainHTTP(r) {
-			http.Error(w, "remote MCP requires https", http.StatusForbidden)
+			http.Error(w, "agent endpoints require https", http.StatusForbidden)
 			return
 		}
 		if !hostAllowed(r.Host, hosts) {

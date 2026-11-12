@@ -26,6 +26,7 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/executors"
+	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/httpapi/agentclients"
 	"github.com/johnny4young/janusly/internal/httpapi/externalruntime"
 	"github.com/johnny4young/janusly/internal/httpapi/publishrequests"
@@ -128,6 +129,9 @@ type V1ServerOptions struct {
 	// MCPHandler, when set, serves remote MCP at /mcp. It authenticates agent
 	// tokens itself, so it bypasses the API's resolver chain.
 	MCPHandler http.Handler
+	// AgentHookHandler, when set, serves the hooks bridge ingest. Like
+	// MCPHandler it authenticates agent tokens itself.
+	AgentHookHandler http.Handler
 	// rateLimitNow is the package-local fixed-window clock seam for tests.
 	rateLimitNow func() time.Time
 }
@@ -229,6 +233,9 @@ func newV1HandlerWithWorkOS(
 		for _, method := range []string{"POST", "GET", "DELETE"} {
 			mux.Handle(method+" /mcp", options.MCPHandler)
 		}
+	}
+	if options.AgentHookHandler != nil {
+		mux.Handle("POST "+hookwire.Path, options.AgentHookHandler)
 	}
 
 	// The embedded Vite bundle rides the mux's own catch-all: every unmatched

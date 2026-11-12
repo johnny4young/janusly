@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Agent clients with the `report` capability can send their sessions to
+  `POST /agent-sessions/events` when remote MCP is enabled: signed
+  CloudEvents with tool names, status and timing, never paths, transcripts or
+  tool inputs. Sessions are kept 14 days. The `janusly hook` command that
+  sends them comes next.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the

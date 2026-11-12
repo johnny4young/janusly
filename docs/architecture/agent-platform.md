@@ -435,23 +435,55 @@ the canvas.
 ### External agents through a signed hooks bridge
 
 `janusly hook` is a subcommand of the same executable, configured as a
-`command` hook in Claude Code or Codex. It reads the hook payload on stdin and
-sends it to `POST /agent-sessions/events` with the agent token as bearer and
-`x-janusly-signature: t=<unix>,v1=<hmac>` over `"<t>.<body>"` (the
-`webhooksig` scheme, ±300 seconds), keyed from the token. Event ids are
-deduplicated per client. The client needs the `report` capability.
+`command` hook in Claude Code or Codex. It reduces the hook payload on the
+user's machine and sends one CloudEvents 1.0 event to
+`POST /agent-sessions/events`. The route exists only with remote MCP enabled
+and shares its transport rules: no credentials in the URL, `https` behind a
+proxy, an allowed `Host`, no browser `Origin`.
 
-Before sending, the bridge drops `transcript_path`, keeps only the last
-segment of `cwd`, scrubs secret-shaped strings and truncates fields. Tool
-inputs, commands and prompts are not sent unless the client enables
-`captureContent` (owner decision D6).
+**Authentication.** The agent token is the bearer and resolves like `/mcp`:
+revoked, expired or orphaned clients get `401`, failures are counted per
+address and audited as `mcp.auth.rejected` with `transport: hooks`. The client
+needs the `report` capability (`403 agent_capability_missing`).
 
-The server persists sessions and events in `agent_sessions` and
-`agent_session_events` (retention 14 days, per-organization caps), projects
-the graph server-side, and streams it with the same LISTEN/NOTIFY wake-up and
-polling fallback as runs. Parent links follow the hook schema: the
-`PostToolUse(Agent)` result's `agentId` links a background subagent to its
-parent; `Stop` is not completion while subagents live.
+**Signature.** `x-janusly-signature: t=<unix>,v1=<hex>` is HMAC-SHA256 over
+`"<t>.<raw body>"`, ±300 seconds, compared in constant time
+(`internal/signedingest`, shared with external runtimes). The key is
+`HKDF-SHA256(ikm = SHA-256(token), info = "janusly/hook-sign/v1")`: the bridge
+derives it from the token, the server from the digest it already stores. The
+signature adds body integrity and a replay window, not a second factor; the
+bearer still has to be the token itself.
+
+**Event contract** (`internal/hookwire`). Strict: an unknown envelope or data
+field, or a field of another type, rejects the event. Types:
+`io.janusly.agent.{session.started, prompt.submitted, tool.requested,
+tool.completed, subagent.started, subagent.stopped, turn.stopped,
+session.ended}`; the source names the runtime (`janusly-hook/1/claude-code`,
+`janusly-hook/1/codex`). The event id is a SHA-256 of its content, so a retried
+hook carries the same id. `project` is a single path segment. Identity fields
+and `januslyRefs` that look like secrets, and names with control or invisible
+format characters, reject the event. `content` is not accepted.
+
+**Storage.** `agent_sessions` and `agent_session_events`, both with `org_id`
+and `agent_client_id`. Each event is one receipt per `(client, event id)`: a
+duplicate answers `200` with `duplicate: true` and changes nothing. The server
+assigns the order (`seq`) under the session row lock. Session ids are
+namespaced per client: another client, even in the same organization, that
+reports the same id gets a session of its own and can neither end nor detect
+the first one. Never stored: transcripts or their path, full
+paths, user or host names, environment, the token, its digest or the
+signature, or the raw body.
+
+| Limit | Value | Past it |
+|---|---|---|
+| Events per client | 100 per 10 s, 600 per minute, own buckets (the client's MCP `rateLimitPerMinute` does not apply) | `429` with `Retry-After` |
+| Events per organization | 3000 per minute | `429` |
+| Body | 32 000 bytes | `413` |
+| Live sessions per client | 50 (silent 30 minutes counts as idle) | `429 agent_session_limit` |
+| Events per session | 5000 | truncated; only closing events, else `409` |
+| Stored receipts per session | 5050, stale and closing included | `409` |
+| Late events | session ended over an hour ago | stored as `stale`, not projected |
+| Retention | 14 days after the last event | the retention sweep deletes it |
 
 - **Gate from the map.** For tools the client lists in `gateTools`, a
   `PreToolUse` event opens a gate request and the bridge long-polls its
