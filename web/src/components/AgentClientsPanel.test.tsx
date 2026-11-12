@@ -131,6 +131,7 @@ describe('<AgentClientsPanel />', () => {
     await waitFor(() => expect(within(tokenDialog).getByTestId('agent-token-keep')).toHaveFocus())
     fireEvent.click(within(tokenDialog).getByTestId('agent-token-keep'))
     expect(within(tokenDialog).getByTestId('agent-token-value')).toHaveValue(TOKEN)
+    await waitFor(() => expect(within(tokenDialog).getByTestId('agent-token-done')).toHaveFocus())
 
     fireEvent.click(within(tokenDialog).getByTestId('agent-token-done'))
     fireEvent.click(within(tokenDialog).getByTestId('agent-token-close'))
@@ -270,8 +271,8 @@ describe('<AgentClientsPanel />', () => {
           { name: 'propose', tools: ['drafts.save'], missingPermissions: ['workflows.write'] },
         ],
         recentCalls: [
-          { tool: 'workflows.get', allowed: true, denial: null, at: '2026-11-07T10:00:00Z' },
-          { tool: 'drafts.save', allowed: false, denial: 'permission_missing', at: '2026-11-07T09:00:00Z' },
+          { tool: 'workflows.get', allowed: true, at: '2026-11-07T10:00:00Z' },
+          { tool: 'drafts.save', allowed: false, at: '2026-11-07T09:00:00Z' },
         ],
         openRequests: [{ id: 'pub-1', workflowId: 'wf-invoices', reasons: ['writes'], createdAt: '2026-11-07T08:00:00Z', expiresAt: '2026-11-08T08:00:00Z' }],
       }),
@@ -285,7 +286,49 @@ describe('<AgentClientsPanel />', () => {
     expect(detail).toHaveTextContent('runs.list · workflows.get')
     expect(within(detail).getByTestId('agent-client-lost-propose')).toHaveTextContent('Creator lost workflows.write')
     expect(within(detail).getByRole('img', { name: 'Denied' })).toBeInTheDocument()
-    expect(detail).toHaveTextContent('permission_missing')
     expect(detail).toHaveTextContent('wf-invoices')
+  })
+  it('hides the calls and requests the viewer could not read elsewhere', async () => {
+    routeApi({
+      'GET /v1/agent-clients': () => listPayload([client({ createdBy: 'peer' })]),
+      'GET /v1/agent-clients/c-own': () => ({
+        client: client({ createdBy: 'peer' }),
+        capabilities: [{ name: 'read', tools: ['runs.list'], missingPermissions: [] }],
+        recentCalls: null,
+        openRequests: null,
+      }),
+    })
+    renderPanel()
+    fireEvent.click(await screen.findByTestId('agent-client-open-c-own'))
+    const detail = await screen.findByTestId('agent-client-detail-c-own')
+    expect(detail).toHaveTextContent('runs.list')
+    expect(within(detail).queryByText('Latest calls')).not.toBeInTheDocument()
+    expect(within(detail).queryByText('Open publish requests')).not.toBeInTheDocument()
+  })
+
+  it('blocks creating when the person cannot grant read, which every client gets', async () => {
+    const payload = listPayload([])
+    payload.capabilities = payload.capabilities.map((capability) => capability.name === 'read'
+      ? { ...capability, grantable: false, missingPermissions: ['recovery.read'] }
+      : capability)
+    routeApi({ 'GET /v1/agent-clients': () => payload, 'GET /workflows': () => [] })
+    renderPanel()
+    fireEvent.click(await screen.findByTestId('agent-client-new'))
+    const dialog = await screen.findByRole('dialog', { name: 'New agent client' })
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Codex' } })
+    expect(within(dialog).getByTestId('agent-client-missing-read')).toHaveTextContent('Needs recovery.read')
+    expect(within(dialog).getByTestId('agent-client-create-submit')).toBeDisabled()
+  })
+
+  it('offers no writes to a viewer-ranked role even with agents.write', async () => {
+    const context = useWorkflowStore.getState().identityContext
+    useWorkflowStore.setState({ identityContext: context && {
+      ...context, organizations: context.organizations.map((org) => ({ ...org, role: 'viewer', roleBase: 'viewer' })),
+    } })
+    routeApi({ 'GET /v1/agent-clients': () => listPayload() })
+    renderPanel({ canWrite: true })
+    const own = await screen.findByTestId('agent-client-c-own')
+    expect(within(own).queryByRole('button', { name: /Rotate|Revoke/ })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('agent-client-new')).not.toBeInTheDocument()
   })
 })

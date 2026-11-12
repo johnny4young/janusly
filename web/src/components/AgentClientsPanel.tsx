@@ -62,13 +62,15 @@ const STATE_TONE: Record<AgentClientState, string> = {
   active: 'success', expiring: 'warning', expired: 'neutral', revoked: 'neutral', removed: 'danger', reduced: 'warning',
 }
 
-export function AgentClientsPanel({ canWrite, canReadMembers }: { canWrite: boolean; canReadMembers: boolean }) {
+export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { canWrite: boolean; canReadMembers: boolean }) {
   const { t } = useT()
   const confirm = useConfirm()
   const addToast = useWorkflowStore((state) => state.addToast)
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const nonce = useInvalidationNonce(AGENT_CLIENT_TAGS)
   const viewer = useViewer()
+  // The write routes also require an editor-ranked role.
+  const canWrite = permitted && viewer.isEditor
   const emails = useMemberEmails(canReadMembers)
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [creating, setCreating] = useState(false)
@@ -128,6 +130,8 @@ export function AgentClientsPanel({ canWrite, canReadMembers }: { canWrite: bool
     returnFocusRef.current = document.getElementById(`agent-client-rotate-${client.id}`)
     setBusyId(client.id)
     try {
+      // The new token must have a dialog to land in before the old one dies.
+      await loadDialogs()
       // A private signal keeps the token-bearing response out of request dedup.
       const result = await contractApi('POST /agent-clients/{id}/rotate', `/v1/agent-clients/${encodeURIComponent(client.id)}/rotate`, {},
         { guard: isPostAgentClientsIdRotateResponse, signal: new AbortController().signal })

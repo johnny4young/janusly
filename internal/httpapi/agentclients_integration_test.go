@@ -237,8 +237,8 @@ func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
 
 	agent := "agent:" + kept
 	for _, client := range []string{kept, other} {
-		meta, _ := json.Marshal(map[string]any{"allowed": client == kept, "denial": "rate_limited",
-			"agentClient": map[string]any{"id": client}})
+		meta, _ := json.Marshal(map[string]any{"allowed": client == kept,
+			"denial": "MCP writes are disabled at the process level", "agentClient": map[string]any{"id": client}})
 		exec(`INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
 			VALUES (gen_random_uuid()::text, $1, $2, 'mcp.tool.invoked', 'mcp_tool', 'runs.list', $3)`, h.org, "agent:"+client, meta)
 	}
@@ -251,13 +251,20 @@ func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
 		VALUES ($1, $2, $3, $4, $5, '{writes}', $6, $7, $6, now() + interval '1 day')`,
 		"pub-detail-"+h.org, h.org, "agent-detail-"+h.org, "draft-detail-"+h.org, "qual-detail-"+h.org, agent, editor["x-user-id"])
 
-	detail := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", viewer)
+	viewed := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", viewer)
+	if viewed.status != 200 || viewed.body["data"].(map[string]any)["recentCalls"] != nil {
+		t.Fatalf("a viewer who did not create the client must not read its audit-derived calls: %d %v", viewed.status, viewed.body)
+	}
+	if requests, _ := viewed.body["data"].(map[string]any)["openRequests"].([]any); len(requests) != 1 {
+		t.Fatalf("a viewer with workflows.read sees the open requests: %v", viewed.body)
+	}
+	detail := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", editor)
 	if detail.status != 200 {
-		t.Fatalf("viewer detail: %d %v", detail.status, detail.body)
+		t.Fatalf("creator detail: %d %v", detail.status, detail.body)
 	}
 	body := detail.body["data"].(map[string]any)
 	calls := body["recentCalls"].([]any)
-	if len(calls) != 1 || calls[0].(map[string]any)["allowed"] != true || calls[0].(map[string]any)["denial"] != nil {
+	if len(calls) != 1 || calls[0].(map[string]any)["allowed"] != true || strings.Contains(fmt.Sprint(body), "process level") {
 		t.Fatalf("detail must show only this client's calls: %v", calls)
 	}
 	if requests := body["openRequests"].([]any); len(requests) != 1 || requests[0].(map[string]any)["id"] != "pub-detail-"+h.org {
@@ -266,6 +273,10 @@ func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
 	if caps := body["capabilities"].([]any); len(caps) != 1 || !strings.Contains(fmt.Sprint(caps[0]), "workflows.list") {
 		t.Fatalf("detail capabilities: %v", caps)
 	}
+	admin := seedAgentClientCreator(t, h, "admin")
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", admin); len(fmt.Sprint(res.body["data"].(map[string]any)["recentCalls"])) < 3 {
+		t.Fatalf("an admin reads the calls of someone else's client: %v", res.body)
+	}
 	demotedDetail := h.callWithHeaders("GET", "/v1/agent-clients/"+demoted, nil, "", viewer).body["data"].(map[string]any)
 	for _, raw := range demotedDetail["capabilities"].([]any) {
 		entry := raw.(map[string]any)
@@ -273,7 +284,7 @@ func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
 			t.Fatalf("a reduced capability must name what the creator lost: %v", entry)
 		}
 	}
-	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "other-org-"+h.org, nil); res.status != 404 && res.status != 403 {
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "other-org-"+h.org, nil); res.status != 404 {
 		t.Fatalf("another organization read the client: %d %v", res.status, res.body)
 	}
 	if res := h.callWithHeaders("GET", "/v1/agent-clients/missing", nil, "", viewer); res.status != 404 {

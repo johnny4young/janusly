@@ -1878,13 +1878,12 @@ export interface ApiResponses {
       "id": string
       "reasons": string[]
       "workflowId": string
-    }[]
+    }[] | null
     "recentCalls": ({
       "allowed": boolean
       "at": string | null
-      "denial": string | null
       "tool": string
-    })[]
+    })[] | null
   }
   /** Exact tenant-safe capability catalog for workflow authoring */
   "GET /authoring/capabilities": AuthoringCapabilities

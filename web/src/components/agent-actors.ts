@@ -7,11 +7,13 @@ import type { Translate } from '../i18n/resources'
 import { getResolvedLocale } from '../i18n/runtime'
 
 /** The signed-in person as the agent routes see them. */
-export function useViewer(): { userId: string | null; isAdmin: boolean } {
+export function useViewer(): { userId: string | null; isAdmin: boolean; isEditor: boolean } {
   const context = useWorkflowStore((state) => state.identityContext)
+  const roleBase = currentSessionOrganization(context)?.roleBase
   return {
     userId: context?.identity.userId ?? null,
-    isAdmin: currentSessionOrganization(context)?.roleBase === 'admin',
+    isAdmin: roleBase === 'admin',
+    isEditor: roleBase === 'admin' || roleBase === 'editor',
   }
 }
 

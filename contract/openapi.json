@@ -7514,71 +7514,78 @@
                               "type": "object"
                             },
                             "openRequests": {
-                              "items": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "expiresAt": {
-                                    "type": "string"
-                                  },
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "reasons": {
-                                    "items": {
-                                      "type": "string"
+                              "anyOf": [
+                                {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "expiresAt": {
+                                        "type": "string"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "reasons": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "workflowId": {
+                                        "type": "string"
+                                      }
                                     },
-                                    "type": "array"
+                                    "required": [
+                                      "id",
+                                      "workflowId",
+                                      "reasons",
+                                      "createdAt",
+                                      "expiresAt"
+                                    ],
+                                    "type": "object"
                                   },
-                                  "workflowId": {
-                                    "type": "string"
-                                  }
+                                  "type": "array"
                                 },
-                                "required": [
-                                  "id",
-                                  "workflowId",
-                                  "reasons",
-                                  "createdAt",
-                                  "expiresAt"
-                                ],
-                                "type": "object"
-                              },
-                              "type": "array"
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "recentCalls": {
-                              "items": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "allowed": {
-                                    "type": "boolean"
+                              "anyOf": [
+                                {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "allowed": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tool": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "tool",
+                                      "allowed",
+                                      "at"
+                                    ],
+                                    "type": "object"
                                   },
-                                  "at": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "denial": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tool": {
-                                    "type": "string"
-                                  }
+                                  "type": "array"
                                 },
-                                "required": [
-                                  "tool",
-                                  "allowed",
-                                  "denial",
-                                  "at"
-                                ],
-                                "type": "object"
-                              },
-                              "type": "array"
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "required": [

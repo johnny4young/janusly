@@ -59,8 +59,11 @@ relies on, so the server narrows it). The list route reports, for the caller,
 which capabilities they may grant and the permissions they lack for the rest,
 plus the issuing limits; the form copies no policy. A row opens the client's
 detail (`GET /v1/agent-clients/{id}`): the tools each capability reaches and
-what its creator lost, its latest tool calls from the audit log (searched
-within the organization's last 5,000 calls) and its open publish requests.
+what its creator lost, its latest tool calls and its open publish requests.
+Calls come from the audit log, so only the client's creator and admins who
+read the audit trail see them, and only the tool and its outcome travel;
+requests show to people with `workflows.read`. A partial index on audit rows
+of `mcp.tool.invoked` by caller keeps that read bounded.
 The token is shown once with paste-ready remote MCP setup for Claude Code and
 Codex; closing asks first and drops the only copy the page held, which never
 reaches the store, browser storage, the request cache or a clipboard

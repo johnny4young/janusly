@@ -35,16 +35,6 @@ test.describe('agent clients by role', () => {
       ('m-${member.viewer}', '${orgId}', '${member.viewer}', 'viewer')`)
     const as = (role: Role) => ({ 'Content-Type': 'application/json', 'x-org-id': orgId, 'x-user-id': member[role], 'x-janusly-csrf': '1' })
 
-    // A viewer reads the list but is offered no way to create, and the API agrees.
-    const viewer = await browser.newPage()
-    await openAccessAs(viewer, orgId, member.viewer)
-    await expect(viewer.getByTestId('agent-clients-empty')).toBeVisible()
-    await expect(viewer.getByTestId('agent-client-new')).toHaveCount(0)
-    await expect(viewer.getByRole('button', { name: 'New agent client' })).toHaveCount(0)
-    const refused = await request.post(`${API_URL}/v1/agent-clients`, { headers: as('viewer'), data: { name: 'nope' } })
-    expect(refused.status()).toBe(403)
-    await viewer.close()
-
     // The editor creates one; the token appears once and leaves the DOM on close.
     const editor = await browser.newPage()
     await openAccessAs(editor, orgId, member.editor)
@@ -71,11 +61,22 @@ test.describe('agent clients by role', () => {
     await expect(row.getByRole('button', { name: 'Rotate the token for Claude Code e2e' })).toBeVisible()
     await editor.close()
 
-    // Another editor sees it but is not offered a rotation, and the API agrees.
     const listed = await request.get(`${API_URL}/v1/agent-clients`, { headers: as('peer') })
     const clientId = ((await listed.json()).data.clients as Array<{ id: string; name: string }>)
       .find((client) => client.name === 'Claude Code e2e')?.id
     expect(clientId).toBeTruthy()
+
+    // A viewer sees the row but is offered no way to create or change it, and the API agrees.
+    const viewer = await browser.newPage()
+    await openAccessAs(viewer, orgId, member.viewer)
+    await expect(viewer.getByTestId(`agent-client-${clientId}`)).toBeVisible()
+    await expect(viewer.getByTestId('agent-client-new')).toHaveCount(0)
+    await expect(viewer.getByTestId(`agent-client-${clientId}`).getByRole('button', { name: /Rotate|Revoke/ })).toHaveCount(0)
+    const refused = await request.post(`${API_URL}/v1/agent-clients`, { headers: as('viewer'), data: { name: 'nope' } })
+    expect(refused.status()).toBe(403)
+    await viewer.close()
+
+    // Another editor sees it but is not offered a rotation, and the API agrees.
     const peer = await browser.newPage()
     await openAccessAs(peer, orgId, member.peer)
     const peerRow = peer.getByTestId(`agent-client-${clientId}`)

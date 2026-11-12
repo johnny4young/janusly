@@ -37,12 +37,13 @@ var agentClientDetail = closedObj(map[string]any{
 	"capabilities": arr(closedObj(map[string]any{
 		"name": agentCapability, "tools": arr(str()), "missingPermissions": arr(str()),
 	}, "name", "tools", "missingPermissions")),
-	"recentCalls": arr(closedObj(map[string]any{
-		"tool": str(), "allowed": boolT(), "denial": nullableString(), "at": nullableString(),
-	}, "tool", "allowed", "denial", "at")),
-	"openRequests": arr(closedObj(map[string]any{
+	// Null when the caller could not read the source elsewhere.
+	"recentCalls": nullable(arr(closedObj(map[string]any{
+		"tool": str(), "allowed": boolT(), "at": nullableString(),
+	}, "tool", "allowed", "at"))),
+	"openRequests": nullable(arr(closedObj(map[string]any{
 		"id": str(), "workflowId": str(), "reasons": arr(str()), "createdAt": str(), "expiresAt": str(),
-	}, "id", "workflowId", "reasons", "createdAt", "expiresAt")),
+	}, "id", "workflowId", "reasons", "createdAt", "expiresAt"))),
 }, "client", "capabilities", "recentCalls", "openRequests")
 
 var agentClientIssued = closedObj(map[string]any{"client": agentClient, "token": str()}, "client", "token")

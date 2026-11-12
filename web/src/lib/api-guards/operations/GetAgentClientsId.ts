@@ -34,18 +34,17 @@ export function isGetAgentClientsIdResponse(value: unknown): value is Api.ApiRes
       tokenIssuedAt: isString,
       tokenLast4: isString,
     }),
-    openRequests: arrayOf(shape({
+    openRequests: nullable(arrayOf(shape({
       createdAt: isString,
       expiresAt: isString,
       id: isString,
       reasons: arrayOf(isString),
       workflowId: isString,
-    })),
-    recentCalls: arrayOf(shape({
+    }))),
+    recentCalls: nullable(arrayOf(shape({
       allowed: isBoolean,
       at: nullable(isString),
-      denial: nullable(isString),
       tool: isString,
-    })),
+    }))),
   })
 }

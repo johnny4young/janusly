@@ -3,6 +3,7 @@
 package agentclients
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -128,19 +129,19 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 		last := rows[limit-1]
 		next = encodeCursor(last.CreatedAt, last.ID)
 	}
-	creators := creatorGrants{q: q, orgID: rc.OrgID, held: map[string]map[string]bool{}}
-	held, err := creators.of(r, rc.UserID)
+	users := []string{rc.UserID}
+	for _, row := range rows {
+		users = append(users, row.CreatedBy)
+	}
+	creators, err := loadCreatorGrants(r.Context(), q, rc.OrgID, users)
 	if err != nil {
 		return internalError()
 	}
+	held := creators.held[rc.UserID]
 	now := s.now()
 	clients := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		access, err := creators.access(r, row)
-		if err != nil {
-			return internalError()
-		}
-		clients = append(clients, withAccess(view(row, now), access))
+		clients = append(clients, withAccess(view(row, now), creators.access(row)))
 	}
 	// What the caller could grant and the issuing limits, so a form never
 	// copies policy the server owns.
@@ -172,12 +173,11 @@ func (s *service) detail(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return internalError()
 	}
-	creators := creatorGrants{q: q, orgID: rc.OrgID, held: map[string]map[string]bool{}}
-	access, err := creators.access(r, row)
+	creators, err := loadCreatorGrants(r.Context(), q, rc.OrgID, []string{row.CreatedBy})
 	if err != nil {
 		return internalError()
 	}
-	held := creators.held[row.CreatedBy]
+	access, held := creators.access(row), creators.held[row.CreatedBy]
 	parsed, _ := agentclient.ParseCapabilities(row.Capabilities)
 	capabilities := make([]map[string]any, 0, len(parsed))
 	for _, capability := range parsed {
@@ -187,37 +187,45 @@ func (s *service) detail(r *http.Request, rc httpkit.Request) httpkit.Result {
 			"missingPermissions": agentclient.MissingPermissions([]agentclient.Capability{capability}, held),
 		})
 	}
-	calls, err := q.ListAgentClientToolCalls(r.Context(), store.ListAgentClientToolCallsParams{OrgID: rc.OrgID, ClientID: row.ID})
+	caller, admin, err := callerGrant(r, q, rc)
 	if err != nil {
 		return internalError()
 	}
-	recent := make([]map[string]any, 0, len(calls))
-	for _, call := range calls {
-		var decision struct {
-			Allowed bool   `json:"allowed"`
-			Denial  string `json:"denial"`
+	// Calls come from the audit log, which only admins read, and requests
+	// name workflows: each shows only to someone who could read it elsewhere.
+	// A denial's wording can describe server configuration, so only the
+	// outcome travels.
+	var recent, open any
+	if row.CreatedBy == rc.UserID || (admin && caller["org.config.write"]) {
+		calls, err := q.ListAgentClientToolCalls(r.Context(), store.ListAgentClientToolCallsParams{OrgID: rc.OrgID, Actor: "agent:" + row.ID})
+		if err != nil {
+			return internalError()
 		}
-		_ = json.Unmarshal(call.Metadata, &decision)
-		var denial any
-		if !decision.Allowed && decision.Denial != "" {
-			denial = decision.Denial
+		rows := make([]map[string]any, 0, len(calls))
+		for _, call := range calls {
+			var decision struct {
+				Allowed bool `json:"allowed"`
+			}
+			_ = json.Unmarshal(call.Metadata, &decision)
+			rows = append(rows, map[string]any{"tool": call.TargetID.String, "allowed": decision.Allowed, "at": optionalTime(call.CreatedAt)})
 		}
-		recent = append(recent, map[string]any{
-			"tool": call.TargetID.String, "allowed": decision.Allowed, "denial": denial, "at": optionalTime(call.CreatedAt),
-		})
+		recent = rows
 	}
-	requests, err := q.ListAgentClientOpenRequests(r.Context(), store.ListAgentClientOpenRequestsParams{
-		OrgID: rc.OrgID, Actor: "agent:" + row.ID,
-	})
-	if err != nil {
-		return internalError()
-	}
-	open := make([]map[string]any, 0, len(requests))
-	for _, request := range requests {
-		open = append(open, map[string]any{
-			"id": request.ID, "workflowId": request.WorkflowID, "reasons": nonNil(request.Reasons),
-			"createdAt": request.CreatedAt.UTC().Format(time.RFC3339), "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
+	if caller["workflows.read"] {
+		requests, err := q.ListAgentClientOpenRequests(r.Context(), store.ListAgentClientOpenRequestsParams{
+			OrgID: rc.OrgID, Actor: "agent:" + row.ID,
 		})
+		if err != nil {
+			return internalError()
+		}
+		rows := make([]map[string]any, 0, len(requests))
+		for _, request := range requests {
+			rows = append(rows, map[string]any{
+				"id": request.ID, "workflowId": request.WorkflowID, "reasons": nonNil(request.Reasons),
+				"createdAt": request.CreatedAt.UTC().Format(time.RFC3339), "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
+			})
+		}
+		open = rows
 	}
 	return httpkit.OK(map[string]any{
 		"client": withAccess(view(row, s.now()), access), "capabilities": capabilities,
@@ -225,57 +233,86 @@ func (s *service) detail(r *http.Request, rc httpkit.Request) httpkit.Result {
 	})
 }
 
-// creatorGrants caches each creator's current grant for one response.
-type creatorGrants struct {
-	q     *store.Queries
-	orgID string
-	held  map[string]map[string]bool
+// callerGrant is the signed-in person's grant in the organization and whether
+// their role ranks as admin; an automation caller holds nothing here.
+func callerGrant(r *http.Request, q *store.Queries, rc httpkit.Request) (map[string]bool, bool, error) {
+	if rc.Auth == nil || !auth.IsPersonMode(rc.Auth.Mode) {
+		return map[string]bool{}, false, nil
+	}
+	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
+	if err != nil || role == nil {
+		return map[string]bool{}, false, err
+	}
+	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
+	if permissions == nil {
+		permissions = map[string]bool{}
+	}
+	return permissions, role.InheritsFrom == auth.RoleAdmin, err
 }
 
-func (c creatorGrants) of(r *http.Request, userID string) (map[string]bool, error) {
-	if held, cached := c.held[userID]; cached {
-		return held, nil
-	}
-	held, err := agentclient.CreatorPermissions(r.Context(), c.q, c.orgID, userID)
+// creatorGrants holds each creator's current grant, nil for someone who is
+// no longer a member, matching agentclient.CreatorPermissions. One query
+// reads the memberships and each distinct role resolves once.
+type creatorGrants struct {
+	held map[string]map[string]bool
+}
+
+func loadCreatorGrants(ctx context.Context, q *store.Queries, orgID string, users []string) (creatorGrants, error) {
+	grants := creatorGrants{held: map[string]map[string]bool{}}
+	rows, err := q.ListMemberRoles(ctx, store.ListMemberRolesParams{OrgID: orgID, UserIds: users})
 	if err != nil {
-		return nil, err
+		return grants, err
 	}
-	c.held[userID] = held
-	return held, nil
+	literals := map[string]string{}
+	for _, row := range rows {
+		literals[row.UserID] = row.Role
+	}
+	byRole := map[string]map[string]bool{}
+	for _, user := range users {
+		literal := literals[user]
+		permissions, cached := byRole[literal]
+		if !cached && literal != "" {
+			role, err := auth.ResolveRoleFromMembership(ctx, q, orgID, literal, auth.ModeSupabase)
+			if err != nil {
+				return grants, err
+			}
+			if permissions, err = auth.EffectivePermissions(ctx, q, orgID, role); err != nil {
+				return grants, err
+			}
+			byRole[literal] = permissions
+		}
+		grants.held[user] = permissions
+	}
+	return grants, nil
 }
 
 // access says whether the creator still stands behind the client: removed
 // when they left the organization, reduced when they lost a permission the
 // client's capabilities rely on. Either way the server already narrows or
 // refuses the token.
-func (c creatorGrants) access(r *http.Request, row store.AgentClient) (map[string]any, error) {
-	held, err := c.of(r, row.CreatedBy)
-	if err != nil {
-		return nil, err
-	}
+func (c creatorGrants) access(row store.AgentClient) map[string]any {
+	held := c.held[row.CreatedBy]
 	if held == nil {
-		return map[string]any{"state": "removed", "missingPermissions": []string{}}, nil
+		return map[string]any{"state": "removed", "missingPermissions": []string{}}
 	}
 	parsed, err := agentclient.ParseCapabilities(row.Capabilities)
 	if err != nil {
-		return map[string]any{"state": "reduced", "missingPermissions": []string{}}, nil
+		return map[string]any{"state": "reduced", "missingPermissions": []string{}}
 	}
-	missing := agentclient.MissingPermissions(parsed, held)
-	if len(missing) > 0 {
-		return map[string]any{"state": "reduced", "missingPermissions": missing}, nil
+	if missing := agentclient.MissingPermissions(parsed, held); len(missing) > 0 {
+		return map[string]any{"state": "reduced", "missingPermissions": missing}
 	}
-	return map[string]any{"state": "member", "missingPermissions": []string{}}, nil
+	return map[string]any{"state": "member", "missingPermissions": []string{}}
 }
 
 // rendered is a client view after a change. The change already succeeded, so
 // an unreadable grant degrades to an unknown state instead of an error.
 func (s *service) rendered(r *http.Request, row store.AgentClient, now time.Time) map[string]any {
-	creators := creatorGrants{q: store.New(s.pool), orgID: row.OrgID, held: map[string]map[string]bool{}}
-	access, err := creators.access(r, row)
+	creators, err := loadCreatorGrants(r.Context(), store.New(s.pool), row.OrgID, []string{row.CreatedBy})
 	if err != nil {
-		access = map[string]any{"state": "unknown", "missingPermissions": []string{}}
+		return withAccess(view(row, now), map[string]any{"state": "unknown", "missingPermissions": []string{}})
 	}
-	return withAccess(view(row, now), access)
+	return withAccess(view(row, now), creators.access(row))
 }
 
 func withAccess(client map[string]any, access map[string]any) map[string]any {

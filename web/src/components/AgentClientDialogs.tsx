@@ -59,7 +59,9 @@ export function CreateAgentClientDialog({
   const rate = Number(rateLimit)
   const expiryValid = Number.isInteger(expiry) && expiry >= 1 && expiry <= catalog.limits.maxExpiryDays
   const rateValid = Number.isInteger(rate) && rate >= 1 && rate <= catalog.limits.maxRateLimitPerMinute
-  const canSubmit = name.trim().length > 0 && expiryValid && rateValid && !submitting
+  // The server always adds read, so a person who cannot grant it cannot create.
+  const readGrantable = catalog.capabilities.find((capability) => capability.name === 'read')?.grantable ?? false
+  const canSubmit = name.trim().length > 0 && expiryValid && rateValid && readGrantable && !submitting
   const scopeTags = parseTags(tags)
 
   const toggle = <Value,>(set: ReadonlySet<Value>, value: Value, on: boolean): ReadonlySet<Value> => {
@@ -147,7 +149,7 @@ export function CreateAgentClientDialog({
                     />
                     <label htmlFor={id}>
                       <span className="we-agent-dialog__option-name">{t(`agentClients.capability.${capability}.label`)}</span>
-                      {!grantable && !implied && (
+                      {!grantable && (
                         <span className="we-pill" data-tone="neutral" data-testid={`agent-client-missing-${capability}`}>
                           {t('agentClients.capability.needs', { permissions: missingPermissions.join(', ') })}
                         </span>
@@ -337,8 +339,11 @@ export function AgentTokenDialog({
   const [closing, setClosing] = useState(false)
   const askToClose = () => setClosing(true)
   useDialogFocusTrap(dialogRef, { initialFocus: doneRef, onEscape: closing ? () => setClosing(false) : askToClose })
+  const asked = useRef(false)
   useEffect(() => {
     if (closing) keepRef.current?.focus()
+    else if (asked.current) doneRef.current?.focus()
+    asked.current = closing
   }, [closing])
   const snippets = mcpSnippets(token)
   return (
@@ -425,40 +430,43 @@ export function AgentClientDetail({ clientId }: { clientId: string }) {
           ))}
         </ul>
       </section>
-      <section aria-labelledby={`${client.id}-calls`}>
-        <h4 id={`${client.id}-calls`}>{t('agentClients.detail.calls')}</h4>
-        {recentCalls.length === 0
-          ? <p className="helper-text">{t('agentClients.detail.noCalls')}</p>
-          : (
-            <ul className="we-agent-detail__calls">
-              {recentCalls.map((call, index) => (
-                <li key={`${call.at ?? ''}-${index}`}>
-                  {call.allowed
-                    ? <CheckCircle2 size={13} role="img" aria-label={t('agentClients.detail.allowed')} />
-                    : <CircleX size={13} role="img" aria-label={t('agentClients.detail.denied')} />}
-                  <code>{call.tool}</code>
-                  {call.denial && <span className="we-agent-detail__muted">{call.denial}</span>}
-                  <span className="we-agent-detail__muted">{formatWhen(call.at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-      </section>
-      <section aria-labelledby={`${client.id}-requests`}>
-        <h4 id={`${client.id}-requests`}>{t('agentClients.detail.requests')}</h4>
-        {openRequests.length === 0
-          ? <p className="helper-text">{t('agentClients.detail.noRequests')}</p>
-          : (
-            <ul className="we-agent-detail__calls">
-              {openRequests.map((request) => (
-                <li key={request.id}>
-                  <code>{request.workflowId}</code>
-                  <span className="we-agent-detail__muted">{t('agentClients.detail.expires', { when: formatWhen(request.expiresAt) })}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-      </section>
+      {recentCalls !== null && (
+        <section aria-labelledby={`${client.id}-calls`}>
+          <h4 id={`${client.id}-calls`}>{t('agentClients.detail.calls')}</h4>
+          {recentCalls.length === 0
+            ? <p className="helper-text">{t('agentClients.detail.noCalls')}</p>
+            : (
+              <ul className="we-agent-detail__calls">
+                {recentCalls.map((call, index) => (
+                  <li key={`${call.at ?? ''}-${index}`}>
+                    {call.allowed
+                      ? <CheckCircle2 size={13} role="img" aria-label={t('agentClients.detail.allowed')} />
+                      : <CircleX size={13} role="img" aria-label={t('agentClients.detail.denied')} />}
+                    <code>{call.tool}</code>
+                    <span className="we-agent-detail__muted">{formatWhen(call.at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
+      )}
+      {openRequests !== null && (
+        <section aria-labelledby={`${client.id}-requests`}>
+          <h4 id={`${client.id}-requests`}>{t('agentClients.detail.requests')}</h4>
+          {openRequests.length === 0
+            ? <p className="helper-text">{t('agentClients.detail.noRequests')}</p>
+            : (
+              <ul className="we-agent-detail__calls">
+                {openRequests.map((request) => (
+                  <li key={request.id}>
+                    <code>{request.workflowId}</code>
+                    <span className="we-agent-detail__muted">{t('agentClients.detail.expires', { when: formatWhen(request.expiresAt) })}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
+      )}
     </div>
   )
 }

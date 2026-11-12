@@ -279,20 +279,15 @@ func (q *Queries) ListAgentClientOpenRequests(ctx context.Context, arg ListAgent
 }
 
 const listAgentClientToolCalls = `-- name: ListAgentClientToolCalls :many
-SELECT recent.target_id, recent.metadata, recent.created_at FROM (
-  SELECT id, target_id, metadata, created_at FROM audit_logs
-  WHERE org_id = $1 AND action = 'mcp.tool.invoked'
-  ORDER BY created_at DESC, id DESC
-  LIMIT 5000
-) recent
-WHERE recent.metadata->'agentClient'->>'id' = $2::text
-ORDER BY recent.created_at DESC, recent.id DESC
+SELECT target_id, metadata, created_at FROM audit_logs
+WHERE org_id = $1 AND user_id = $2::text AND action = 'mcp.tool.invoked'
+ORDER BY created_at DESC, id DESC
 LIMIT 20
 `
 
 type ListAgentClientToolCallsParams struct {
-	OrgID    string
-	ClientID string
+	OrgID string
+	Actor string
 }
 
 type ListAgentClientToolCallsRow struct {
@@ -301,10 +296,9 @@ type ListAgentClientToolCallsRow struct {
 	CreatedAt *time.Time
 }
 
-// Bounded to the organization's latest tool calls, so a rarely used agent
-// never turns the read into a scan of the whole audit log.
+// Served by the partial tool-call index on (org_id, user_id).
 func (q *Queries) ListAgentClientToolCalls(ctx context.Context, arg ListAgentClientToolCallsParams) ([]ListAgentClientToolCallsRow, error) {
-	rows, err := q.db.Query(ctx, listAgentClientToolCalls, arg.OrgID, arg.ClientID)
+	rows, err := q.db.Query(ctx, listAgentClientToolCalls, arg.OrgID, arg.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -565,6 +559,41 @@ func (q *Queries) ListAgentScopedWorkflows(ctx context.Context, arg ListAgentSco
 			&i.RunCount,
 			&i.LastRunStatus,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemberRoles = `-- name: ListMemberRoles :many
+SELECT user_id, role FROM org_members
+WHERE org_id = $1 AND user_id = ANY($2::text[])
+`
+
+type ListMemberRolesParams struct {
+	OrgID   string
+	UserIds []string
+}
+
+type ListMemberRolesRow struct {
+	UserID string
+	Role   string
+}
+
+func (q *Queries) ListMemberRoles(ctx context.Context, arg ListMemberRolesParams) ([]ListMemberRolesRow, error) {
+	rows, err := q.db.Query(ctx, listMemberRoles, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMemberRolesRow
+	for rows.Next() {
+		var i ListMemberRolesRow
+		if err := rows.Scan(&i.UserID, &i.Role); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
