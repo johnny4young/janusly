@@ -61,23 +61,38 @@ func bearerToken(r *http.Request) (string, bool) {
 	return fields[1], true
 }
 
+// refuseCredential counts and audits only presented tokens: a probe without
+// one keeps the plain 401 challenge and costs no database write.
 func (d Deps) refuseCredential(w http.ResponseWriter, r *http.Request, err error, presented bool) {
-	address := httpkit.ClientAddress(r)
-	if d.Limiter != nil {
-		var limited *ratelimit.LimitError
-		if errors.As(d.Limiter.Enforce(r.Context(), "ip:"+address, failedAuthLimit), &limited) {
-			result := httpkit.Error(http.StatusTooManyRequests, "rate_limited", limited.Error(), nil)
-			result.RetryAfterSec = limited.RetryAfterSec
-			httpkit.WriteUnversioned(w, result)
-			return
-		}
-	}
 	if !presented {
 		http.Error(w, "no bearer token", http.StatusUnauthorized)
 		return
 	}
+	address := httpkit.ClientAddress(r)
+	if limited := d.limitFailedAuth(r.Context(), "ip:"+address); limited != nil {
+		result := httpkit.Error(http.StatusTooManyRequests, "rate_limited", limited.Error(), nil)
+		result.RetryAfterSec = limited.RetryAfterSec
+		httpkit.WriteUnversioned(w, result)
+		return
+	}
 	d.auditTokenRejection(r.Context(), err, address)
 	http.Error(w, sdkauth.ErrInvalidToken.Error(), http.StatusUnauthorized)
+}
+
+// limitFailedAuth counts one failure; past the limit the caller writes no
+// audit row, so the limiter also caps audit volume.
+func (d Deps) limitFailedAuth(ctx context.Context, key string) *ratelimit.LimitError {
+	if d.Limiter == nil {
+		return nil
+	}
+	// A caller that hangs up must still be counted before it is audited.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	var limited *ratelimit.LimitError
+	if errors.As(d.Limiter.Enforce(ctx, key, failedAuthLimit), &limited) {
+		return limited
+	}
+	return nil
 }
 
 // auditTokenRejection writes the attempt to the client's organization when

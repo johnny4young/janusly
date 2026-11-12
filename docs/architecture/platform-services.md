@@ -69,8 +69,8 @@ default (`JANUSLY_START_RATE_LIMIT_PER_MIN`; a runaway-client cap, not a quota),
 `GET /auth/sso/start` at 60 per minute per client address, and the
 unauthenticated `GET /public/status/{token}` at 60 per minute per client
 address. An exhausted bucket answers `429 rate_limited` with a `Retry-After`
-header. The client address is the socket peer unless `JANUSLY_TRUSTED_PROXY`
-is set. Public status pages are additionally served from a 60-second
+header. The client address is the socket peer, or with `JANUSLY_TRUSTED_PROXY`
+the last `X-Forwarded-For` hop when it parses as an IP. Public status pages are additionally served from a 60-second
 in-memory snapshot per token, so a scan costs at most one query set per
 minute per page. In production the browser header set also carries
 `Strict-Transport-Security`.

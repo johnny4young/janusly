@@ -9,8 +9,11 @@
   no permission is now refused instead of admitted; `agent.info` stays open to
   every agent client. Each rejected agent token, on remote MCP or with
   `JANUSLY_AGENT_TOKEN`, writes an `mcp.auth.rejected` audit row with the
-  reason and never the token, and remote MCP answers 429 after 20 failed
-  attempts in a minute from one address. A database failure while checking an
+  reason and never the token, and remote MCP answers 429 after 20 rejected
+  tokens in a minute from one address. With `JANUSLY_TRUSTED_PROXY=true`, every
+  per-address limit (remote MCP, SSO start, public status pages) now keys on
+  the last `X-Forwarded-For` hop, the one your proxy wrote, so a client can no
+  longer choose its own bucket by sending the header itself. A database failure while checking an
   agent token no longer reaches the MCP client; it gets a fixed "temporarily
   unavailable" message and the detail stays in the server log.
 - While development auth headers are accepted (no identity provider outside

@@ -61,7 +61,7 @@ key to the host `.env` does not automatically forward it into a container.
 | `JANUSLY_SESSION_COOKIE_SECURE` | Process | boolean strings true/false; unset/other → HTTPS scheme of WEB_BASE_URL | `browsersession/browsersession.go` |
 | `API_ALLOWED_ORIGINS` | Process | comma-separated exact origins; localhost and 127.0.0.1 ports 5173/5174; wildcard accepted only outside production | `httpapi/cors.go` |
 | `JANUSLY_BROWSER_CONNECT_ORIGINS` | Process | comma-separated origins; empty; only explicit loopback HTTP origins extend browser CSP; others ignored | `httpapi/cors.go` |
-| `JANUSLY_TRUSTED_PROXY` | Process | exact `true` enables first X-Forwarded-For hop; default false; only behind a header-overwriting proxy | `httpapi/cors.go` |
+| `JANUSLY_TRUSTED_PROXY` | Process | exact `true` keys per-IP limits on the last X-Forwarded-For hop (validated as an IP, else the socket peer); default false; only behind exactly one proxy | `httpkit/clientaddress.go` |
 | `ALLOW_PRIVATE_HTTP_TARGETS` | Process | exact `true` permits private outbound targets; default false; does not disable other SSRF/redirect/DNS/byte guards | `executors/http.go` |
 | `ALLOW_DEV_AUTH_HEADERS_ON_NETWORK` | Process | exact `true` lets a process that accepts development auth headers listen on `0.0.0.0` or `::`; otherwise boot refuses that bind | `internal/config/config.go`; boot validation |
 | `ALLOW_DEV_AUTH_HEADERS` | Process | exact `true` enables dev headers; unset/false still auto-allows them outside production when Supabase is absent; production with configured Supabase refuses true; without Supabase production requires explicit true | `auth/auth.go` |

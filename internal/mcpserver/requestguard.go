@@ -43,7 +43,14 @@ func (server Deps) requestGuard(next mcp.MethodHandler) mcp.MethodHandler {
 			principal, err := server.ResolveActor(ctx, req)
 			if err != nil {
 				if errors.Is(err, agentclient.ErrInvalidToken) {
-					server.auditTokenRejection(ctx, err, "")
+					key := server.Transport + ":unknown"
+					var rejection *agentclient.RejectedError
+					if errors.As(err, &rejection) && rejection.ClientID != "" {
+						key = server.Transport + ":client:" + rejection.ClientID
+					}
+					if server.limitFailedAuth(ctx, key) == nil {
+						server.auditTokenRejection(ctx, err, "")
+					}
 					err = errAgentUnauthenticated
 				} else {
 					server.logger().Error("mcp agent resolution failed", "method", method, "error", err)

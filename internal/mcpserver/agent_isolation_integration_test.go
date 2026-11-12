@@ -327,6 +327,14 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(session, "revoked")
+	for range failedAuthLimit.Max + 5 {
+		expectInvalid(session, "revoked, retried")
+	}
+	var rejections int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'mcp.auth.rejected'
+		AND target_id = $2`, tenant.org, revoked.Client.ID).Scan(&rejections); err != nil || rejections != failedAuthLimit.Max {
+		t.Fatalf("retried rejections must be audited up to the limit: %d %v", rejections, err)
+	}
 
 	expired := issueAgentClient(t, pool, tenant, agentclient.IssueInput{})
 	if _, err := pool.Exec(ctx, `UPDATE agent_clients SET token_issued_at = now() - interval '2 days',

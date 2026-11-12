@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -113,6 +114,9 @@ func run() error {
 		resolver := agentclient.Resolver{Pool: pool}
 		principal, err := resolver.Resolve(ctx, token)
 		if err != nil {
+			if errors.Is(err, agentclient.ErrInvalidToken) {
+				deps.AuditTokenRejection(ctx, err)
+			}
 			return err
 		}
 		// Re-resolved on every call so revocation and expiry apply mid-session.

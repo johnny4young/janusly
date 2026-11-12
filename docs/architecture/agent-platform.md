@@ -251,10 +251,11 @@ public listener, before `webdist`:
   `creator_removed`), the transport and the client address, in the client's
   organization when the token matched one and in `system` otherwise; the
   token, its digest and its last characters are never recorded. After 20
-  failed attempts in a minute from one address (`JANUSLY_TRUSTED_PROXY`
-  decides whether that is the first `X-Forwarded-For` hop), further failures
+  rejected tokens in a minute from one address (with `JANUSLY_TRUSTED_PROXY`,
+  the last `X-Forwarded-For` hop), further rejections
   answer 429 with `Retry-After` and the standard `rate_limited` body, and are
-  no longer audited one by one.
+  no longer audited one by one. A request without a bearer token gets the
+  plain 401 challenge and is neither counted nor audited.
 - **No tokens in URLs.** A request with `access_token`, `token`, `api_key`,
   `key`, `auth` or `authorization` in the query string, or `jly_agent_`
   anywhere in it, is refused with 400 before authentication; the parameter

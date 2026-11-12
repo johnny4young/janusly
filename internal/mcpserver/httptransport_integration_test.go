@@ -5,8 +5,10 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -220,9 +222,22 @@ func TestRemoteMCPAuditsAndLimitsRejectedTokens(t *testing.T) {
 	t.Cleanup(server.Close)
 	endpoint := server.URL + "/mcp"
 	t.Setenv("JANUSLY_TRUSTED_PROXY", "true")
-	address := "2001:db8::" + strings.ReplaceAll(uuid.NewString()[:9], "-", ":")
+	newAddress := func() string {
+		id := uuid.New()
+		return net.ParseIP(fmt.Sprintf("2001:db8::%x:%x:%x", id[0:2], id[2:4], id[4:6])).String()
+	}
+	address := newAddress()
 	from := func(token string) map[string]string {
 		return map[string]string{"Authorization": "Bearer " + token, "X-Forwarded-For": address}
+	}
+	auditedFrom := func(address string) int {
+		t.Helper()
+		var count int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_logs WHERE action = 'mcp.auth.rejected'
+			AND metadata->>'clientAddress' = $1`, address).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
 	}
 
 	if status, _, _ := rawPost(t, endpoint, from(revoked.Token), initializeBody); status != http.StatusUnauthorized {
@@ -242,7 +257,8 @@ func TestRemoteMCPAuditsAndLimitsRejectedTokens(t *testing.T) {
 		t.Fatalf("unknown token audit: %v", err)
 	}
 	for _, text := range []string{metadata, unknown, logs.String()} {
-		for _, token := range []string{revoked.Token, unissued, revoked.Token[len(agentclient.TokenPrefix):]} {
+		for _, token := range []string{revoked.Token, unissued, revoked.Token[len(agentclient.TokenPrefix):],
+			fmt.Sprintf("%x", agentclient.Digest(revoked.Token)), revoked.Client.TokenLast4} {
 			if strings.Contains(text, token) {
 				t.Fatalf("a token reached audit or logs: %s", text)
 			}
@@ -259,7 +275,38 @@ func TestRemoteMCPAuditsAndLimitsRejectedTokens(t *testing.T) {
 		!strings.Contains(body, `"code":"rate_limited"`) || !strings.Contains(header.Get("Content-Type"), "application/json") {
 		t.Fatalf("failed attempts past the limit: %d %q %v", status, body, header)
 	}
+	if got := auditedFrom(address); got != failedAuthLimit.Max {
+		t.Fatalf("failures past the limit must not be audited: %d rows", got)
+	}
 	if status, _, _ := rawPost(t, endpoint, map[string]string{"Authorization": "Bearer " + live.Token}, initializeBody); status != http.StatusOK {
-		t.Fatalf("another address was limited: %d", status)
+		t.Fatalf("a valid token was refused: %d", status)
+	}
+	other := newAddress()
+	elsewhere := map[string]string{"Authorization": "Bearer " + unissued, "X-Forwarded-For": other}
+	if status, _, _ := rawPost(t, endpoint, elsewhere, initializeBody); status != http.StatusUnauthorized {
+		t.Fatalf("another address shared the exhausted bucket: %d", status)
+	}
+	// Probes without a bearer are neither counted nor audited.
+	for range failedAuthLimit.Max + 1 {
+		if status, _, header := rawPost(t, endpoint, map[string]string{"X-Forwarded-For": other}, initializeBody); status != http.StatusUnauthorized ||
+			header.Get("WWW-Authenticate") == "" {
+			t.Fatalf("a probe without a bearer: %d %v", status, header)
+		}
+	}
+
+	// A caller that hangs up before the limiter runs is still counted.
+	hungUp := newAddress()
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	handler := NewHTTPHandler(Deps{Engine: eng, Pool: pool, NewID: uuid.NewString}, HTTPOptions{})
+	for range failedAuthLimit.Max + 5 {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(initializeBody)).WithContext(cancelled)
+		req.Host = "localhost"
+		req.Header.Set("Authorization", "Bearer x")
+		req.Header.Set("X-Forwarded-For", hungUp)
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if got := auditedFrom(hungUp); got != failedAuthLimit.Max {
+		t.Fatalf("cancelled attempts bypassed the limiter: %d rows", got)
 	}
 }
