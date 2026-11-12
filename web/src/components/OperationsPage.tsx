@@ -69,6 +69,7 @@ const AiGuidanceSettingsPanel = lazy(() => import('./AiGuidanceSettingsPanel').t
 const AuthPolicySettingsPanel = lazy(() => import('./AuthPolicySettingsPanel').then(module => ({ default: module.AuthPolicySettingsPanel })))
 const ScimDirectorySettingsPanel = lazy(() => import('./ScimDirectorySettingsPanel').then(module => ({ default: module.ScimDirectorySettingsPanel })))
 const AuditLogPanel = lazy(() => import('./AuditLogPanel').then(module => ({ default: module.AuditLogPanel })))
+const OAuthConsentPanel = lazy(() => import('./OAuthConsentPanel'))
 const PermissionGrantsPanel = lazy(() => import('./PermissionGrantsPanel').then(module => ({ default: module.PermissionGrantsPanel })))
 const MemoryGovernancePanel = lazy(() => import('./MemoryGovernancePanel').then(module => ({ default: module.MemoryGovernancePanel })))
 const AlertPoliciesPanel = lazy(() => import('./AlertPoliciesPanel').then(module => ({ default: module.AlertPoliciesPanel })))
@@ -494,6 +495,7 @@ function ReliabilitySection({ permissions }: { permissions?: readonly string[] }
 function AccessSection({ permissions }: { permissions?: readonly string[] }) {
   return (
     <>
+      {location.search.includes('oauth_request') && <OAuthConsentPanel />}
       {hasPermission(permissions, 'org.config.write') && <AuthPolicySettingsPanel />}
       {hasPermission(permissions, 'members.read') && (
         <ScimDirectorySettingsPanel

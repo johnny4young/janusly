@@ -44,6 +44,7 @@ const WORKSPACE_PREFIXES = [
   'multiAgent.',
   'nodeDefaults.',
   'nodes.',
+  'oauthConsent.',
   'operations.',
   'permissions.',
   'problems.',

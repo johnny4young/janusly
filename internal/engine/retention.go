@@ -152,6 +152,13 @@ func (e *Engine) RunRetentionSweep(ctx context.Context, every time.Duration, ret
 		} else if purged > 0 {
 			logger.Info("retention purged agent sessions", "count", purged)
 		}
+		// OAuth registrations nobody used, and authorization requests past their life.
+		if _, err := store.New(e.pool).DeleteUnusedOAuthClients(ctx, e.now().UTC().Add(-24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
+		if _, err := store.New(e.pool).DeleteExpiredOAuthRequests(ctx, e.now().UTC().Add(-24*time.Hour)); err != nil {
+			passErr = errors.Join(passErr, err)
+		}
 		// Captured gate input is kept for a shorter window than its session.
 		gateNow := e.now().UTC()
 		if _, err := store.New(e.pool).ExpireAgentGates(ctx, gateNow); err != nil {

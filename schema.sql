@@ -169,11 +169,16 @@ CREATE TABLE public.agent_clients (
     last_used_at timestamp with time zone,
     gate_tools text[] DEFAULT '{}'::text[] NOT NULL,
     capture_content boolean DEFAULT false NOT NULL,
+    oauth_client_id text,
+    access_expires_at timestamp with time zone,
+    refresh_digest bytea,
+    refresh_prev_digest bytea,
     CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
     CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
     CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '2160:00:00'::interval)))),
     CONSTRAINT agent_clients_gate_check CHECK (((cardinality(gate_tools) <= 20) AND ((NOT capture_content) OR (cardinality(gate_tools) > 0)))),
     CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
+    CONSTRAINT agent_clients_oauth_check CHECK ((((oauth_client_id IS NOT NULL) OR ((access_expires_at IS NULL) AND (refresh_digest IS NULL) AND (refresh_prev_digest IS NULL))) AND ((refresh_digest IS NULL) OR (octet_length(refresh_digest) = 32)) AND ((refresh_prev_digest IS NULL) OR (octet_length(refresh_prev_digest) = 32)))),
     CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
     CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
     CONSTRAINT agent_clients_scope_check CHECK (((cardinality(scope_workflow_ids) <= 100) AND (cardinality(scope_tags) <= 20)))
@@ -800,6 +805,49 @@ CREATE TABLE public.memory_entries (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     retain_until timestamp with time zone NOT NULL,
     hold_until timestamp with time zone
+);
+
+
+--
+-- Name: oauth_authorization_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_authorization_requests (
+    id text NOT NULL,
+    oauth_client_id text NOT NULL,
+    redirect_uri text NOT NULL,
+    code_challenge text NOT NULL,
+    scopes text[] NOT NULL,
+    state text NOT NULL,
+    resource text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    org_id text,
+    decided_by text,
+    agent_client_id text,
+    code_digest bytea,
+    code_expires_at timestamp with time zone,
+    code_used_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oauth_requests_approved_check CHECK (((status = 'approved'::text) = ((code_digest IS NOT NULL) AND (agent_client_id IS NOT NULL) AND (org_id IS NOT NULL)))),
+    CONSTRAINT oauth_requests_challenge_check CHECK ((char_length(code_challenge) = 43)),
+    CONSTRAINT oauth_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text])))
+);
+
+
+--
+-- Name: oauth_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_clients (
+    id text NOT NULL,
+    client_name text NOT NULL,
+    redirect_uris text[] NOT NULL,
+    registered_from text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT oauth_clients_name_check CHECK (((char_length(client_name) >= 1) AND (char_length(client_name) <= 100))),
+    CONSTRAINT oauth_clients_redirects_check CHECK (((cardinality(redirect_uris) >= 1) AND (cardinality(redirect_uris) <= 5)))
 );
 
 
@@ -2211,6 +2259,22 @@ ALTER TABLE ONLY public.memory_entries
 
 
 --
+-- Name: oauth_authorization_requests oauth_authorization_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_requests
+    ADD CONSTRAINT oauth_authorization_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oauth_clients oauth_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_clients
+    ADD CONSTRAINT oauth_clients_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: onboarding_progress onboarding_progress_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2738,6 +2802,20 @@ CREATE INDEX agent_clients_org_created_idx ON public.agent_clients USING btree (
 
 
 --
+-- Name: agent_clients_refresh_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients USING btree (refresh_digest) WHERE (refresh_digest IS NOT NULL);
+
+
+--
+-- Name: agent_clients_refresh_prev_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_clients_refresh_prev_idx ON public.agent_clients USING btree (refresh_prev_digest) WHERE (refresh_prev_digest IS NOT NULL);
+
+
+--
 -- Name: agent_clients_token_digest_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3239,6 +3317,27 @@ CREATE INDEX memory_entries_org_retain_until_idx ON public.memory_entries USING 
 --
 
 CREATE UNIQUE INDEX memory_entries_run_summary_key ON public.memory_entries USING btree (org_id, run_id, kind) WHERE ((kind = 'run_summary'::text) AND (run_id IS NOT NULL));
+
+
+--
+-- Name: oauth_clients_unused_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_clients_unused_idx ON public.oauth_clients USING btree (created_at) WHERE (last_used_at IS NULL);
+
+
+--
+-- Name: oauth_requests_code_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX oauth_requests_code_idx ON public.oauth_authorization_requests USING btree (code_digest) WHERE (code_digest IS NOT NULL);
+
+
+--
+-- Name: oauth_requests_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests USING btree (expires_at);
 
 
 --
@@ -4202,6 +4301,14 @@ ALTER TABLE ONLY public.authoring_experiences
 
 ALTER TABLE ONLY public.authoring_experiences
     ADD CONSTRAINT authoring_experiences_workflow_fk FOREIGN KEY (org_id, workflow_id) REFERENCES public.workflows(org_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_authorization_requests oauth_authorization_requests_oauth_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_requests
+    ADD CONSTRAINT oauth_authorization_requests_oauth_client_id_fkey FOREIGN KEY (oauth_client_id) REFERENCES public.oauth_clients(id) ON DELETE CASCADE;
 
 
 --

@@ -1,0 +1,49 @@
+/* Styles for OAuthConsentPanel.tsx, shipped with its lazy chunk. */
+
+.oauth-consent {
+  display: grid;
+  gap: 12px;
+}
+
+.oauth-consent h3 {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+
+.oauth-consent dl {
+  display: grid;
+  gap: 4px 12px;
+  grid-template-columns: max-content 1fr;
+  margin: 0;
+}
+
+.oauth-consent dt { color: var(--we-ink-soft); }
+.oauth-consent dd { margin: 0; overflow-wrap: anywhere; }
+
+.oauth-consent fieldset {
+  border: 0;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.oauth-consent legend {
+  font-weight: 600;
+  padding: 0 0 4px;
+}
+
+.oauth-consent label {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+
+.oauth-consent__days input { width: 5em; }
+
+.oauth-consent__actions {
+  display: flex;
+  gap: 8px;
+}

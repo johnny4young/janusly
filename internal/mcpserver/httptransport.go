@@ -28,6 +28,9 @@ type HTTPOptions struct {
 	// HTTP, so a bearer token never travels in clear in production.
 	RefuseForwardedHTTP bool
 	Logger              *slog.Logger
+	// ResourceMetadataURL, when set, is named in every 401 so an OAuth client
+	// can discover the authorization server.
+	ResourceMetadataURL string
 }
 
 const principalExtraKey = "janusly.principal"
@@ -70,7 +73,7 @@ func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 			Extra: map[string]any{principalExtraKey: principal},
 		}, nil
 	}
-	authenticated := challenge(authGate(deps, resolver, opts.Logger,
+	authenticated := challenge(opts.ResourceMetadataURL, authGate(deps, resolver, opts.Logger,
 		sdkauth.RequireBearerToken(verify, nil)(refuseBatches(streamable))))
 	protected := http.NewCrossOriginProtection().Handler(authenticated)
 	return guardHTTP(protected, opts)
@@ -103,17 +106,24 @@ var errVerificationUnavailable = errors.New("token verification is temporarily u
 
 // challenge adds the bearer challenge to every 401, which the SDK omits
 // without OAuth metadata.
-func challenge(next http.Handler) http.Handler {
+func challenge(resourceMetadataURL string, next http.Handler) http.Handler {
+	header := `Bearer realm="janusly"`
+	if resourceMetadataURL != "" {
+		header += `, resource_metadata="` + resourceMetadataURL + `"`
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&challengeWriter{ResponseWriter: w}, r)
+		next.ServeHTTP(&challengeWriter{ResponseWriter: w, header: header}, r)
 	})
 }
 
-type challengeWriter struct{ http.ResponseWriter }
+type challengeWriter struct {
+	http.ResponseWriter
+	header string
+}
 
 func (w *challengeWriter) WriteHeader(status int) {
 	if status == http.StatusUnauthorized {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="janusly"`)
+		w.Header().Set("WWW-Authenticate", w.header)
 	}
 	w.ResponseWriter.WriteHeader(status)
 }

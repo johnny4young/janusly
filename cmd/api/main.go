@@ -32,6 +32,7 @@ import (
 	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/httpapi"
 	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
+	"github.com/johnny4young/janusly/internal/httpapi/oauth"
 	"github.com/johnny4young/janusly/internal/mcpclient"
 	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
@@ -311,6 +312,7 @@ func run() error {
 	defer runner.Shutdown()
 
 	var mcpHandler, hookHandler, gateOpenHandler, gatePollHandler http.Handler
+	oauthIssuer := ""
 	if cfg.MCPHTTP.Enabled {
 		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
 		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
@@ -318,6 +320,10 @@ func run() error {
 		})
 		agentHTTP := mcpserver.HTTPOptions{
 			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
+		}
+		// With a public base URL, remote MCP also takes OAuth grants.
+		if oauthIssuer = cfg.MCPHTTP.BaseURL; oauthIssuer != "" {
+			agentHTTP.ResourceMetadataURL = oauth.ResourceMetadataURL(oauthIssuer)
 		}
 		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
@@ -338,6 +344,7 @@ func run() error {
 		AgentHookHandler:            hookHandler,
 		AgentGateOpenHandler:        gateOpenHandler,
 		AgentGatePollHandler:        gatePollHandler,
+		OAuthIssuer:                 oauthIssuer,
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
 		Audit:                       auditWriter,

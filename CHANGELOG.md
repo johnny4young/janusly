@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Remote MCP accepts OAuth when `JANUSLY_WEB_BASE_URL` is set: an MCP client
+  registers itself, a signed-in person approves the connection and its
+  capabilities in Settings → Access, and the client gets a 15-minute access
+  token with a rotating refresh token. The grant is an ordinary agent client,
+  so revoking it or demoting its creator applies on the next call. Static
+  agent tokens keep working.
 - Agent clients with the `report` capability can send their sessions to
   `POST /agent-sessions/events` when remote MCP is enabled: signed
   CloudEvents with tool names, status and timing, never paths, transcripts or

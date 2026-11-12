@@ -30,6 +30,10 @@ type AgentClient struct {
 	LastUsedAt         *time.Time
 	GateTools          []string
 	CaptureContent     bool
+	OauthClientID      pgtype.Text
+	AccessExpiresAt    *time.Time
+	RefreshDigest      []byte
+	RefreshPrevDigest  []byte
 }
 
 type AgentSession struct {
@@ -471,6 +475,34 @@ type MemoryEntry struct {
 	CreatedAt          time.Time
 	RetainUntil        time.Time
 	HoldUntil          *time.Time
+}
+
+type OauthAuthorizationRequest struct {
+	ID            string
+	OauthClientID string
+	RedirectUri   string
+	CodeChallenge string
+	Scopes        []string
+	State         string
+	Resource      string
+	Status        string
+	OrgID         pgtype.Text
+	DecidedBy     pgtype.Text
+	AgentClientID pgtype.Text
+	CodeDigest    []byte
+	CodeExpiresAt *time.Time
+	CodeUsedAt    *time.Time
+	ExpiresAt     time.Time
+	CreatedAt     time.Time
+}
+
+type OauthClient struct {
+	ID             string
+	ClientName     string
+	RedirectUris   []string
+	RegisteredFrom string
+	CreatedAt      time.Time
+	LastUsedAt     *time.Time
 }
 
 type OnboardingProgress struct {
