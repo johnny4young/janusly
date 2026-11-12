@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The JavaScript toolchain requires Node.js 26 LTS (26.13.1 or newer). Node 26
+  no longer bundles corepack, so install it before `corepack enable`.
 - While development auth headers are accepted (no identity provider outside
   production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
   `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless

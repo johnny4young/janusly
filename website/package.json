@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Marketing site for janusly.app (Astro, standalone npm package; not part of the pnpm web project).",
   "engines": {
-    "node": ">=26.13.1"
+    "node": ">=26.13.1 <27"
   },
   "scripts": {
     "dev": "astro dev",
