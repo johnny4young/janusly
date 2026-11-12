@@ -1,6 +1,7 @@
-FROM node:24-bookworm@sha256:392e1e23f34da768d8d1f4e502b64f200d3be3465934d4b7930f57d7e2fc1989 AS web-deps
+FROM node:26-bookworm@sha256:b7087bc4d973034b30854b378ba107f9fab622b47514cb7e2592e41b8bab8d49 AS web-deps
 WORKDIR /src/web
-RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
+# Node 25+ no longer bundles corepack.
+RUN npm install -g corepack@0.36.0 && corepack enable && corepack prepare pnpm@11.17.0 --activate
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN --mount=type=cache,id=janusly-pnpm,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile
