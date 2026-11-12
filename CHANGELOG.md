@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Agent access is tighter. The "needs you" feed (`GET /needs-you`,
+  `GET /v1/needs-you`) lists approval, form and tool-approval steps only to
+  people who also hold `runs.read`, so a custom role with only `runs.start` no
+  longer sees the organization's run, step and tool ids. An MCP tool that names
+  no permission is now refused instead of admitted; `agent.info` stays open to
+  every agent client. Each rejected agent token, on remote MCP or with
+  `JANUSLY_AGENT_TOKEN`, writes an `mcp.auth.rejected` audit row with the
+  reason and never the token, and remote MCP answers 429 after 20 failed
+  attempts in a minute from one address. A database failure while checking an
+  agent token no longer reaches the MCP client; it gets a fixed "temporarily
+  unavailable" message and the detail stays in the server log.
 - While development auth headers are accepted (no identity provider outside
   production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
   `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless

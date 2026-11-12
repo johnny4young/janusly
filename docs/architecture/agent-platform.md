@@ -245,7 +245,16 @@ public listener, before `webdist`:
 - **Authentication.** `Authorization: Bearer jly_agent_…` only. Browser
   sessions, Supabase tokens, the service token and development headers are
   refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`;
-  a token store failure answers 500 with fixed text.
+  a token store failure answers 500 with fixed text. Each rejected token
+  writes an `mcp.auth.rejected` audit row with the reason (`malformed`,
+  `unknown`, `revoked`, `expired`, `invalid_capabilities` or
+  `creator_removed`), the transport and the client address, in the client's
+  organization when the token matched one and in `system` otherwise; the
+  token, its digest and its last characters are never recorded. After 20
+  failed attempts in a minute from one address (`JANUSLY_TRUSTED_PROXY`
+  decides whether that is the first `X-Forwarded-For` hop), further failures
+  answer 429 with `Retry-After` and the standard `rate_limited` body, and are
+  no longer audited one by one.
 - **No tokens in URLs.** A request with `access_token`, `token`, `api_key`,
   `key`, `auth` or `authorization` in the query string, or `jly_agent_`
   anywhere in it, is refused with 400 before authentication; the parameter
@@ -369,7 +378,7 @@ history) and `needsYou` (a person step or a tool approval a person with
 editor rank may decide, never one they caused),
 plus agent lanes from `agent.*` and `multi_agent.*` events and run totals.
 `GET /needs-you` lists, for the signed-in person, tool approvals they did not
-cause, approval and form steps (both with `runs.start`) and agent publish
+cause, approval and form steps (both with `runs.start` and `runs.read`) and agent publish
 requests (with `workflows.write`, and not to the people a second-person rule
 excludes). Both are in the versioned contract (`/v1/runs/{runId}/map`,
 `/v1/needs-you`). A lane step carries only its type, time and the string or
