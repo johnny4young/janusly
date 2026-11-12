@@ -28,6 +28,7 @@ import (
 	"github.com/johnny4young/janusly/internal/config"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
+	"github.com/johnny4young/janusly/internal/hookbridge"
 	"github.com/johnny4young/janusly/internal/hookwire"
 	"github.com/johnny4young/janusly/internal/httpapi"
 	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
@@ -104,10 +105,24 @@ func requireBuildProvenance(production bool, identity buildinfo.Identity) error 
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		os.Exit(runHook())
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
 		os.Exit(1)
 	}
+}
+
+// runHook serves `janusly hook` inside an agent's hook runner: no
+// configuration, database or logs, and a panic never fails the agent.
+func runHook() (code int) {
+	defer func() {
+		if recover() != nil {
+			code = 0
+		}
+	}()
+	return hookbridge.Main(context.Background(), os.Args[2:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
 }
 
 func run() error {

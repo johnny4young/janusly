@@ -1,0 +1,16 @@
+{
+  "specversion": "1.0",
+  "id": "ccefb0c619b789921871ddbdc22311cf8e4af5e018214219f1c49e4f47a553bb",
+  "source": "janusly-hook/1/codex",
+  "type": "io.janusly.agent.tool.completed",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3",
+    "toolUseId": "call_a1",
+    "tool": "mcp__notion__search",
+    "toolKind": "mcp",
+    "mcpServer": "notion",
+    "status": "ok"
+  }
+}

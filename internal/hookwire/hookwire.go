@@ -139,7 +139,7 @@ func (e Event) Runtime() string { return strings.TrimPrefix(e.Source, sourcePref
 
 // EventID is deterministic: a retried hook produces the same id.
 func EventID(parts ...string) string {
-	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
 

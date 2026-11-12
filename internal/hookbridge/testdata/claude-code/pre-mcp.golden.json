@@ -1,0 +1,15 @@
+{
+  "specversion": "1.0",
+  "id": "ea1268cc19808432d8ebb0a140638734fc6a709345f296b4d0b94ba0e074648e",
+  "source": "janusly-hook/1/claude-code",
+  "type": "io.janusly.agent.tool.requested",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+    "toolUseId": "toolu_01",
+    "tool": "mcp__stripe__create_refund",
+    "toolKind": "mcp",
+    "mcpServer": "stripe"
+  }
+}

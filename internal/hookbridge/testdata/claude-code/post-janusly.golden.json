@@ -1,0 +1,21 @@
+{
+  "specversion": "1.0",
+  "id": "7ba69a39e0e85f77ec09b377df6d6da8e5825c04359afee128a0658e658c48a2",
+  "source": "janusly-hook/1/claude-code",
+  "type": "io.janusly.agent.tool.completed",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+    "toolUseId": "toolu_02",
+    "tool": "mcp__janusly__runs.start",
+    "toolKind": "mcp",
+    "mcpServer": "janusly",
+    "status": "ok",
+    "durationMs": 812,
+    "januslyRefs": {
+      "workflowId": "wf_refunds",
+      "runId": "run_8c1"
+    }
+  }
+}
