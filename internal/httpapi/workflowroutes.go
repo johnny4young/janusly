@@ -441,12 +441,15 @@ func (s *V1Server) resumeWorkflowCore(r *http.Request, rc v1Request, workflowID 
 	if workflowID == "" {
 		return opError(http.StatusBadRequest, "workflows_workflow_id_required", "workflowId is required", nil)
 	}
-	outcome, lifted, err := s.engine.ResumeWorkflow(r.Context(), rc.orgID, workflowID, rc.userID)
+	outcome, lifted, err := s.engine.ResumeWorkflow(r.Context(), rc.orgID, workflowID, rc.authContext)
 	if err != nil {
 		var notResumable *engine.ErrWorkflowNotResumable
 		switch {
 		case errors.Is(err, engine.ErrWorkflowNotFoundForResume):
 			return opError(http.StatusNotFound, "workflow_not_found", "Workflow not found", nil)
+		case errors.Is(err, engine.ErrBreakerResumeNeedsPerson):
+			return opError(http.StatusForbidden, "workflow_circuit_breaker_resume_requires_person",
+				"Only a person can resume a workflow its circuit breaker paused", nil)
 		case errors.As(err, &notResumable) && notResumable.Status == "paused_upstream_degraded":
 			return opError(http.StatusConflict, "upstream_degraded",
 				"An upstream this workflow depends on is degraded; it resumes when the upstream recovers",

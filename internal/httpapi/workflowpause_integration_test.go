@@ -357,3 +357,37 @@ func TestReplayCampaignWaitsForAPausedWorkflow(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 }
+
+// A circuit-breaker pause waits for someone to look at the failures, so a
+// service token cannot lift it; a person can.
+func TestCircuitBreakerPauseLiftsOnlyForAPerson(t *testing.T) {
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-breaker-resume-token")
+	h := newAPIHarnessWithoutWorkers(t)
+	workflowID := fmt.Sprintf("breaker-hook-%d", time.Now().UnixNano())
+	if res := h.call("POST", "/v1/workflows/save", webhookWorkflow(workflowID, "breaker-hook"), ""); res.status != 200 {
+		t.Fatalf("save: %d %+v", res.status, res.body)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `UPDATE workflows SET status = 'paused_circuit_breaker' WHERE org_id = $1 AND id = $2`,
+		h.org, workflowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, 'automation', 'editor')`,
+		"m-automation-"+workflowID, h.org); err != nil {
+		t.Fatal(err)
+	}
+	refused := h.callWithHeaders("POST", "/v1/workflows/"+workflowID+"/resume", nil, "", map[string]string{
+		"Authorization": "Bearer svc-breaker-resume-token", "x-user-id": "automation",
+	})
+	if refused.status != http.StatusForbidden || !strings.Contains(fmt.Sprint(refused.body), "workflow_circuit_breaker_resume_requires_person") {
+		t.Fatalf("a service token lifted a circuit-breaker pause: %d %+v", refused.status, refused.body)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "paused_circuit_breaker" {
+		t.Fatalf("after the refused resume: %s", status)
+	}
+	if res := h.call("POST", "/v1/workflows/"+workflowID+"/resume", nil, ""); res.status != http.StatusOK {
+		t.Fatalf("a person's resume: %d %+v", res.status, res.body)
+	}
+	if status, _ := workflowStatus(t, h.org, workflowID); status != "active" {
+		t.Fatalf("after a person's resume: %s", status)
+	}
+}

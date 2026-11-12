@@ -549,4 +549,41 @@ func TestAgentClientPausesAndResumesWithinScope(t *testing.T) {
 	if actions != "workflow.paused,workflow.resumed" {
 		t.Fatalf("agent audit trail: %q", actions)
 	}
+
+	// Only a person lifts a circuit-breaker pause; neither the agent nor the
+	// stdio operator can.
+	if _, err := pool.Exec(t.Context(), `UPDATE workflows SET status = 'paused_circuit_breaker' WHERE org_id = $1 AND id = $2`,
+		tenant.org, tenant.workflowID); err != nil {
+		t.Fatal(err)
+	}
+	operatorSession := operatorSession(t, pool, eng, tenant.org)
+	for label, caller := range map[string]*mcp.ClientSession{"agent": session, "stdio operator": operatorSession} {
+		res, _ := callTool(t, caller, "workflows.resume", map[string]any{"workflowId": tenant.workflowID})
+		if !res.IsError || !strings.Contains(resultText(res), "permission_denied") || !strings.Contains(resultText(res), "only a person can resume it") {
+			t.Fatalf("%s lifted a circuit-breaker pause: %q", label, resultText(res))
+		}
+	}
+	if got := status(tenant.workflowID); got != "paused_circuit_breaker" {
+		t.Fatalf("after refused resumes: %s", got)
+	}
+}
+
+// operatorSession is cmd/mcp without an agent token: the operator ceiling
+// acting as the "mcp" service actor.
+func operatorSession(t *testing.T, pool *pgxpool.Pool, eng *engine.Engine, org string) *mcp.ClientSession {
+	t.Helper()
+	server := NewServer(Deps{Engine: eng, Pool: pool, OrgID: org, UserID: "mcp", NewID: uuid.NewString,
+		Permissions: fullMCPTestPermissions(), Transport: "stdio"})
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = server.Run(context.Background(), serverTransport)
+	}()
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "operator", Version: "1"}, nil).Connect(t.Context(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close(); <-done })
+	return session
 }
