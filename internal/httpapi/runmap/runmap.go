@@ -246,7 +246,8 @@ func formResumable(kind string, waiting map[string]any, now time.Time) bool {
 }
 
 func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types map[string]string) ([]map[string]any, error) {
-	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID, PerNode: maxLaneEvents})
+	// One event past the bound tells a full lane from a truncated one.
+	events, err := store.New(s.pool).ListRunAgentEvents(r.Context(), store.ListRunAgentEventsParams{OrgID: rc.OrgID, RunID: runID, PerNode: maxLaneEvents + 1})
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +261,12 @@ func (s *service) lanes(r *http.Request, rc httpkit.Request, runID string, types
 	}
 	lanes := make([]map[string]any, 0, len(order))
 	for _, nodeID := range order {
-		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": byNode[nodeID]})
+		steps := byNode[nodeID]
+		truncated := len(steps) > maxLaneEvents
+		if truncated {
+			steps = steps[len(steps)-maxLaneEvents:]
+		}
+		lanes = append(lanes, map[string]any{"nodeId": nodeID, "kind": types[nodeID], "steps": steps, "truncated": truncated})
 	}
 	return lanes, nil
 }

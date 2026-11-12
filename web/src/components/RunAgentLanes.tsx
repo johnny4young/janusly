@@ -45,6 +45,7 @@ export function RunAgentLanes({ runId }: { runId: string }) {
                 <span className="we-pill" data-tone="neutral">{t(`runWorkspace.lanes.kind.${lane.kind}`)}</span>
               )}
               <span className="helper-text">{t('multiAgent.stepCount', { count: lane.stepCount })}</span>
+              {lane.truncated && <span className="helper-text">{t('runWorkspace.lanes.truncated')}</span>}
             </header>
             {lane.tracks.map(track => (
               <div key={track.agent ?? ''} className="we-run-lane__track">

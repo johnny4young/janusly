@@ -4186,12 +4186,16 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
           }
         },
         "required": [
           "nodeId",
           "kind",
-          "steps"
+          "steps",
+          "truncated"
         ],
         "type": "object"
       },

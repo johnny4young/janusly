@@ -376,7 +376,8 @@ requests (with `workflows.write`, and not to the people a second-person rule
 excludes). Both are in the versioned contract (`/v1/runs/{runId}/map`,
 `/v1/needs-you`). A lane step carries only its type, time and the string or
 integer fields `tool`, `status`, `agent` (a crew agent's `name`) and
-`iteration`.
+`iteration`. A lane keeps its latest 200 events; `truncated` says it dropped
+older ones, and the Agents tab says so.
 
 The canvas reads the map through one shared feed per run
 (`web/src/hooks/useRunMap.ts`): it refetches 400 ms after the run projection
@@ -388,7 +389,9 @@ browser from the moment the map arrived. A decision is offered only while the
 live step still waits and its binding is complete: a tool approval posts its
 approval id and parameter digest to `POST /runs/tool-approvals/decide`, an
 approval step resumes through `POST /resume` (there is no reject route for an
-approval step), and a form opens the existing form dialog. Rerun uses the
+approval step), and a form opens the existing form dialog bound to the
+step's resume token: the dialog closes when the step stops waiting or its
+token changes, and never reopens by itself. Rerun uses the
 existing preview and side-effect acknowledgement. The Agents tab reads the
 same feed. Not built yet: expanding a child run inline (the node links to
 it), the MCP activity lane, and recovery approvals and publish requests on

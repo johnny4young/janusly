@@ -178,3 +178,47 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 		t.Fatalf("the approver's decidable tool approval was crowded out or a cancelled run's approval was offered: %v", kinds)
 	}
 }
+
+// A lane past its event bound keeps the latest steps and says it dropped some.
+func TestRunMapLaneReportsTruncation(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	runID := "run-lanes-" + suffix
+	doc, _ := json.Marshal(map[string]any{"workflow": map[string]any{"id": "wf-lanes-" + suffix, "nodes": []any{
+		map[string]any{"id": "busy", "type": "agent"}, map[string]any{"id": "quiet", "type": "agent"},
+	}}})
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json) VALUES ($1, $2, 'v', $3, 'running', $4)`,
+			[]any{runID, h.org, "wf-lanes-" + suffix, doc}},
+		{`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload)
+			SELECT $1 || g, $2, $3, 'busy', 'agent.step.started', jsonb_build_object('iteration', g) FROM generate_series(0, 200) g`,
+			[]any{"busy-" + suffix + "-", runID, h.org}},
+		{`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload) VALUES ($1, $2, $3, 'quiet', 'agent.completed', '{}')`,
+			[]any{"quiet-" + suffix, runID, h.org}},
+	} {
+		if _, err := pool.Exec(t.Context(), stmt.sql, stmt.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := h.call("GET", "/v1/runs/"+runID+"/map", nil, "")
+	if res.status != 200 {
+		t.Fatalf("run map: %d %v", res.status, res.body)
+	}
+	lanes := map[string]map[string]any{}
+	for _, raw := range res.body["data"].(map[string]any)["lanes"].([]any) {
+		lane := raw.(map[string]any)
+		lanes[lane["nodeId"].(string)] = lane
+	}
+	busy, quiet := lanes["busy"], lanes["quiet"]
+	steps, _ := busy["steps"].([]any)
+	if busy["truncated"] != true || len(steps) != 200 || steps[0].(map[string]any)["iteration"] != 1.0 {
+		t.Fatalf("busy lane: truncated=%v steps=%d first=%v", busy["truncated"], len(steps), steps[0])
+	}
+	if quiet["truncated"] != false {
+		t.Fatalf("quiet lane: %v", quiet)
+	}
+}
