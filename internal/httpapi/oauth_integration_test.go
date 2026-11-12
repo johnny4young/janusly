@@ -561,6 +561,24 @@ func TestOAuthRegistrationIsBounded(t *testing.T) {
 	if oldest != 0 || total != 1000 || fresh == "" {
 		t.Fatalf("eviction at the cap: oldest kept %d, total %d", oldest, total)
 	}
+	// A request waiting for consent does not pin a registration: with every
+	// unused one holding a request, the oldest still makes room.
+	if _, err := pool.Exec(t.Context(), `DELETE FROM rate_limit_windows WHERE name LIKE 'oauth.%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE oauth_clients SET created_at = now() - interval '1 hour' WHERE id = $1`, fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO oauth_authorization_requests (id, oauth_client_id, redirect_uri, code_challenge, scopes, state, resource, expires_at)
+		SELECT gen_random_uuid()::text, id, 'https://x.example.test/cb', repeat('a', 43), '{read}', 's', 'r', now() + interval '10 minutes'
+		FROM oauth_clients WHERE last_used_at IS NULL`); err != nil {
+		t.Fatal(err)
+	}
+	pinned := h.register(t, "pinned", "https://x.example.test/cb")
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM oauth_clients WHERE last_used_at IS NULL`).Scan(&total); err != nil || total != 1000 || pinned == "" {
+		t.Fatalf("pending requests pinned the table: %d %v", total, err)
+	}
+	fresh = pinned
 	// Registrations still in their first minutes are a flow in progress: none is evicted.
 	if _, err := pool.Exec(t.Context(), `UPDATE oauth_clients SET created_at = now() WHERE last_used_at IS NULL`); err != nil {
 		t.Fatal(err)

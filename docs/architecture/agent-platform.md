@@ -360,11 +360,12 @@ token.
   when they consent; nothing in an OAuth request names one.
 - **Registration is unauthenticated,** so it is bounded: 10 per hour per
   address (an IPv6 caller counts by its /64), 1000 unused registrations in
-  total, where a new one evicts the oldest (never one younger than 10
-  minutes or with a request waiting for consent), and one nobody used within
-  24 hours is swept. Authorize and token are limited per address too, and a
-  client holds at most 20 requests waiting for consent, so one caller cannot
-  crowd out another.
+  total, where a new one evicts an older one (first those without a request
+  waiting for consent, never one younger than 10 minutes), and one nobody
+  used within 24 hours is swept. Authorize and token are limited per address
+  too. A client holds at most 20 requests waiting for consent, and past
+  10 000 in total the oldest makes room, so neither cap can be used to lock
+  others out.
 - **Loose ends are closed.** A consent whose code is never exchanged is
   revoked within minutes by the retention sweep.
 - **Not in this cut:** client metadata documents by URL (CIMD), private

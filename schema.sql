@@ -3359,6 +3359,13 @@ CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests US
 
 
 --
+-- Name: oauth_requests_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_requests_pending_idx ON public.oauth_authorization_requests USING btree (oauth_client_id, created_at) WHERE (status = 'pending'::text);
+
+
+--
 -- Name: onboarding_progress_org_user_idx; Type: INDEX; Schema: public; Owner: -
 --
 

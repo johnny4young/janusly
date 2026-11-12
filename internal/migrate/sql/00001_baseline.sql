@@ -3722,6 +3722,7 @@ CREATE TABLE public.oauth_authorization_requests (
 );
 CREATE UNIQUE INDEX oauth_requests_code_idx ON public.oauth_authorization_requests (code_digest) WHERE code_digest IS NOT NULL;
 CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests (expires_at);
+CREATE INDEX oauth_requests_pending_idx ON public.oauth_authorization_requests (oauth_client_id, created_at) WHERE status = 'pending';
 
 -- An agent's proposed workflow document. A draft is never a version: nothing
 -- routes, schedules or triggers it until a publication appends it.

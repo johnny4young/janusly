@@ -38,6 +38,8 @@ const (
 	maxUnusedClients = 1000
 	// maxPendingPerClient bounds the unanswered requests one registration holds.
 	maxPendingPerClient = 20
+	// maxPendingRequests bounds every unanswered request stored at once.
+	maxPendingRequests = 10000
 	// evictionMinAge keeps a registration from being evicted mid-flow.
 	evictionMinAge = 10 * time.Minute
 	maxFormBytes   = 8 << 10

@@ -173,6 +173,10 @@ func (s *service) authorize(w http.ResponseWriter, r *http.Request) {
 			fail("temporarily_unavailable", "too many pending requests for this client; retry later")
 			return
 		}
+		// A total ceiling too: past it the oldest unanswered request makes room.
+		if total, err := q.CountAllPendingOAuthRequests(r.Context()); err == nil && total >= maxPendingRequests {
+			_ = q.EvictOldestPendingOAuthRequest(r.Context())
+		}
 		request, err := q.InsertOAuthRequest(r.Context(), store.InsertOAuthRequestParams{
 			ID: uuid.NewString(), OauthClientID: client.ID, RedirectUri: redirect,
 			CodeChallenge: query.Get("code_challenge"), Scopes: scopes, State: state,

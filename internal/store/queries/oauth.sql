@@ -85,17 +85,26 @@ WHERE oauth_client_id IS NOT NULL AND access_expires_at IS NULL AND revoked_at I
 SELECT count(*)::int FROM oauth_authorization_requests
 WHERE oauth_client_id = sqlc.arg(oauth_client_id) AND status = 'pending' AND expires_at > sqlc.arg(now)::timestamptz;
 
--- Makes room for a new registration by dropping the oldest one nobody used.
--- One still inside its first minutes, or with a request waiting for consent,
--- is a flow in progress and is never evicted.
+-- Makes room for a new registration by dropping one nobody used: first the
+-- oldest without a request waiting for consent, else the oldest. One still in
+-- its first minutes is a flow in progress and is never evicted.
 -- name: EvictOldestUnusedOAuthClient :execrows
 DELETE FROM oauth_clients WHERE id = (
   SELECT c.id FROM oauth_clients c
   WHERE c.last_used_at IS NULL AND c.created_at < sqlc.arg(settled_before)::timestamptz
-    AND NOT EXISTS (
+  ORDER BY EXISTS (
       SELECT 1 FROM oauth_authorization_requests r
-      WHERE r.oauth_client_id = c.id AND r.status = 'pending' AND r.expires_at > sqlc.arg(now)::timestamptz)
-  ORDER BY c.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+      WHERE r.oauth_client_id = c.id AND r.status = 'pending' AND r.expires_at > sqlc.arg(now)::timestamptz),
+    c.created_at
+  LIMIT 1 FOR UPDATE SKIP LOCKED
+);
+
+-- name: CountAllPendingOAuthRequests :one
+SELECT count(*)::int FROM oauth_authorization_requests WHERE status = 'pending';
+
+-- name: EvictOldestPendingOAuthRequest :exec
+DELETE FROM oauth_authorization_requests WHERE id = (
+  SELECT id FROM oauth_authorization_requests WHERE status = 'pending' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
 );
 
 -- A replayed code or refresh token ends the grant.
