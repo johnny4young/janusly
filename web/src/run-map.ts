@@ -147,10 +147,11 @@ export function laneStepLabel(step: LaneStep): LaneStepLabel {
   const name = laneAgent(step) ?? ''
   const session = SESSION_LABELS[type]
   if (session) return { key: session, params: {} }
-  if (type === 'agent.subagent.started') return { key: 'multiAgent.agentStarted', params: { name } }
-  if (type === 'agent.subagent.stopped') return { key: 'multiAgent.agentCompleted', params: { name } }
+  if (type === 'agent.subagent.started') return { key: 'agentSessions.step.subagentStarted', params: {} }
+  if (type === 'agent.subagent.stopped') return { key: 'agentSessions.step.subagentStopped', params: {} }
   if (type === 'agent.tool.requested') return { key: 'multiAgent.toolStarted', params: { tool } }
   if (type === 'agent.tool.completed' && step.status === 'denied') return { key: 'agentSessions.step.toolDenied', params: { tool } }
+  if (type === 'agent.tool.completed' && step.status === 'error') return { key: 'agentSessions.step.toolFailed', params: { tool } }
   if (type === 'multi_agent.started') return { key: 'runWorkspace.lanes.step.teamStarted', params: {} }
   if (type === 'multi_agent.completed') return { key: 'multiAgent.teamCompleted', params: {} }
   if (type === 'multi_agent.agent.started') return { key: 'multiAgent.agentStarted', params: { name } }

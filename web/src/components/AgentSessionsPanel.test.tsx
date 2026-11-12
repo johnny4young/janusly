@@ -57,7 +57,8 @@ describe('<AgentSessionsPanel />', () => {
     expect(sub.dataset.depth).toBe('1')
     expect(within(sub).getByText('Live')).toBeVisible()
     expect(within(main).getByText('Session started')).toBeVisible()
-    expect(screen.getByTestId('agent-session-totals')).toHaveTextContent('1 errors')
+    expect(within(sub).getByText('mcp__notion__search failed')).toBeVisible()
+    expect(screen.getByTestId('agent-session-totals')).toHaveTextContent('Errors: 1')
     fireEvent.click(screen.getByRole('button', { name: 'Run run_8c1' }))
     expect(onOpenRun).toHaveBeenCalledWith('run_8c1')
 
