@@ -141,6 +141,19 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 		t.Fatalf("a viewer-rank role was offered decisions: %v", kinds)
 	}
 
+	// runs.start without runs.read must not list the organization's runs.
+	blind := "blind-" + suffix
+	exec(`INSERT INTO org_roles (id, org_id, name, inherits_from, granted_permissions) VALUES ($1, $2, 'blind-starter', 'editor', '["runs.start"]')`,
+		"role-blind-"+suffix, h.org)
+	exec(`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, $3, 'blind-starter')`, "m-"+blind, h.org, blind)
+	if kinds := inbox(blind); len(kinds) != 0 {
+		t.Fatalf("runs.start without runs.read listed runs: %v", kinds)
+	}
+	if res := h.callWithHeaders("GET", "/v1/needs-you", nil, "", as(blind)); res.status != 200 ||
+		len(res.body["data"].(map[string]any)["items"].([]any)) != 0 {
+		t.Fatalf("versioned needs-you without runs.read: %d %v", res.status, res.body)
+	}
+
 	// With a second person required, the agent's creator is not offered its publish request.
 	clientID := "client-" + suffix
 	exec(`INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)

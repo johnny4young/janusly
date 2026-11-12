@@ -111,3 +111,28 @@ func TestAgentGuardRefusesToolsOutsideItsCapabilities(t *testing.T) {
 		t.Fatalf("deps not bound to the agent: %+v", deps)
 	}
 }
+
+func TestGuardRefusesAToolThatNamesNoPermission(t *testing.T) {
+	operator := Deps{OrgID: "org-1", UserID: "operator-1", Permissions: map[string]bool{"workflows.read": true}}
+	for _, required := range [][]string{nil, {}, {""}} {
+		if allowed, _ := operator.guardToolAny(context.Background(), "workflows.list", required, false); allowed {
+			t.Fatalf("an empty permission list %q admitted the caller", required)
+		}
+	}
+	if allowed, message := operator.guardToolAny(context.Background(), "agent.info", nil, false); !allowed {
+		t.Fatalf("agent.info needs no business permission: %q", message)
+	}
+	principal := &agentclient.Principal{
+		ClientID: "client-1", OrgID: "org-1",
+		Capabilities: []agentclient.Capability{agentclient.CapabilityRead},
+		Tools:        agentclient.CeilingTools([]agentclient.Capability{agentclient.CapabilityRead}),
+		Permissions:  map[string]bool{},
+	}
+	agent := Deps{}.at(withCallActor(context.Background(), principal))
+	if allowed, message := agent.guardToolAny(context.Background(), "agent.info", nil, false); !allowed {
+		t.Fatalf("a demoted agent must still read agent.info: %q", message)
+	}
+	if allowed, _ := agent.guardToolAny(context.Background(), "workflows.list", nil, false); allowed {
+		t.Fatal("an agent reached a business tool without a permission")
+	}
+}

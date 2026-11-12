@@ -60,7 +60,8 @@ jobs:
           run_install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.18.0
+          node-version-file: .nvmrc
+          check-latest: true
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -105,7 +106,8 @@ jobs:
         run: make recovery-local-selftest
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.18.0
+          node-version-file: .nvmrc
+          check-latest: true
       - name: Generated files leave no drift
         # Every `make generate` output, not just the Go ones: the pricing
         # table and the OpenAPI-derived TypeScript types and guards are tracked files too.
@@ -179,7 +181,8 @@ jobs:
           run_install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.18.0
+          node-version-file: .nvmrc
+          check-latest: true
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile
@@ -303,7 +306,8 @@ jobs:
           run_install: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.18.0
+          node-version-file: .nvmrc
+          check-latest: true
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The JavaScript toolchain requires Node.js 26 LTS (26.13.1 or newer). Node 26
+  no longer bundles corepack, so install it before `corepack enable`.
+- Agent access is tighter. The "needs you" feed (`GET /needs-you`,
+  `GET /v1/needs-you`) lists approval, form and tool-approval steps only to
+  people who also hold `runs.read`, so a custom role with only `runs.start` no
+  longer sees the organization's run, step and tool ids. An MCP tool that names
+  no permission is now refused instead of admitted; `agent.info` stays open to
+  every agent client. Each rejected agent token, on remote MCP or with
+  `JANUSLY_AGENT_TOKEN`, writes an `mcp.auth.rejected` audit row with the
+  reason and never the token, and remote MCP answers 429 after 20 rejected
+  tokens in a minute from one address. With `JANUSLY_TRUSTED_PROXY=true`, every
+  per-address limit (remote MCP, SSO start, public status pages) now keys on
+  the last `X-Forwarded-For` hop, the one your proxy wrote, so a client can no
+  longer choose its own bucket by sending the header itself. A database failure while checking an
+  agent token no longer reaches the MCP client; it gets a fixed "temporarily
+  unavailable" message and the detail stays in the server log.
 - Workflow pause and resume hold up under races. A pause that lands while a
   resume is starting held events stops the rest of that batch; a held event
   whose start fails goes back to the queue for the next resume instead of
