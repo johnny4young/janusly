@@ -36,7 +36,7 @@ creates in Settings or through `POST /agent-clients`:
 | `name` | Shown in audit, approvals and the run map |
 | `capabilities` | The ceiling: any of `read`, `propose`, `test`, `publish`, `operate`, `report` |
 | `scope` | Optional workflow ids and workflow tags; empty means the whole organization |
-| `expiresAt` | Required, at most 90 days ahead; default 30 days |
+| `expiresAt` | Required, at most 90 days (2160 hours) ahead; default 30 days |
 | `rateLimitPerMinute` | Calls per minute across every tool; default 120, at most 600 |
 | `createdBy` | The person the client acts for |
 | `revokedAt` | Set by revoke; effective on the next request |
@@ -46,7 +46,9 @@ once at creation or rotation. The database keeps only its SHA-256 digest and
 last four characters; lookup is by digest, so no comparison runs on the
 plaintext. The fixed prefix lets secret scanners recognise a leaked token.
 Rotation replaces the token immediately and keeps the client id, so audit
-history stays continuous. Only the creator rotates: the new token acts with
+history stays continuous. An expired client ends like a revoked one: rotating
+it is refused with `agent_client_expired`, and the person creates a new
+client. Only the creator rotates: the new token acts with
 the creator's authority, so nobody else may hold it.
 
 Managing clients needs two new catalog permissions: `agents.read` (viewer and

@@ -3,9 +3,12 @@
 package agentclients
 
 import (
+	"encoding/base64"
 	"errors"
 	"maps"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,17 +78,62 @@ func requirePerson(rc httpkit.Request) *httpkit.Result {
 	return nil
 }
 
+// maxListPage is also the default page, so a caller that ignores the cursor
+// sees what it saw before pagination.
+const maxListPage = 200
+
 func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
-	rows, err := store.New(s.pool).ListAgentClients(r.Context(), rc.OrgID)
+	limit := maxListPage
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxListPage {
+			return httpkit.Error(http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 200", nil)
+		}
+		limit = parsed
+	}
+	beforeAt, beforeID := time.Date(9999, time.January, 1, 0, 0, 0, 0, time.UTC), ""
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		at, id, ok := decodeCursor(raw)
+		if !ok {
+			return httpkit.Error(http.StatusBadRequest, "invalid_cursor", "cursor is not one this list returned", nil)
+		}
+		beforeAt, beforeID = at, id
+	}
+	rows, err := store.New(s.pool).ListAgentClients(r.Context(), store.ListAgentClientsParams{
+		OrgID: rc.OrgID, BeforeCreatedAt: beforeAt, BeforeID: beforeID, PageLimit: int32(limit + 1),
+	})
 	if err != nil {
 		return internalError()
+	}
+	var next any
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[limit-1]
+		next = encodeCursor(last.CreatedAt, last.ID)
 	}
 	now := s.now()
 	clients := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		clients = append(clients, view(row, now))
 	}
-	return httpkit.OK(map[string]any{"clients": clients})
+	return httpkit.OK(map[string]any{"clients": clients, "nextCursor": next})
+}
+
+func encodeCursor(createdAt time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(createdAt.UTC().Format(time.RFC3339Nano) + "|" + id))
+}
+
+func decodeCursor(raw string) (time.Time, string, bool) {
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	at, id, found := strings.Cut(string(decoded), "|")
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if !found || err != nil || id == "" {
+		return time.Time{}, "", false
+	}
+	return parsed, id, true
 }
 
 type createBody struct {
@@ -154,6 +202,10 @@ func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
 		}
 	}
 	now := s.now()
+	// Expiry ends a client like revocation does; rotation never revives it.
+	if existing.RevokedAt == nil && !now.Before(existing.ExpiresAt) {
+		return httpkit.Error(http.StatusConflict, "agent_client_expired", "agent client has expired; create a new one", nil)
+	}
 	issued, err := agentclient.Rotate(r.Context(), store.New(s.pool), rc.OrgID, existing.ID, now, body.ExpiresInDays)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return revokedConflict()

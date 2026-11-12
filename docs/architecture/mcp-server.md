@@ -48,9 +48,12 @@ does not maintain another task store.
 
 An agent client is an organization's credential for one external agent,
 created by a member through `POST /agent-clients` (`agents.write`) and listed
-with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
+with `GET /agent-clients` (`agents.read`), newest first, up to `limit` (at
+most and by default 200) per page; `nextCursor` is the opaque `cursor` for the
+next page. The token (`jly_agent_…`) is shown
 once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
-is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator may
+is stored. `POST /agent-clients/{id}/revoke` ends it, and so does expiry: an
+expired client cannot be rotated. Only the creator may
 rotate, the creator or an admin may revoke, and service tokens can manage none.
 
 A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,

@@ -18,15 +18,17 @@ SELECT * FROM agent_clients WHERE org_id = $1 AND id = $2;
 
 -- name: ListAgentClients :many
 SELECT * FROM agent_clients
-WHERE org_id = $1
+WHERE org_id = sqlc.arg(org_id)
+  AND (created_at, id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_id)::text)
 ORDER BY created_at DESC, id DESC
-LIMIT 200;
+LIMIT sqlc.arg(page_limit);
 
 -- name: RotateAgentClientToken :one
 UPDATE agent_clients
 SET token_digest = sqlc.arg(token_digest), token_last4 = sqlc.arg(token_last4),
     token_issued_at = sqlc.arg(token_issued_at), expires_at = sqlc.arg(expires_at)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND revoked_at IS NULL
+  AND expires_at > sqlc.arg(token_issued_at)
 RETURNING *;
 
 -- name: RevokeAgentClient :one

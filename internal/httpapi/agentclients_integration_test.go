@@ -94,3 +94,92 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 		t.Fatalf("lifecycle audit: %d rows, metadata %s", audited, metadata)
 	}
 }
+
+func seedAgentClientCreator(t *testing.T, h *apiHarness, role string) map[string]string {
+	t.Helper()
+	user := fmt.Sprintf("%s-%d", role, time.Now().UnixNano())
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, $3, $4)`,
+		"m-"+user, h.org, user, role); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"x-user-id": user}
+}
+
+// Rotation never revives an expired client: its token and expiry stay as they were.
+func TestAgentClientRotationRefusesAnExpiredClient(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	as := seedAgentClientCreator(t, h, "editor")
+	created := h.callWithHeaders("POST", "/agent-clients", map[string]any{"name": "expired", "capabilities": []string{"read"}}, "", as)
+	if created.status != 201 {
+		t.Fatalf("create: %d %v", created.status, created.body)
+	}
+	clientID := created.body["client"].(map[string]any)["id"].(string)
+	pool := testPool(t)
+	if _, err := pool.Exec(t.Context(), `UPDATE agent_clients SET token_issued_at = now() - interval '10 days',
+		expires_at = now() - interval '1 day' WHERE org_id = $1 AND id = $2`, h.org, clientID); err != nil {
+		t.Fatal(err)
+	}
+	var before time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT expires_at FROM agent_clients WHERE id = $1`, clientID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	rotated := h.callWithHeaders("POST", "/agent-clients/"+clientID+"/rotate", map[string]any{"expiresInDays": 30}, "", as)
+	if rotated.status != 409 || rotated.body["code"] != "agent_client_expired" || rotated.body["token"] != nil {
+		t.Fatalf("rotating an expired client: %d %v", rotated.status, rotated.body)
+	}
+	var after time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT expires_at FROM agent_clients WHERE id = $1`, clientID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.Equal(before) {
+		t.Fatalf("a refused rotation moved the expiry: %s -> %s", before, after)
+	}
+}
+
+// The client list pages by an opaque cursor, newest first.
+func TestAgentClientListPagesByCursor(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	as := seedAgentClientCreator(t, h, "editor")
+	var ids []string
+	for i := range 3 {
+		created := h.callWithHeaders("POST", "/agent-clients", map[string]any{"name": fmt.Sprintf("client %d", i), "capabilities": []string{"read"}}, "", as)
+		if created.status != 201 {
+			t.Fatalf("create %d: %d %v", i, created.status, created.body)
+		}
+		ids = append(ids, created.body["client"].(map[string]any)["id"].(string))
+	}
+	page := func(query string) ([]string, any) {
+		t.Helper()
+		res := h.callWithHeaders("GET", "/agent-clients"+query, nil, "", as)
+		if res.status != 200 {
+			t.Fatalf("list %s: %d %v", query, res.status, res.body)
+		}
+		var got []string
+		for _, client := range res.body["clients"].([]any) {
+			got = append(got, client.(map[string]any)["id"].(string))
+		}
+		return got, res.body["nextCursor"]
+	}
+
+	first, cursor := page("?limit=2")
+	if fmt.Sprint(first) != fmt.Sprint([]string{ids[2], ids[1]}) {
+		t.Fatalf("first page: %v, want %v", first, []string{ids[2], ids[1]})
+	}
+	next, ok := cursor.(string)
+	if !ok || next == "" || strings.Contains(next, ids[1]) {
+		t.Fatalf("first page cursor must be opaque: %v", cursor)
+	}
+	second, end := page("?limit=2&cursor=" + next)
+	if fmt.Sprint(second) != fmt.Sprint([]string{ids[0]}) || end != nil {
+		t.Fatalf("second page: %v next=%v", second, end)
+	}
+	if all, more := page(""); len(all) != 3 || more != nil {
+		t.Fatalf("default page: %v next=%v", all, more)
+	}
+	for _, bad := range []string{"?cursor=not-a-cursor", "?limit=0", "?limit=abc"} {
+		if res := h.callWithHeaders("GET", "/agent-clients"+bad, nil, "", as); res.status != 400 {
+			t.Fatalf("list %s: %d %v", bad, res.status, res.body)
+		}
+	}
+}
