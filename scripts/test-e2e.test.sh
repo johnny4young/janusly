@@ -58,7 +58,8 @@ jq -e '.specs == [
   "e2e/workflow.spec.ts", "e2e/workflow-data-contracts.spec.ts",
   "e2e/workflow-folders.spec.ts", "e2e/workflow-language.spec.ts",
   "e2e/workflow-tags.spec.ts", "e2e/workflow-trash.spec.ts",
-  "e2e/compressed-assets.spec.ts"
+  "e2e/compressed-assets.spec.ts",
+  "e2e/publish-requests.spec.ts"
 ]' <<<"$result" >/dev/null || { echo "lane spec selection drifted from the expected list" >&2; exit 1; }
 while IFS= read -r spec; do
   [[ -f "$root/web/$spec" ]] || { echo "lane selects a missing spec: $spec" >&2; exit 1; }

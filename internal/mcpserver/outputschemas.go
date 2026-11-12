@@ -44,7 +44,7 @@ var outputSchemas = map[string]*jsonschema.Schema{
 		"publishRequestId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
 		"draftId": {kind: "string", required: true}, "status": {kind: "string", required: true},
 		"reasons": {kind: "array", required: true}, "expiresAt": {kind: "string", required: true},
-		"versionId": {kind: "string"}, "decidedAt": {kind: "string"},
+		"versionId": {kind: "string"}, "decidedAt": {kind: "string"}, "reason": {kind: "string"},
 	}),
 	"credentials.request": outputObject(fields{
 		"name": {kind: "string", required: true}, "kind": {kind: "string"},

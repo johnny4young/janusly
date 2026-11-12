@@ -357,4 +357,12 @@ var Routes = []Route{
 		Response: agentGateDecision},
 	{Method: "GET", Path: "/v1/needs-you", Summary: "Decisions waiting on the signed-in person",
 		Response: needsYou},
+	{Method: "GET", Path: "/v1/publish-requests", Summary: "The organization's latest agent publish requests, each with whether the caller may decide it",
+		Response: closedObj(map[string]any{"requests": arr(publishRequest)}, "requests")},
+	{Method: "GET", Path: "/v1/publish-requests/{id}", Summary: "One publish request in decision order: effects, reasons, changes, documents and qualification",
+		Response: publishRequestDetail},
+	{Method: "POST", Path: "/v1/publish-requests/{id}/approve", Summary: "Approve and publish an agent's draft",
+		Request: publishDecision, Response: closedObj(map[string]any{"request": publishRequest}, "request")},
+	{Method: "POST", Path: "/v1/publish-requests/{id}/reject", Summary: "Reject an agent's publish request; the agent reads the reason in publish.status",
+		Request: publishDecision, Response: closedObj(map[string]any{"request": publishRequest}, "request")},
 }

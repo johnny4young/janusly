@@ -108,9 +108,9 @@ func TestAgentPublishesThroughTheGate(t *testing.T) {
 	publishrequests.Mount(mux, publishrequests.Deps{Pool: pool, Engine: eng, Audit: audit.Writer{}, Routes: personRoutes{}})
 	people := httptest.NewServer(mux)
 	t.Cleanup(people.Close)
-	decide := func(user, requestID, verb string) (int, map[string]any) {
+	decideWith := func(user, requestID, verb string, payload io.Reader) (int, map[string]any) {
 		t.Helper()
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, people.URL+"/publish-requests/"+requestID+"/"+verb, nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, people.URL+"/publish-requests/"+requestID+"/"+verb, payload)
 		req.Header.Set("x-org-id", tenant.org)
 		req.Header.Set("x-user-id", user)
 		res, err := http.DefaultClient.Do(req)
@@ -121,6 +121,10 @@ func TestAgentPublishesThroughTheGate(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(res.Body).Decode(&body)
 		return res.StatusCode, body
+	}
+	decide := func(user, requestID, verb string) (int, map[string]any) {
+		t.Helper()
+		return decideWith(user, requestID, verb, nil)
 	}
 
 	// A draft without a contract or fixtures fails the gate with repairable checks.
@@ -253,8 +257,13 @@ func TestAgentPublishesThroughTheGate(t *testing.T) {
 		t.Fatalf("an unreadable second-person setting allowed an approval: %d %v", status, body)
 	}
 	setPolicy(`true`)
-	if status, body := decide(reviewer, freshRequest, "reject"); status != http.StatusOK || body["request"].(map[string]any)["status"] != "rejected" {
+	if status, body := decideWith(reviewer, freshRequest, "reject", strings.NewReader(`{"reason":"Keep the retry limit"}`)); status != http.StatusOK ||
+		body["request"].(map[string]any)["status"] != "rejected" {
 		t.Fatalf("a second person's rejection: %d %v", status, body)
+	}
+	if _, status, _ := gateCall(t, session, "publish.status", map[string]any{"publishRequestId": freshRequest}); status["status"] != "rejected" ||
+		status["reason"] != "Keep the retry limit" {
+		t.Fatalf("the agent must read why its request was rejected: %v", status)
 	}
 	if status, _ := decide(reviewer, freshRequest, "approve"); status != http.StatusConflict {
 		t.Fatalf("a settled request was decided again: %d", status)

@@ -1654,6 +1654,10 @@ export interface ApiRequests {
   "GET /needs-you": undefined
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": undefined
+  /** The organization's latest agent publish requests, each with whether the caller may decide it */
+  "GET /publish-requests": undefined
+  /** One publish request in decision order: effects, reasons, changes, documents and qualification */
+  "GET /publish-requests/{id}": undefined
   /** List bounded semantic recovery cases */
   "GET /recovery/cases": undefined
   /** Inspect one governed semantic recovery case */
@@ -1759,6 +1763,14 @@ export interface ApiRequests {
     "recoveryPlaybookId"?: string
     "suggestedWorkflow": WorkflowDoc
     "validationEffectMode"?: string
+  }
+  /** Approve and publish an agent's draft */
+  "POST /publish-requests/{id}/approve": {
+    "reason"?: string
+  }
+  /** Reject an agent's publish request; the agent reads the reason in publish.status */
+  "POST /publish-requests/{id}/reject": {
+    "reason"?: string
   }
   /** Apply an approved immutable recovery candidate */
   "POST /recovery/cases/{caseId}/apply": RecoveryApprovalBindingRequest
@@ -1908,6 +1920,98 @@ export interface ApiResponses {
   "GET /needs-you": NeedsYou
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": OperatorBrief
+  /** The organization's latest agent publish requests, each with whether the caller may decide it */
+  "GET /publish-requests": {
+    "requests": ({
+      "createdAt": string
+      "decidedAt": string | null
+      "decidedBy": string | null
+      "decisionReason": string | null
+      "draftId": string
+      "draftedBy": string
+      "drafterName": string | null
+      "expiresAt": string
+      "id": string
+      "onBehalfOf": string
+      "proposedName": string | null
+      "publishedVersionId": string | null
+      "qualificationId": string
+      "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
+      "requestedBy": string
+      "requesterName": string | null
+      "status": "pending" | "published" | "rejected" | "expired" | "superseded"
+      "viewer": {
+        "canDecide": boolean
+        "refusal": "settled" | "permission" | "requester" | "second_person" | "creator_unknown" | "policy_unavailable" | "stale" | "stale_base" | null
+      }
+      "workflowId": string
+      "workflowName": string | null
+    })[]
+  }
+  /** One publish request in decision order: effects, reasons, changes, documents and qualification */
+  "GET /publish-requests/{id}": {
+    "changes": {
+      "outputsRemoved": string[]
+      "stepsRemoved": string[]
+      "triggersChanged": string[]
+    } | null
+    "current"?: {
+      "document": WorkflowDoc
+      "version": number
+      "versionId": string
+    }
+    "effects": ({
+      "credentials": string[]
+      "kind": "step" | "outputs"
+      "nodeId": string
+      "target": string
+      "tool": string
+      "type": string
+      "writes": boolean
+    })[] | null
+    "proposed": WorkflowDoc
+    "qualification": {
+      "checks": ({
+        "code": string
+        "fix"?: string
+        "message": string
+        "path"?: string
+        "status": "passed" | "failed"
+      })[]
+      "fixtureRuns": ({
+        "detail"?: string
+        "fixture": string
+        "runId"?: string
+        "status": "running" | "passed" | "failed"
+      })[]
+      "status": "running" | "passed" | "failed"
+    }
+    "request": {
+      "createdAt": string
+      "decidedAt": string | null
+      "decidedBy": string | null
+      "decisionReason": string | null
+      "draftId": string
+      "draftedBy": string
+      "drafterName": string | null
+      "expiresAt": string
+      "id": string
+      "onBehalfOf": string
+      "proposedName": string | null
+      "publishedVersionId": string | null
+      "qualificationId": string
+      "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
+      "requestedBy": string
+      "requesterName": string | null
+      "status": "pending" | "published" | "rejected" | "expired" | "superseded"
+      "viewer": {
+        "canDecide": boolean
+        "refusal": "settled" | "permission" | "requester" | "second_person" | "creator_unknown" | "policy_unavailable" | "stale" | "stale_base" | null
+      }
+      "workflowId": string
+      "workflowName": string | null
+    }
+  }
   /** List bounded semantic recovery cases */
   "GET /recovery/cases": {
     "cases": RecoveryCase[]
@@ -2150,6 +2254,62 @@ export interface ApiResponses {
   "POST /dlq/validate-fix": {
     "runId": string
   }
+  /** Approve and publish an agent's draft */
+  "POST /publish-requests/{id}/approve": {
+    "request": {
+      "createdAt": string
+      "decidedAt": string | null
+      "decidedBy": string | null
+      "decisionReason": string | null
+      "draftId": string
+      "draftedBy": string
+      "drafterName": string | null
+      "expiresAt": string
+      "id": string
+      "onBehalfOf": string
+      "proposedName": string | null
+      "publishedVersionId": string | null
+      "qualificationId": string
+      "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
+      "requestedBy": string
+      "requesterName": string | null
+      "status": "pending" | "published" | "rejected" | "expired" | "superseded"
+      "viewer": {
+        "canDecide": boolean
+        "refusal": "settled" | "permission" | "requester" | "second_person" | "creator_unknown" | "policy_unavailable" | "stale" | "stale_base" | null
+      }
+      "workflowId": string
+      "workflowName": string | null
+    }
+  }
+  /** Reject an agent's publish request; the agent reads the reason in publish.status */
+  "POST /publish-requests/{id}/reject": {
+    "request": {
+      "createdAt": string
+      "decidedAt": string | null
+      "decidedBy": string | null
+      "decisionReason": string | null
+      "draftId": string
+      "draftedBy": string
+      "drafterName": string | null
+      "expiresAt": string
+      "id": string
+      "onBehalfOf": string
+      "proposedName": string | null
+      "publishedVersionId": string | null
+      "qualificationId": string
+      "reasons": ("writes" | "first_publish" | "outbound" | "callers" | "triggers_changed" | "steps_removed" | "outputs_removed")[]
+      "requestedBy": string
+      "requesterName": string | null
+      "status": "pending" | "published" | "rejected" | "expired" | "superseded"
+      "viewer": {
+        "canDecide": boolean
+        "refusal": "settled" | "permission" | "requester" | "second_person" | "creator_unknown" | "policy_unavailable" | "stale" | "stale_base" | null
+      }
+      "workflowId": string
+      "workflowName": string | null
+    }
+  }
   /** Apply an approved immutable recovery candidate */
   "POST /recovery/cases/{caseId}/apply": {
     "decision": string
@@ -2280,6 +2440,10 @@ export interface ApiSuccessStatuses {
   "GET /needs-you": 200
   /** Bounded deterministic Operator Brief shared by UI and MCP */
   "GET /operations/brief": 200
+  /** The organization's latest agent publish requests, each with whether the caller may decide it */
+  "GET /publish-requests": 200
+  /** One publish request in decision order: effects, reasons, changes, documents and qualification */
+  "GET /publish-requests/{id}": 200
   /** List bounded semantic recovery cases */
   "GET /recovery/cases": 200
   /** Inspect one governed semantic recovery case */
@@ -2350,6 +2514,10 @@ export interface ApiSuccessStatuses {
   "POST /dlq/resolve": 200
   /** Start a write-suppressed validation replay for a proposed fix */
   "POST /dlq/validate-fix": 200
+  /** Approve and publish an agent's draft */
+  "POST /publish-requests/{id}/approve": 200
+  /** Reject an agent's publish request; the agent reads the reason in publish.status */
+  "POST /publish-requests/{id}/reject": 200
   /** Apply an approved immutable recovery candidate */
   "POST /recovery/cases/{caseId}/apply": 200
   /** Create a 30-minute one-use human approval */
