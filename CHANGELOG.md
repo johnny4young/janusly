@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Workflow pause and resume hold up under races. A pause that lands while a
+  resume is starting held events stops the rest of that batch; a held event
+  whose start fails goes back to the queue for the next resume instead of
+  staying stuck; and a replay campaign no longer replays an item when the
+  workflow's pause state cannot be read. A pause reason that is only spaces
+  or control characters is recorded as no reason, and the MCP
+  `workflows.pause` tool refuses a reason over 500 characters with
+  `invalid_argument`, as the HTTP route does, instead of cutting it short.
+- Agent clients: an expired client can no longer be rotated back to life;
+  rotating it answers `409 agent_client_expired`, so create a new client
+  instead. A 90-day client is no longer refused when its lifetime crosses a
+  daylight-saving change. `GET /agent-clients` pages with `limit` (default and
+  maximum 200) and the `nextCursor` it returns.
+- Run map: the form dialog stays bound to the form it opened. If the step's
+  form changes or the step stops waiting, the dialog closes instead of
+  sending your answers with the new form, and it no longer reopens by itself.
+  An agent lane that holds more than its latest 200 events now says so, and
+  the run map's `lanes[].truncated` reports it. The needs-you inbox reads tool
+  approvals through an index on the organization.
 - While development auth headers are accepted (no identity provider outside
   production, or `ALLOW_DEV_AUTH_HEADERS=true`), the API now listens on
   `127.0.0.1` by default and refuses to start on `0.0.0.0` or `::` unless
