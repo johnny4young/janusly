@@ -35,7 +35,15 @@ type SaveWorkflowVersionInput struct {
 	UpstreamHealthSources         json.RawMessage
 	UpstreamHealthSourcesProvided bool
 	NewID                         func() string
+	// ExpectedBaseVersionID, when set, makes the save fail with
+	// ErrWorkflowSaveBaseMoved unless the latest version is still this one
+	// ("" means none), checked under the workflow lock.
+	ExpectedBaseVersionID *string
 }
+
+// ErrWorkflowSaveBaseMoved rejects a save built on a version that is no
+// longer the latest.
+var ErrWorkflowSaveBaseMoved = errors.New("workflow gained a version since the expected base")
 
 type SaveWorkflowVersionResult struct {
 	VersionID string
@@ -134,6 +142,21 @@ func (e *Engine) saveWorkflowVersionAttempt(
 		return SaveWorkflowVersionResult{}, err
 	}
 
+	if input.ExpectedBaseVersionID != nil {
+		current := ""
+		latest, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
+			WorkflowID: input.Workflow.ID, OrgID: input.OrgID,
+		})
+		switch {
+		case err == nil:
+			current = latest.ID
+		case !errors.Is(err, pgx.ErrNoRows):
+			return SaveWorkflowVersionResult{}, err
+		}
+		if current != *input.ExpectedBaseVersionID {
+			return SaveWorkflowVersionResult{}, ErrWorkflowSaveBaseMoved
+		}
+	}
 	if _, err := q.FindActiveWorkflowRollout(ctx, store.FindActiveWorkflowRolloutParams{
 		OrgID: input.OrgID, WorkflowID: input.Workflow.ID,
 	}); err == nil {

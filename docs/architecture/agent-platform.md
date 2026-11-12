@@ -294,7 +294,8 @@ is therefore a production change. Draft tests run an unsaved document as a
 validation run with writes suppressed and optional stand-in step outputs;
 `workflows.assure` reports contract and fixture evidence for saved versions.
 
-The gate makes agent changes reach production only by publication:
+The gate makes agent changes reach production only by publication (built as
+described in `mcp-server.md`):
 
 1. **Draft.** `drafts.save` stores an immutable, content-addressed draft in a
    new `workflow_drafts` table. A draft is not a version: nothing routes,

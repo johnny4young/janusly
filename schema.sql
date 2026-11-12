@@ -382,6 +382,26 @@ CREATE TABLE public.dead_letters (
 
 
 --
+-- Name: draft_qualifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.draft_qualifications (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    draft_id text NOT NULL,
+    digest text NOT NULL,
+    status text NOT NULL,
+    checks jsonb NOT NULL,
+    fixture_runs jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT draft_qualifications_completed_check CHECK (((status = 'running'::text) = (completed_at IS NULL))),
+    CONSTRAINT draft_qualifications_status_check CHECK ((status = ANY (ARRAY['running'::text, 'passed'::text, 'failed'::text])))
+);
+
+
+--
 -- Name: eval_datasets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -828,6 +848,35 @@ CREATE TABLE public.prompts (
     created_by text,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
+);
+
+
+--
+-- Name: publish_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.publish_requests (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    draft_id text NOT NULL,
+    qualification_id text NOT NULL,
+    reasons text[] NOT NULL,
+    requested_by text NOT NULL,
+    on_behalf_of text NOT NULL,
+    drafted_by text NOT NULL,
+    scope_tag text,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    published_version_id text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT publish_requests_decision_check CHECK (((status = ANY (ARRAY['published'::text, 'rejected'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
+    CONSTRAINT publish_requests_published_check CHECK (((status = 'published'::text) = (published_version_id IS NOT NULL))),
+    CONSTRAINT publish_requests_reasons_check CHECK (((cardinality(reasons) >= 1) AND (reasons <@ ARRAY['writes'::text, 'first_publish'::text, 'outbound'::text, 'callers'::text]))),
+    CONSTRAINT publish_requests_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by))),
+    CONSTRAINT publish_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'published'::text, 'rejected'::text, 'expired'::text, 'superseded'::text])))
 );
 
 
@@ -1646,6 +1695,24 @@ CREATE TABLE public.workflow_budgets (
 
 
 --
+-- Name: workflow_drafts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.workflow_drafts (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    workflow_id text NOT NULL,
+    base_version_id text,
+    document jsonb NOT NULL,
+    fixtures jsonb DEFAULT '[]'::jsonb NOT NULL,
+    digest text NOT NULL,
+    created_by text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT workflow_drafts_digest_check CHECK ((char_length(digest) = 64))
+);
+
+
+--
 -- Name: workflow_improvements; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1901,6 +1968,14 @@ ALTER TABLE ONLY public.dead_letters
 
 
 --
+-- Name: draft_qualifications draft_qualifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.draft_qualifications
+    ADD CONSTRAINT draft_qualifications_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: eval_datasets eval_datasets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2082,6 +2157,14 @@ ALTER TABLE ONLY public.prompt_versions
 
 ALTER TABLE ONLY public.prompts
     ADD CONSTRAINT prompts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: publish_requests publish_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.publish_requests
+    ADD CONSTRAINT publish_requests_pkey PRIMARY KEY (id);
 
 
 --
@@ -2437,6 +2520,14 @@ ALTER TABLE ONLY public.workflow_budgets
 
 
 --
+-- Name: workflow_drafts workflow_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.workflow_drafts
+    ADD CONSTRAINT workflow_drafts_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: workflow_improvements workflow_improvements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2763,6 +2854,13 @@ CREATE INDEX dead_letters_recovery_search_trgm_idx ON public.dead_letters USING 
 
 
 --
+-- Name: draft_qualifications_draft_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX draft_qualifications_draft_idx ON public.draft_qualifications USING btree (org_id, draft_id, created_at DESC);
+
+
+--
 -- Name: eval_datasets_org_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3012,6 +3110,20 @@ CREATE INDEX prompts_org_created_id_idx ON public.prompts USING btree (org_id, c
 --
 
 CREATE UNIQUE INDEX prompts_org_name_idx ON public.prompts USING btree (org_id, name);
+
+
+--
+-- Name: publish_requests_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX publish_requests_live_idx ON public.publish_requests USING btree (org_id, workflow_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: publish_requests_org_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX publish_requests_org_created_idx ON public.publish_requests USING btree (org_id, created_at DESC, id DESC);
 
 
 --
@@ -3691,6 +3803,20 @@ CREATE UNIQUE INDEX verified_domains_org_domain_idx ON public.verified_domains U
 --
 
 CREATE UNIQUE INDEX workflow_budgets_org_workflow_idx ON public.workflow_budgets USING btree (org_id, workflow_id);
+
+
+--
+-- Name: workflow_drafts_digest_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX workflow_drafts_digest_idx ON public.workflow_drafts USING btree (org_id, workflow_id, created_by, digest);
+
+
+--
+-- Name: workflow_drafts_org_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts USING btree (org_id, created_at DESC, id DESC);
 
 
 --

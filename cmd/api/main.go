@@ -302,6 +302,7 @@ func run() error {
 		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
 			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
 			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,
+			WebBaseURL: os.Getenv("JANUSLY_WEB_BASE_URL"),
 		}, mcpserver.HTTPOptions{
 			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
 		})

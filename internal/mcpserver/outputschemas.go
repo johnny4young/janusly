@@ -10,6 +10,39 @@ import (
 // can rely on field names and types. Nested values stay open; the SDK checks
 // every successful result against its schema.
 var outputSchemas = map[string]*jsonschema.Schema{
+	"drafts.save": outputObject(fields{
+		"draftId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
+		"digest": {kind: "string", required: true}, "unchanged": {kind: "boolean", required: true},
+		"newWorkflow": {kind: "boolean", required: true}, "fixtures": {kind: "integer", required: true},
+		"validation": {kind: "object", required: true}, "next": {kind: "string"},
+	}),
+	"drafts.get": outputObject(fields{
+		"draftId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
+		"digest": {kind: "string", required: true}, "baseVersionId": {kind: "string"},
+		"createdBy": {kind: "string"}, "createdAt": {kind: "string"},
+		"document": {kind: "object", required: true}, "fixtures": {kind: "array", required: true},
+	}),
+	"drafts.list": pageObject("drafts"),
+	"workflows.test": outputObject(fields{
+		"runId": {kind: "string", required: true}, "writesSuppressed": {kind: "boolean", required: true}, "next": {kind: "string"},
+	}),
+	"workflows.qualify":  qualificationObject(),
+	"qualifications.get": qualificationObject(),
+	"workflows.publish": outputObject(fields{
+		"status": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
+		"versionId": {kind: "string"}, "version": {kind: "integer"}, "publishRequestId": {kind: "string"},
+		"reasons": {kind: "array"}, "expiresAt": {kind: "string"}, "next": {kind: "string"},
+	}),
+	"publish.status": outputObject(fields{
+		"publishRequestId": {kind: "string", required: true}, "workflowId": {kind: "string", required: true},
+		"draftId": {kind: "string", required: true}, "status": {kind: "string", required: true},
+		"reasons": {kind: "array", required: true}, "expiresAt": {kind: "string", required: true},
+		"versionId": {kind: "string"}, "decidedAt": {kind: "string"},
+	}),
+	"credentials.request": outputObject(fields{
+		"name": {kind: "string", required: true}, "kind": {kind: "string"},
+		"setupUrl": {kind: "string", required: true}, "message": {kind: "string", required: true},
+	}),
 	"agent.info": outputObject(fields{
 		"kind": {kind: "string", required: true}, "organizationId": {kind: "string", required: true},
 		"capabilities": {kind: "array", required: true}, "tools": {kind: "array", required: true},
@@ -149,5 +182,14 @@ func pageObject(rows string) *jsonschema.Schema {
 func activeObject() *jsonschema.Schema {
 	return outputObject(fields{
 		"workflowId": {kind: "string", required: true}, "active": {kind: "boolean", required: true},
+	})
+}
+
+func qualificationObject() *jsonschema.Schema {
+	return outputObject(fields{
+		"qualificationId": {kind: "string", required: true}, "draftId": {kind: "string", required: true},
+		"digest": {kind: "string", required: true}, "status": {kind: "string", required: true},
+		"checks": {kind: "array", required: true}, "fixtureRuns": {kind: "array", required: true},
+		"createdAt": {kind: "string"}, "next": {kind: "string"},
 	})
 }
