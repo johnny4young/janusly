@@ -66,7 +66,9 @@ document and a run's outputs with secret-shaped literals removed;
 `workflows.rollback`, `workflows.pause`, `workflows.resume`,
 `workflows.deactivate`, `workflows.reactivate` and `runs.cancel` complete the
 lifecycle under write consent. A pause keeps the workflow's schedules and
-rollout; deactivate moves it to the trash. Semantic recovery is exposed as bounded
+rollout; deactivate moves it to the trash. Only a person can lift a
+circuit-breaker pause, so `workflows.resume` refuses one with
+`permission_denied`. Semantic recovery is exposed as bounded
 inspect/diagnose/validate/apply tools; apply requires a separately created,
 unexpired human approval and the immutable candidate's additional permissions.
 Diagnose is deterministic without a provider and can use bounded AI enrichment

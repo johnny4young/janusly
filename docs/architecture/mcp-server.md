@@ -82,7 +82,8 @@ client, the creator (`onBehalfOf`) and the transport; rows written by the work
 it causes carry the same actor with mode `agent`. Wherever an agent caused a
 call (a start, a redrive, a fix), its creator counts as a requester of the
 call's tool approval, so the person accountable for an agent cannot approve its
-writes alone. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
+writes alone. Likewise the creator cannot approve a recovery fix whose
+candidate or validation the agent produced. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
 
 ## Publish gate
@@ -124,12 +125,17 @@ through the gate, whose tools return failures as
 4. `workflows.publish` (`publish`, a business write) takes a passed receipt
    for the same digest, at most 24 hours old; the digest covers the base
    version too. Only a workflow made of pure steps, already published, with
-   no output reading a secret, and called by no other workflow, is appended
-   at once through the canonical engine save. Anything else opens a publish
+   no output reading a secret, called by no other workflow, and taking
+   nothing from the live version is appended at once through the canonical
+   engine save. Anything else opens a publish
    request (`approval_required`) with reasons `first_publish`, `writes`,
    `outbound` (a step that is not pure, triggers included, because a read can
-   still carry data out) and `callers` (another workflow calls this one, so
-   the change reaches it). A newer request for the same workflow supersedes an
+   still carry data out), `callers` (another workflow calls this one, so
+   the change reaches it), and, against the live version, `triggers_changed`
+   (a trigger removed, added or reconfigured), `steps_removed` and
+   `outputs_removed`, so an agent cannot swap production for a no-op. The
+   response carries a `message` naming every reason and, for the last three,
+   `changes` with the trigger, step and output ids. A newer request for the same workflow supersedes an
    older one. The engine save compares the draft's base version under the
    workflow lock, so a draft whose workflow gained a version is refused as
    stale, even against a concurrent save.
@@ -301,7 +307,11 @@ recovery tools keep their withheld projections.
 `runs.cancel` (`runs.cancel`) call the same engine operations as the HTTP
 rollback, pause, resume, trash, restore and cancel routes. They are
 business writes, so they also need write consent, and deactivate and cancel are
-annotated destructive.
+annotated destructive. Neither an agent nor the stdio operator can lift a
+circuit-breaker pause: `workflows.resume` answers `permission_denied` and only
+a person resumes it, through the UI or `POST /workflows/{id}/resume` (which
+also refuses service tokens with
+`workflow_circuit_breaker_resume_requires_person`).
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.

@@ -105,8 +105,11 @@ impact attribution, and feedback.
   claim that downstream work was contained. Only quarantine findings carry a
   `detected -> contained` receipt and may accept a replacement output that
   resumes the same paused generation.
-- Approval is a human-authenticated UI/API action, never an MCP capability. Its
-  grant is bound to the organization, case, candidate, validation, and exact
+- Approval is a human-authenticated UI/API action, never an MCP capability.
+  The person who created the agent client that produced the candidate or its
+  validation cannot approve it (`recovery_self_approval`); another member must.
+  A fix the stdio operator prepared names no agent client, so no person is
+  excluded. Its grant is bound to the organization, case, candidate, validation, and exact
   case revision for exactly 30 minutes; it is consumed once or revoked by the
   next lifecycle change. Database constraints enforce the duration and mutually
   exclusive active, consumed, and revoked states. The authenticated HTTP case
