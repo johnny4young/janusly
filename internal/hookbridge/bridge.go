@@ -41,6 +41,11 @@ type Config struct {
 	Runtime string
 	Client  *http.Client
 	Now     func() time.Time
+	// GateWait bounds how long a gated tool call waits for a person.
+	GateWait time.Duration
+	// Gated marks a hook whose client lists gateTools: when Janusly cannot
+	// say whether a call is gated, the hook asks instead of staying silent.
+	Gated bool
 }
 
 // ConfigFromEnv reads JANUSLY_URL and the token from JANUSLY_AGENT_TOKEN_FILE
@@ -52,8 +57,14 @@ func ConfigFromEnv(getenv func(string) string, args []string) Config {
 			cfg.Token = strings.TrimSpace(string(raw))
 		}
 	}
+	cfg.GateWait = DefaultGateWait
+	if seconds, err := strconv.Atoi(strings.TrimSpace(getenv("JANUSLY_HOOK_GATE_SECONDS"))); err == nil {
+		cfg.GateWait = min(max(time.Duration(seconds)*time.Second, 0), MaxGateWait)
+	}
 	for _, arg := range args {
 		switch arg {
+		case "--gate":
+			cfg.Gated = true
 		case hookwire.RuntimeClaudeCode, "claude":
 			cfg.Runtime = hookwire.RuntimeClaudeCode
 		case hookwire.RuntimeCodex:
@@ -71,8 +82,8 @@ func (c Config) now() time.Time {
 }
 
 // Run reads one payload and sends it. Problems go to stderr as one line that
-// never carries the token or the payload.
-func Run(ctx context.Context, stdin io.Reader, stderr io.Writer, cfg Config) {
+// never carries the token or the payload. stdout carries only a gate's decision.
+func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, cfg Config) {
 	raw, err := io.ReadAll(io.LimitReader(stdin, maxPayloadBytes+1))
 	if err != nil || len(raw) > maxPayloadBytes {
 		note(stderr, "payload not read")
@@ -100,9 +111,25 @@ func Run(ctx context.Context, stdin io.Reader, stderr io.Writer, cfg Config) {
 		note(stderr, "event not encoded")
 		return
 	}
-	if status, err := Send(ctx, cfg, endpoint, body); err != nil {
+	status, reply, err := send(ctx, cfg, http.MethodPost, endpoint, body, SendTimeout)
+	reported := err == nil && (status == http.StatusAccepted || status == http.StatusOK)
+	if event.Type == hookwire.TypeToolRequested {
+		var accepted struct {
+			Gate           bool `json:"gate"`
+			CaptureContent bool `json:"captureContent"`
+		}
+		switch {
+		case reported && json.Unmarshal(reply, &accepted) == nil && accepted.Gate:
+			holdForDecision(ctx, cfg, endpoint, event, raw, accepted.CaptureContent, true, stdout, stderr)
+		case !reported && cfg.Gated:
+			// The event was not stored, so nothing said whether this call is
+			// gated: ask the gate route itself, and ask the person if it cannot say.
+			holdForDecision(ctx, cfg, endpoint, event, raw, false, false, stdout, stderr)
+		}
+	}
+	if err != nil {
 		note(stderr, err.Error())
-	} else if status != http.StatusAccepted && status != http.StatusOK {
+	} else if !reported {
 		note(stderr, "event refused with HTTP "+strconv.Itoa(status))
 	}
 }
@@ -138,27 +165,39 @@ func Endpoint(base string) (string, error) {
 
 // Send posts one signed body, never retries and never follows redirects.
 func Send(ctx context.Context, cfg Config, endpoint string, body []byte) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, SendTimeout)
+	status, _, err := send(ctx, cfg, http.MethodPost, endpoint, body, SendTimeout)
+	return status, err
+}
+
+// send signs the body, or the path of a GET, and returns a bounded reply.
+func send(ctx context.Context, cfg Config, method, endpoint string, body []byte, timeout time.Duration) (int, []byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return 0, errors.New("request not built")
+		return 0, nil, errors.New("request not built")
 	}
-	req.Header.Set("Content-Type", "application/json")
+	signed := body
+	if method == http.MethodGet {
+		signed = []byte(req.URL.Path)
+	} else {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	req.Header.Set(hookwire.SignatureHeader, hookwire.Sign(hookwire.SigningKeyFromToken(cfg.Token), cfg.now().Unix(), body))
-	client := http.Client{Timeout: SendTimeout}
+	req.Header.Set(hookwire.SignatureHeader, hookwire.Sign(hookwire.SigningKeyFromToken(cfg.Token), cfg.now().Unix(), signed))
+	client := http.Client{}
 	if cfg.Client != nil {
 		client = *cfg.Client
 	}
+	client.Timeout = timeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := client.Do(req)
 	if err != nil {
-		return 0, errors.New("no answer from Janusly")
+		return 0, nil, errors.New("no answer from Janusly")
 	}
 	defer func() { _ = res.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
-	return res.StatusCode, nil
+	reply, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+	return res.StatusCode, reply, nil
 }
 
 var (
@@ -184,6 +223,11 @@ type payload struct {
 	PromptID     string          `json:"prompt_id"`
 	Source       string          `json:"source"`
 	ToolResponse json.RawMessage `json:"tool_response"`
+}
+
+// toolInput is read only for a gated call of a client that captures content.
+type toolInput struct {
+	ToolInput any `json:"tool_input"`
 }
 
 // Build maps one hook payload onto the wire event.

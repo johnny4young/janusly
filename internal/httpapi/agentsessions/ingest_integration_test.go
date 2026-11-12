@@ -32,6 +32,7 @@ type tenant struct{ org, creator string }
 type ingestHarness struct {
 	pool     *pgxpool.Pool
 	endpoint string
+	base     string
 }
 
 func newIngestHarness(t *testing.T, limiter bool) ingestHarness {
@@ -48,12 +49,15 @@ func newIngestHarness(t *testing.T, limiter bool) ingestHarness {
 	if limiter {
 		rl = ratelimit.New(pool, ratelimit.Hooks{})
 	}
-	handler := mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(mcpserver.Deps{
-		Audit: audit.NewWriter(grammar.Persister{}), Pool: pool, Limiter: rl, Transport: "hooks",
-	}, Ingest(IngestDeps{Pool: pool, Limiter: rl, NewID: uuid.NewString})), mcpserver.HTTPOptions{})
-	server := httptest.NewServer(handler)
+	authDeps := mcpserver.Deps{Audit: audit.NewWriter(grammar.Persister{}), Pool: pool, Limiter: rl, Transport: "hooks"}
+	deps := IngestDeps{Pool: pool, Limiter: rl, NewID: uuid.NewString}
+	mux := http.NewServeMux()
+	mux.Handle("POST "+hookwire.Path, mcpserver.AgentAuth(authDeps, Ingest(deps)))
+	mux.Handle("POST "+hookwire.GatesPath, mcpserver.AgentAuth(authDeps, OpenGate(deps)))
+	mux.Handle("GET "+hookwire.GatesPath+"/{gateId}/decision", mcpserver.AgentAuth(authDeps, PollGate(deps)))
+	server := httptest.NewServer(mcpserver.GuardAgentHTTP(mux, mcpserver.HTTPOptions{}))
 	t.Cleanup(server.Close)
-	return ingestHarness{pool: pool, endpoint: server.URL + hookwire.Path}
+	return ingestHarness{pool: pool, endpoint: server.URL + hookwire.Path, base: server.URL}
 }
 
 func seedTenant(t *testing.T, pool *pgxpool.Pool, label string) tenant {

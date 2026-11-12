@@ -133,6 +133,10 @@ type V1ServerOptions struct {
 	// AgentHookHandler, when set, serves the hooks bridge ingest. Like
 	// MCPHandler it authenticates agent tokens itself.
 	AgentHookHandler http.Handler
+	// AgentGateOpenHandler and AgentGatePollHandler serve the bridge's gate
+	// requests under the same rules.
+	AgentGateOpenHandler http.Handler
+	AgentGatePollHandler http.Handler
 	// rateLimitNow is the package-local fixed-window clock seam for tests.
 	rateLimitNow func() time.Time
 }
@@ -237,6 +241,10 @@ func newV1HandlerWithWorkOS(
 	}
 	if options.AgentHookHandler != nil {
 		mux.Handle("POST "+hookwire.Path, options.AgentHookHandler)
+	}
+	if options.AgentGateOpenHandler != nil && options.AgentGatePollHandler != nil {
+		mux.Handle("POST "+hookwire.GatesPath, options.AgentGateOpenHandler)
+		mux.Handle("GET "+hookwire.GatesPath+"/{gateId}/decision", options.AgentGatePollHandler)
 	}
 
 	// The embedded Vite bundle rides the mux's own catch-all: every unmatched
@@ -396,7 +404,7 @@ func (s *V1Server) mountAPIRoutes(mux *http.ServeMux) {
 	agentclients.Mount(mux, agentclients.Deps{Pool: s.pool, Audit: s.audit, Routes: s})
 	publishrequests.Mount(mux, publishrequests.Deps{Pool: s.pool, Audit: s.audit, Engine: s.engine, Routes: s})
 	runmap.Mount(mux, runmap.Deps{Pool: s.pool, Routes: s})
-	agentsessions.Mount(mux, agentsessions.Deps{Pool: s.pool, Routes: s})
+	agentsessions.Mount(mux, agentsessions.Deps{Audit: s.audit, Pool: s.pool, Routes: s})
 	s.mountUpstreamHealthRoutes(mux)
 	s.mountAutoHealingRoutes(mux)
 	s.mountProductSurfaceRoutes(mux)

@@ -45,25 +45,8 @@ func Ingest(deps IngestDeps) func(http.ResponseWriter, *http.Request, *agentclie
 		logger = slog.Default()
 	}
 	return func(w http.ResponseWriter, r *http.Request, principal *agentclient.Principal) {
-		if !principal.Has(agentclient.CapabilityReport) {
-			httpkit.WriteUnversioned(w, httpkit.Error(http.StatusForbidden, "agent_capability_missing",
-				"this agent client lacks the report capability", nil))
-			return
-		}
-		if limited := enforce(r, deps.Limiter, principal); limited != nil {
-			result := httpkit.Error(http.StatusTooManyRequests, "rate_limited", limited.Error(), nil)
-			result.RetryAfterSec = limited.RetryAfterSec
-			httpkit.WriteUnversioned(w, result)
-			return
-		}
-		raw, ok := httpkit.ReadRawBody(w, r, hookwire.MaxBodyBytes)
+		raw, at, ok := admit(w, r, principal, deps.Limiter, now, hookwire.MaxBodyBytes)
 		if !ok {
-			return
-		}
-		at := now()
-		if !hookwire.Verify(r.Header.Get(hookwire.SignatureHeader), principal.HookSigningKey(), raw, at.Unix()) {
-			httpkit.WriteUnversioned(w, httpkit.Error(http.StatusUnauthorized, "agent_session_invalid_signature",
-				"invalid agent session event signature", nil))
 			return
 		}
 		event, err := hookwire.Parse(raw, at)
@@ -85,12 +68,49 @@ func Ingest(deps IngestDeps) func(http.ResponseWriter, *http.Request, *agentclie
 			if result.Outcome == agentsession.OutcomeDuplicate {
 				status, outcome = http.StatusOK, result.PriorOutcome
 			}
-			httpkit.WriteUnversioned(w, httpkit.Result{Status: status, Data: map[string]any{
+			data := map[string]any{
 				"accepted": true, "duplicate": result.Outcome == agentsession.OutcomeDuplicate,
 				"outcome": outcome, "eventId": event.ID, "sessionId": result.SessionID,
-			}})
+			}
+			// Tells the bridge to hold this call for a person's decision.
+			if event.Type == hookwire.TypeToolRequested && agentclient.GateMatches(principal.GateTools, event.Data.Tool) {
+				data["gate"], data["captureContent"] = true, principal.CaptureContent
+			}
+			httpkit.WriteUnversioned(w, httpkit.Result{Status: status, Data: data})
 		}
 	}
+}
+
+// admit runs what every signed agent request shares: the report capability,
+// the hook buckets, a bounded body and the signature. A GET signs its path.
+func admit(w http.ResponseWriter, r *http.Request, principal *agentclient.Principal, limiter *ratelimit.Limiter,
+	now func() time.Time, maxBytes int64) ([]byte, time.Time, bool) {
+	if !principal.Has(agentclient.CapabilityReport) {
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusForbidden, "agent_capability_missing",
+			"this agent client lacks the report capability", nil))
+		return nil, time.Time{}, false
+	}
+	if limited := enforce(r, limiter, principal); limited != nil {
+		result := httpkit.Error(http.StatusTooManyRequests, "rate_limited", limited.Error(), nil)
+		result.RetryAfterSec = limited.RetryAfterSec
+		httpkit.WriteUnversioned(w, result)
+		return nil, time.Time{}, false
+	}
+	raw, signed := []byte(nil), []byte(r.URL.Path)
+	if r.Method != http.MethodGet {
+		var ok bool
+		if raw, ok = httpkit.ReadRawBody(w, r, maxBytes); !ok {
+			return nil, time.Time{}, false
+		}
+		signed = raw
+	}
+	at := now()
+	if !hookwire.Verify(r.Header.Get(hookwire.SignatureHeader), principal.HookSigningKey(), signed, at.Unix()) {
+		httpkit.WriteUnversioned(w, httpkit.Error(http.StatusUnauthorized, "agent_session_invalid_signature",
+			"invalid agent session event signature", nil))
+		return nil, time.Time{}, false
+	}
+	return raw, at, true
 }
 
 func enforce(r *http.Request, limiter *ratelimit.Limiter, principal *agentclient.Principal) *ratelimit.LimitError {

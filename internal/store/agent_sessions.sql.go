@@ -76,7 +76,8 @@ func (q *Queries) DeleteExpiredAgentSessionsBatch(ctx context.Context, arg Delet
 
 const getAgentSession = `-- name: GetAgentSession :one
 SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
-       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at,
+       coalesce(c.created_by, '')::text AS client_created_by
 FROM agent_sessions s
 LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
 WHERE s.org_id = $1 AND s.id = $2
@@ -100,6 +101,7 @@ type GetAgentSessionRow struct {
 	StartedAt       time.Time
 	LastEventAt     time.Time
 	EndedAt         *time.Time
+	ClientCreatedBy string
 }
 
 func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams) (GetAgentSessionRow, error) {
@@ -118,8 +120,27 @@ func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams
 		&i.StartedAt,
 		&i.LastEventAt,
 		&i.EndedAt,
+		&i.ClientCreatedBy,
 	)
 	return i, err
+}
+
+const getAgentSessionByExternal = `-- name: GetAgentSessionByExternal :one
+SELECT id FROM agent_sessions
+WHERE org_id = $1 AND agent_client_id = $2 AND external_session_id = $3
+`
+
+type GetAgentSessionByExternalParams struct {
+	OrgID             string
+	AgentClientID     string
+	ExternalSessionID string
+}
+
+func (q *Queries) GetAgentSessionByExternal(ctx context.Context, arg GetAgentSessionByExternalParams) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentSessionByExternal, arg.OrgID, arg.AgentClientID, arg.ExternalSessionID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getAgentSessionReceipt = `-- name: GetAgentSessionReceipt :one
@@ -334,7 +355,8 @@ func (q *Queries) ListAgentSessionEvents(ctx context.Context, arg ListAgentSessi
 
 const listAgentSessions = `-- name: ListAgentSessions :many
 SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
-       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at,
+       coalesce(c.created_by, '')::text AS client_created_by
 FROM agent_sessions s
 LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
 WHERE s.org_id = $1
@@ -363,6 +385,7 @@ type ListAgentSessionsRow struct {
 	StartedAt       time.Time
 	LastEventAt     time.Time
 	EndedAt         *time.Time
+	ClientCreatedBy string
 }
 
 func (q *Queries) ListAgentSessions(ctx context.Context, arg ListAgentSessionsParams) ([]ListAgentSessionsRow, error) {
@@ -392,6 +415,7 @@ func (q *Queries) ListAgentSessions(ctx context.Context, arg ListAgentSessionsPa
 			&i.StartedAt,
 			&i.LastEventAt,
 			&i.EndedAt,
+			&i.ClientCreatedBy,
 		); err != nil {
 			return nil, err
 		}

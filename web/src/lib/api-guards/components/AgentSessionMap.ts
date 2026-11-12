@@ -2,11 +2,21 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isBoolean, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
+import { arrayOf, isAny, isBoolean, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
 import { isAgentSession } from "./AgentSession"
 
 export function isAgentSessionMap(value: unknown): value is Api.AgentSessionMap {
   return isShape(value, {
+    gates: arrayOf(shape({
+      agentId: nullable(isString),
+      contentCaptured: isBoolean,
+      expiresAt: isString,
+      id: isString,
+      input: isAny,
+      mcpServer: nullable(isString),
+      needsYou: isBoolean,
+      tool: isString,
+    })),
     lanes: arrayOf(shape({
       agentType: nullable(isString),
       kind: literal("external_agent", "external_subagent"),

@@ -4,6 +4,10 @@ SELECT * FROM agent_sessions
 WHERE org_id = $1 AND agent_client_id = $2 AND external_session_id = $3
 FOR UPDATE;
 
+-- name: GetAgentSessionByExternal :one
+SELECT id FROM agent_sessions
+WHERE org_id = $1 AND agent_client_id = $2 AND external_session_id = $3;
+
 -- name: CountLiveAgentSessions :one
 SELECT count(*)::int FROM agent_sessions
 WHERE agent_client_id = sqlc.arg(agent_client_id) AND status = 'running'
@@ -73,7 +77,8 @@ WHERE s.id = doomed.id AND s.last_event_at < sqlc.arg(cutoff)::timestamptz;
 
 -- name: ListAgentSessions :many
 SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
-       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at,
+       coalesce(c.created_by, '')::text AS client_created_by
 FROM agent_sessions s
 LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
 WHERE s.org_id = sqlc.arg(org_id)
@@ -83,7 +88,8 @@ LIMIT sqlc.arg(page_limit);
 
 -- name: GetAgentSession :one
 SELECT s.id, s.agent_client_id, coalesce(c.name, '')::text AS agent_client_name, s.runtime, s.project, s.model,
-       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at
+       s.status, s.truncated, s.event_count, s.started_at, s.last_event_at, s.ended_at,
+       coalesce(c.created_by, '')::text AS client_created_by
 FROM agent_sessions s
 LEFT JOIN agent_clients c ON c.org_id = s.org_id AND c.id = s.agent_client_id
 WHERE s.org_id = $1 AND s.id = $2;

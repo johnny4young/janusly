@@ -3650,6 +3650,9 @@ CREATE TABLE public.agent_clients (
     revoked_at timestamp with time zone,
     revoked_by text,
     last_used_at timestamp with time zone,
+    gate_tools text[] DEFAULT '{}' NOT NULL,
+    capture_content boolean DEFAULT false NOT NULL,
+    CONSTRAINT agent_clients_gate_check CHECK (cardinality(gate_tools) <= 20 AND (NOT capture_content OR cardinality(gate_tools) > 0)),
     CONSTRAINT agent_clients_name_check CHECK (char_length(name) BETWEEN 1 AND 120),
     CONSTRAINT agent_clients_capabilities_check CHECK (
         cardinality(capabilities) BETWEEN 1 AND 6
@@ -3788,6 +3791,33 @@ CREATE TABLE public.agent_session_events (
 );
 CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_events (agent_client_id, event_id);
 CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events (session_id, seq);
+-- A tool call an agent's hook holds until a person decides it from the map.
+-- content exists only when the client captures content for gated tools.
+CREATE TABLE public.agent_session_gates (
+    id text PRIMARY KEY,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL REFERENCES public.agent_sessions(id) ON DELETE CASCADE,
+    tool_use_id text NOT NULL,
+    tool text NOT NULL,
+    mcp_server text,
+    agent_id text,
+    content jsonb,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    reason text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_gates_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
+    CONSTRAINT agent_session_gates_decision_check CHECK ((status IN ('approved', 'denied')) = (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
+    CONSTRAINT agent_session_gates_reason_check CHECK (reason IS NULL OR char_length(reason) <= 500)
+);
+CREATE UNIQUE INDEX agent_session_gates_call_idx ON public.agent_session_gates (session_id, tool_use_id);
+CREATE INDEX agent_session_gates_pending_idx ON public.agent_session_gates (org_id, created_at) WHERE status = 'pending';
+CREATE INDEX agent_session_gates_client_pending_idx ON public.agent_session_gates (agent_client_id) WHERE status = 'pending';
+CREATE INDEX agent_session_gates_content_idx ON public.agent_session_gates (created_at) WHERE content IS NOT NULL;
+
 CREATE INDEX agent_session_events_run_idx ON public.agent_session_events (org_id, (janusly_refs->>'runId')) WHERE (janusly_refs->>'runId') IS NOT NULL;
 
 -- +goose StatementEnd

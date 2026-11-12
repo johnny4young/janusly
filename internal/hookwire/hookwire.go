@@ -299,3 +299,71 @@ func Sign(key string, unixSeconds int64, body []byte) string {
 func Verify(header, key string, body []byte, nowUnixSeconds int64) bool {
 	return signedingest.VerifyTimestamped(header, string(body), key, nowUnixSeconds)
 }
+
+// Gates: a held tool call waiting for a person.
+const (
+	// GatesPath opens a gate; GatesPath + "/{id}/decision" polls it.
+	GatesPath = "/agent-sessions/gates"
+	// MaxGateBodyBytes bounds a gate request, captured input included.
+	MaxGateBodyBytes = 64_000
+	// MaxGateWaitSeconds is one long-poll window.
+	MaxGateWaitSeconds = 25
+
+	DecisionPending = "pending"
+	DecisionAllow   = "allow"
+	DecisionDeny    = "deny"
+	// DecisionAsk hands the call back to the runtime's own permission prompt.
+	DecisionAsk = "ask"
+)
+
+// GateContent is the captured input of a gated call.
+type GateContent struct {
+	Input any `json:"input"`
+}
+
+// GateRequest opens a gate for one tool call.
+type GateRequest struct {
+	SessionID string       `json:"sessionId"`
+	ToolUseID string       `json:"toolUseId"`
+	Tool      string       `json:"tool"`
+	MCPServer string       `json:"mcpServer,omitempty"`
+	AgentID   string       `json:"agentId,omitempty"`
+	Content   *GateContent `json:"content,omitempty"`
+	// WaitSeconds is how long the bridge will wait; the gate lives that long.
+	WaitSeconds int `json:"waitSeconds,omitempty"`
+}
+
+// GateReply is the server's answer to opening or polling a gate.
+type GateReply struct {
+	GateID   string `json:"gateId,omitempty"`
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+var gateFields = map[string]bool{"sessionId": true, "toolUseId": true, "tool": true, "mcpServer": true, "agentId": true, "content": true, "waitSeconds": true}
+
+// ParseGateRequest reads one strict gate request.
+func ParseGateRequest(raw []byte) (GateRequest, error) {
+	fields, ok := signedingest.StrictObject(raw, gateFields)
+	if !ok {
+		return GateRequest{}, ErrInvalidEvent
+	}
+	if content, present := fields["content"]; present {
+		if _, ok := signedingest.StrictObject(content, map[string]bool{"input": true}); !ok {
+			return GateRequest{}, ErrInvalidEvent
+		}
+	}
+	var request GateRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return GateRequest{}, ErrInvalidEvent
+	}
+	if !text(request.SessionID, maxIDChars, true) || !text(request.ToolUseID, maxIDChars, true) ||
+		!text(request.Tool, maxIDChars, true) || !text(request.MCPServer, maxNameChars, false) ||
+		!text(request.AgentID, maxIDChars, false) || request.WaitSeconds < 0 || request.WaitSeconds > 3600 {
+		return GateRequest{}, ErrInvalidEvent
+	}
+	if signedingest.IdentitySensitive(request.SessionID, request.ToolUseID, request.Tool, request.MCPServer, request.AgentID) {
+		return GateRequest{}, ErrSensitiveIdentity
+	}
+	return request, nil
+}

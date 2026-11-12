@@ -310,7 +310,7 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
-	var mcpHandler, hookHandler http.Handler
+	var mcpHandler, hookHandler, gateOpenHandler, gatePollHandler http.Handler
 	if cfg.MCPHTTP.Enabled {
 		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
 		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
@@ -326,16 +326,18 @@ func run() error {
 		}, agentHTTP)
 		// The hooks bridge is the same remote agent surface: same switch,
 		// transport rules and token checks.
-		hookHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(mcpserver.Deps{
-			Audit: auditWriter, Pool: pool, Limiter: mcpLimiter, Transport: "hooks", Logger: logger,
-		}, agentsessions.Ingest(agentsessions.IngestDeps{
-			Pool: pool, Limiter: mcpLimiter, Logger: logger, NewID: uuid.NewString,
-		})), agentHTTP)
+		hookAuth := mcpserver.Deps{Audit: auditWriter, Pool: pool, Limiter: mcpLimiter, Transport: "hooks", Logger: logger}
+		hookDeps := agentsessions.IngestDeps{Pool: pool, Limiter: mcpLimiter, Logger: logger, NewID: uuid.NewString}
+		hookHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.Ingest(hookDeps)), agentHTTP)
+		gateOpenHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.OpenGate(hookDeps)), agentHTTP)
+		gatePollHandler = mcpserver.GuardAgentHTTP(mcpserver.AgentAuth(hookAuth, agentsessions.PollGate(hookDeps)), agentHTTP)
 		logger.Info("remote mcp enabled", "path", "/mcp", "hooksPath", hookwire.Path, "allowedHosts", cfg.MCPHTTP.AllowedHosts)
 	}
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
 		MCPHandler:                  mcpHandler,
 		AgentHookHandler:            hookHandler,
+		AgentGateOpenHandler:        gateOpenHandler,
+		AgentGatePollHandler:        gatePollHandler,
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
 		Audit:                       auditWriter,

@@ -102,6 +102,13 @@ var agentSessionLane = closedObj(map[string]any{
 	"truncated": boolT(),
 }, "nodeId", "kind", "parentId", "agentType", "live", "steps", "truncated")
 
+// input is the captured tool input, present only when the client captures
+// content for gated tools.
+var agentSessionGate = closedObj(map[string]any{
+	"id": str(), "tool": str(), "mcpServer": nullableString(), "agentId": nullableString(),
+	"contentCaptured": boolT(), "input": map[string]any{}, "expiresAt": str(), "needsYou": boolT(),
+}, "id", "tool", "mcpServer", "agentId", "contentCaptured", "input", "expiresAt", "needsYou")
+
 var agentSessionMap = closedObj(map[string]any{
 	"session": agentSession,
 	"lanes":   arr(agentSessionLane),
@@ -112,7 +119,12 @@ var agentSessionMap = closedObj(map[string]any{
 	"refs": closedObj(map[string]any{
 		"workflowIds": arr(str()), "draftIds": arr(str()), "runIds": arr(str()),
 	}, "workflowIds", "draftIds", "runIds"),
-}, "session", "lanes", "totals", "liveSubagents", "refs")
+	"gates": arr(agentSessionGate),
+}, "session", "lanes", "totals", "liveSubagents", "refs", "gates")
+
+var agentGateDecision = closedObj(map[string]any{
+	"gate": closedObj(map[string]any{"id": str(), "status": strEnum([]string{"approved", "denied"})}, "id", "status"),
+}, "gate")
 
 var needsYouItem = map[string]any{"oneOf": []any{
 	closedObj(map[string]any{
@@ -127,6 +139,10 @@ var needsYouItem = map[string]any{"oneOf": []any{
 		"kind": map[string]any{"const": "publish_request"}, "id": str(), "workflowId": str(),
 		"reasons": arr(str()), "requestedBy": str(), "expiresAt": str(),
 	}, "kind", "id", "workflowId", "reasons", "requestedBy", "expiresAt"),
+	closedObj(map[string]any{
+		"kind": map[string]any{"const": "agent_gate"}, "id": str(), "sessionId": str(), "tool": str(),
+		"agentClientName": str(), "expiresAt": str(),
+	}, "kind", "id", "sessionId", "tool", "agentClientName", "expiresAt"),
 }}
 
 var needsYou = closedObj(map[string]any{"items": arr(needsYouItem)}, "items")

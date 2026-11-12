@@ -8,9 +8,11 @@ import { ArrowLeft, Bot, CircleDot, CircleStop, Clock, RefreshCw } from 'lucide-
 import { useAliveRef } from '../hooks/useAliveRef'
 import { getResolvedLocale, useT } from '../i18n'
 import {
+  decideAgentGate,
   getAgentSessionMap,
   listAgentSessions,
   runtimeLabel,
+  type AgentSessionGate,
   type AgentSessionMap,
   type AgentSessionSummary,
 } from '../lib/agent-sessions'
@@ -209,8 +211,54 @@ function SessionDetail({ id, onBack, onOpenRun }: { id: string; onBack: () => vo
           ))}
         </div>
       )}
+      {map.gates.length > 0 && <SessionGates gates={map.gates} onDecided={() => void load()} />}
       {session.truncated && <p className="helper-text" role="note">{t('agentSessions.truncated')}</p>}
       <AgentLanes lanes={lanes} testId="agent-session-lanes" />
+    </section>
+  )
+}
+
+/** Tool calls the agent's hook is holding. Without captured input the decider sees only the tool, and the card says so. */
+function SessionGates({ gates, onDecided }: { gates: readonly AgentSessionGate[]; onDecided: () => void }) {
+  const { t } = useT()
+  const alive = useAliveRef()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  const decide = async (id: string, decision: 'approve' | 'deny') => {
+    setBusy(id)
+    setFailed(false)
+    try {
+      await decideAgentGate(id, decision)
+    } catch {
+      if (alive.current) setFailed(true)
+    } finally {
+      if (alive.current) setBusy(null)
+      onDecided()
+    }
+  }
+
+  return (
+    <section className="agent-sessions__gates" aria-labelledby="agent-session-gates-title" data-testid="agent-session-gates">
+      <h4 id="agent-session-gates-title">{t('agentSessions.gate.title')}</h4>
+      {failed && <p role="alert" className="helper-text">{t('agentSessions.gate.failed')}</p>}
+      <ul>
+        {gates.map(gate => (
+          <li key={gate.id} className="we-card agent-sessions__gate" data-testid="agent-session-gate">
+            <code>{gate.tool}</code>
+            {gate.input != null && <pre tabIndex={0}>{JSON.stringify(gate.input, null, 2)}</pre>}
+            {!gate.contentCaptured && <p className="helper-text">{t('agentSessions.gate.notCaptured')}</p>}
+            {gate.needsYou ? (
+              <div className="agent-sessions__refs">
+                <Button size="sm" variant="primary" loading={busy === gate.id} disabled={busy !== null}
+                  onClick={() => void decide(gate.id, 'approve')}>{t('rightPanel.runs.toolApproval.approve')}</Button>
+                <Button size="sm" variant="danger" disabled={busy !== null}
+                  onClick={() => void decide(gate.id, 'deny')}>{t('rightPanel.runs.toolApproval.deny')}</Button>
+              </div>
+            ) : <p className="helper-text">{t('agentSessions.gate.cannotDecide')}</p>}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

@@ -215,3 +215,106 @@ func TestAgentSessionsRequireAgentsRead(t *testing.T) {
 		t.Fatalf("run map without agents.read: %d %v", res.status, res.body["sessions"])
 	}
 }
+
+func seedGate(t *testing.T, org string, s seededSession, withContent bool) string {
+	t.Helper()
+	id := uuid.NewString()
+	var content any
+	if withContent {
+		content = `{"input":{"charge":"ch_1"}}`
+	}
+	if _, err := testPool(t).Exec(t.Context(), `INSERT INTO agent_session_gates (id, org_id, agent_client_id, session_id, tool_use_id, tool, mcp_server, content, expires_at)
+		VALUES ($1, $2, $3, $4, $5, 'mcp__stripe__create_refund', 'stripe', $6::jsonb, now() + interval '10 minutes')`,
+		id, org, s.clientID, s.id, "tu-"+id, content); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestAgentGateDecisionIsForPeopleWithinTheOrganization(t *testing.T) {
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-gate-token")
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	s := seedAgentSession(t, h.org, "")
+	other := "other-org-" + uuid.NewString()[:8]
+	foreignSession := seedAgentSession(t, other, "")
+	foreignGate := seedGate(t, other, foreignSession, false)
+	for user, role := range map[string]string{"gate-editor": "editor", "gate-viewer": "viewer", "creator": "editor"} {
+		seedMemberRow(t, pool, h.org, user, user+"@example.test", role)
+	}
+	as := func(user string) map[string]string { return map[string]string{"x-user-id": user} }
+	approve := map[string]any{"decision": "approve"}
+
+	gate := seedGate(t, h.org, s, true)
+	path := "/agent-sessions/gates/" + gate + "/decide"
+	if res := h.callWithHeaders("POST", path, approve, "", as("gate-viewer")); res.status != 403 {
+		t.Fatalf("viewer decided: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("POST", path, approve, "", map[string]string{"x-user-id": "gate-editor", "Authorization": "Bearer svc-gate-token"}); res.status != 403 || res.body["code"] != "person_required" {
+		t.Fatalf("service token decided: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("POST", path, approve, "", map[string]string{"Authorization": "Bearer jly_agent_" + strings.Repeat("A", 43)}); res.status != 401 && res.status != 403 {
+		t.Fatalf("agent token decided: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("POST", "/agent-sessions/gates/"+foreignGate+"/decide", approve, "", as("gate-editor")); res.status != 404 {
+		t.Fatalf("another organization's gate: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("POST", path, map[string]any{"decision": "allow"}, "", as("gate-editor")); res.status != 400 {
+		t.Fatalf("unknown decision: %d", res.status)
+	}
+
+	// The map shows the gate with its captured input and offers the decision.
+	mapped := h.callWithHeaders("GET", "/agent-sessions/"+s.id+"/map", nil, "", as("gate-editor"))
+	gates, _ := mapped.body["gates"].([]any)
+	if len(gates) != 1 || gates[0].(map[string]any)["needsYou"] != true || gates[0].(map[string]any)["contentCaptured"] != true ||
+		fmt.Sprint(gates[0].(map[string]any)["input"]) != "map[charge:ch_1]" {
+		t.Fatalf("map gates: %v", mapped.body["gates"])
+	}
+	viewerGate := h.callWithHeaders("GET", "/agent-sessions/"+s.id+"/map", nil, "", as("gate-viewer")).body["gates"].([]any)[0].(map[string]any)
+	if viewerGate["needsYou"] != false || viewerGate["input"] != nil || viewerGate["contentCaptured"] != true {
+		t.Fatalf("a viewer was offered the decision or shown the captured input: %v", viewerGate)
+	}
+	inbox := h.callWithHeaders("GET", "/needs-you", nil, "", as("gate-editor"))
+	raw, _ := json.Marshal(inbox.body)
+	if !strings.Contains(string(raw), `"kind":"agent_gate"`) || !strings.Contains(string(raw), gate) || strings.Contains(string(raw), foreignGate) || strings.Contains(string(raw), "ch_1") {
+		t.Fatalf("needs-you: %s", raw)
+	}
+
+	// The creator may decide their own agent's gate by default.
+	if res := h.callWithHeaders("POST", path, map[string]any{"decision": "deny", "reason": "wrong customer"}, "", as("creator")); res.status != 200 {
+		t.Fatalf("creator decision: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("POST", path, approve, "", as("gate-editor")); res.status != 409 {
+		t.Fatalf("second decision: %d %v", res.status, res.body)
+	}
+	var status, decidedBy, metadata string
+	if err := pool.QueryRow(t.Context(), `SELECT g.status, g.decided_by, (SELECT metadata::text FROM audit_logs WHERE org_id = g.org_id AND target_id = g.id AND action = 'agent_gate.decided')
+		FROM agent_session_gates g WHERE g.id = $1`, gate).Scan(&status, &decidedBy, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if status != "denied" || decidedBy != "creator" || !strings.Contains(metadata, "mcp__stripe__create_refund") || strings.Contains(metadata, "ch_1") {
+		t.Fatalf("stored decision: %s %s %s", status, decidedBy, metadata)
+	}
+
+	// With the second-person rule the creator neither decides nor is asked.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO org_configs (id, org_id, key, value_json, category, description, value_type)
+		VALUES ($1, $2, 'agents.publishRequiresSecondPerson', 'true', 'mcp', 'test', 'boolean')`, uuid.NewString(), h.org); err != nil {
+		t.Fatal(err)
+	}
+	second := seedGate(t, h.org, s, false)
+	secondPath := "/agent-sessions/gates/" + second + "/decide"
+	if res := h.callWithHeaders("POST", secondPath, approve, "", as("creator")); res.status != 403 || res.body["code"] != "agent_gate_self_decision" {
+		t.Fatalf("creator under the second-person rule: %d %v", res.status, res.body)
+	}
+	creatorInbox, _ := json.Marshal(h.callWithHeaders("GET", "/needs-you", nil, "", as("creator")).body)
+	if strings.Contains(string(creatorInbox), second) {
+		t.Fatalf("needs-you offered the creator a gate they cannot decide: %s", creatorInbox)
+	}
+	// An expired gate cannot be approved.
+	if _, err := pool.Exec(t.Context(), `UPDATE agent_session_gates SET expires_at = now() - interval '1 second' WHERE id = $1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.callWithHeaders("POST", secondPath, approve, "", as("gate-editor")); res.status != 409 {
+		t.Fatalf("expired gate approved: %d %v", res.status, res.body)
+	}
+}

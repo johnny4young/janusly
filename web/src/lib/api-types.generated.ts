@@ -27,6 +27,16 @@ export type AgentSession = {
 }
 
 export type AgentSessionMap = {
+  "gates": ({
+    "agentId": string | null
+    "contentCaptured": boolean
+    "expiresAt": string
+    "id": string
+    "input": unknown
+    "mcpServer": string | null
+    "needsYou": boolean
+    "tool": string
+  })[]
   "lanes": ({
     "agentType": string | null
     "kind": "external_agent" | "external_subagent"
@@ -425,6 +435,8 @@ export type NeedsYouItem = {
   "since"?: never
   "reasons"?: never
   "requestedBy"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
 } | {
   "kind": "approval" | "human_form"
   "nodeId": string
@@ -436,6 +448,8 @@ export type NeedsYouItem = {
   "tool"?: never
   "reasons"?: never
   "requestedBy"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
 } | {
   "expiresAt": string
   "id": string
@@ -447,6 +461,21 @@ export type NeedsYouItem = {
   "runId"?: never
   "tool"?: never
   "since"?: never
+  "agentClientName"?: never
+  "sessionId"?: never
+} | {
+  "agentClientName": string
+  "expiresAt": string
+  "id": string
+  "kind": "agent_gate"
+  "sessionId": string
+  "tool": string
+  "nodeId"?: never
+  "runId"?: never
+  "workflowId"?: never
+  "since"?: never
+  "reasons"?: never
+  "requestedBy"?: never
 }
 
 export type NullableCount = number | null
@@ -1665,6 +1694,11 @@ export interface ApiRequests {
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": {
+    "decision": "approve" | "deny"
+    "reason"?: string
+  }
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": {
     "deadLetterId": string
@@ -2051,6 +2085,13 @@ export interface ApiResponses {
   "GET /workflows/versions": WorkflowVersion[]
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": WorkflowVersionSnapshot
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": {
+    "gate": {
+      "id": string
+      "status": "approved" | "denied"
+    }
+  }
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": WorkflowPatchResponse
   /** Compile a bounded deterministic workflow intent brief */
@@ -2255,6 +2296,8 @@ export interface ApiSuccessStatuses {
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200
+  /** Approve or deny a tool call an agent's hook is holding */
+  "POST /agent-sessions/gates/{gateId}/decide": 200
   /** Suggest a validated fix for one dead letter without applying it */
   "POST /ai/patch-workflow": 200
   /** Compile a bounded deterministic workflow intent brief */
