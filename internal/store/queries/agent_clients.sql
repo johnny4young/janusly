@@ -100,3 +100,9 @@ WHERE dl.org_id = $1 AND dl.id = $2;
 
 -- name: GetRecoveryCaseWorkflowForOrg :one
 SELECT coalesce(workflow_id, '')::text FROM recovery_cases WHERE org_id = $1 AND id = $2;
+
+-- The people accountable for the agent clients among these actor ids.
+-- name: ListAgentClientCreators :many
+SELECT DISTINCT created_by FROM agent_clients
+WHERE org_id = sqlc.arg(org_id) AND 'agent:' || id = ANY(sqlc.arg(actor_ids)::text[])
+ORDER BY created_by;

@@ -52,3 +52,10 @@ func TestRecoveryMutationErrorExposesStableHumanApprovalGuard(t *testing.T) {
 		t.Fatalf("human approval guard envelope = %+v", result)
 	}
 }
+
+func TestRecoveryMutationErrorRefusesTheAgentCreator(t *testing.T) {
+	result := recoveryMutationError(engine.ErrRecoverySelfApproval)
+	if result.status != http.StatusForbidden || result.code != "recovery_self_approval" {
+		t.Fatalf("self approval envelope = %+v", result)
+	}
+}

@@ -196,6 +196,38 @@ func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowFo
 	return i, err
 }
 
+const listAgentClientCreators = `-- name: ListAgentClientCreators :many
+SELECT DISTINCT created_by FROM agent_clients
+WHERE org_id = $1 AND 'agent:' || id = ANY($2::text[])
+ORDER BY created_by
+`
+
+type ListAgentClientCreatorsParams struct {
+	OrgID    string
+	ActorIds []string
+}
+
+// The people accountable for the agent clients among these actor ids.
+func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClientCreatorsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.ActorIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var created_by string
+		if err := rows.Scan(&created_by); err != nil {
+			return nil, err
+		}
+		items = append(items, created_by)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentClients = `-- name: ListAgentClients :many
 SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients
 WHERE org_id = $1
