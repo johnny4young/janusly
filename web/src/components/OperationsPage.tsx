@@ -77,6 +77,7 @@ const RecentAlertsCard = lazy(() => import('./RecentAlertsCard').then(module => 
 const McpConnectionsPanel = lazy(() => import('./McpConnectionsPanel').then(module => ({ default: module.McpConnectionsPanel })))
 const SlackInteractionsPanel = lazy(() => import('./SlackInteractionsPanel').then(module => ({ default: module.SlackInteractionsPanel })))
 const ExternalRuntimePanel = lazy(() => import('./ExternalRuntimePanel').then(module => ({ default: module.ExternalRuntimePanel })))
+const AgentClientsPanel = lazy(() => import('./AgentClientsPanel').then(module => ({ default: module.AgentClientsPanel })))
 
 /** Public ``/health`` rate-limiter payload — matches
  *  the public rate-limiter health response from ``internal/ratelimit``
@@ -503,6 +504,12 @@ function AccessSection({ permissions }: { permissions?: readonly string[] }) {
       )}
       {hasPermission(permissions, 'members.read') && (
         <PermissionGrantsPanel canWrite={hasPermission(permissions, 'org.permissions.write')} />
+      )}
+      {hasPermission(permissions, 'agents.read') && (
+        <AgentClientsPanel
+          canWrite={hasPermission(permissions, 'agents.write')}
+          canReadMembers={hasPermission(permissions, 'members.read')}
+        />
       )}
     </>
   )

@@ -51,6 +51,24 @@ it is refused with `agent_client_expired`, and the person creates a new
 client. Only the creator rotates: the new token acts with
 the creator's authority, so nobody else may hold it.
 
+Settings > Access lists the clients with their capabilities, scope, expiry,
+creator and one state, in text and an icon: active, expires soon (seven days
+or less), expired, revoked, no owner (the creator left, so the token is
+refused) or reduced permissions (the creator lost a permission a capability
+relies on, so the server narrows it). The list route reports, for the caller,
+which capabilities they may grant and the permissions they lack for the rest,
+plus the issuing limits; the form copies no policy. A row opens the client's
+detail (`GET /v1/agent-clients/{id}`): the tools each capability reaches and
+what its creator lost, its latest tool calls from the audit log (searched
+within the organization's last 5,000 calls) and its open publish requests.
+The token is shown once with paste-ready remote MCP setup for Claude Code and
+Codex; closing asks first and drops the only copy the page held, which never
+reaches the store, browser storage, the request cache or a clipboard
+fallback element. Rotate appears only to the creator of an active client and
+revoke to the creator or an admin, with a confirmation that names the token
+and the capabilities that stop working. Every route also has a `/v1` form in
+the contract.
+
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
 up) and `agents.write`. A person can only grant capabilities whose
 permissions they hold, and can only edit or revoke their own clients unless

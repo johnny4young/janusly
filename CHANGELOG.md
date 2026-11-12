@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Agent clients have a screen. Settings > Access lists them with a state in
+  text and an icon (active, expires soon, expired, revoked, no owner, reduced
+  permissions) and opens each one's tools, latest calls and open publish
+  requests. Creating one shows which capabilities you may grant and the
+  permissions you lack for the others. The token is shown once, next to
+  ready-to-paste MCP setup for Claude Code and Codex, and closing asks first.
+  Only the creator can rotate a client; the creator or an admin can revoke it.
+  The routes are now in the v1 contract, with `GET /v1/agent-clients/{id}`.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the
