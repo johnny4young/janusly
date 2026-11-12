@@ -4,7 +4,3 @@
 
 github.com/johnny4young/janusly/internal/observability.SweepNames # test seam: wiring, alert-rule and e2e tests assert every supervised sweep is registered
 github.com/johnny4young/janusly/internal/secretstore.ResetForTests # test seam: integration tests clear the cached root key and warn-once state between cases
-github.com/johnny4young/janusly/internal/hookwire.EventID # bridge side of the wire contract; janusly hook calls it
-github.com/johnny4young/janusly/internal/hookwire.Sign # bridge side of the wire contract; janusly hook calls it
-github.com/johnny4young/janusly/internal/hookwire.SigningKeyFromToken # bridge side of the wire contract; janusly hook calls it
-github.com/johnny4young/janusly/internal/hookwire.Source # bridge side of the wire contract; janusly hook calls it
