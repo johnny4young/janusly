@@ -26,6 +26,10 @@ const (
 // failure; the reason stays server side.
 var errAgentUnauthenticated = errors.New("agent token is invalid, expired or revoked")
 
+// errAgentUnavailable replaces a store failure while resolving the agent; the
+// detail is logged, never sent.
+var errAgentUnavailable = errors.New("agent token verification is temporarily unavailable; retry later")
+
 // requestGuard bounds the complete raw tools/call envelope before the SDK's
 // typed tool schema and Janusly business parsing. It also makes the common
 // authority envelope fail closed: an unknown tool, malformed typed request, or
@@ -39,9 +43,20 @@ func (server Deps) requestGuard(next mcp.MethodHandler) mcp.MethodHandler {
 			principal, err := server.ResolveActor(ctx, req)
 			if err != nil {
 				if errors.Is(err, agentclient.ErrInvalidToken) {
+					key := server.Transport + ":unknown"
+					var rejection *agentclient.RejectedError
+					if errors.As(err, &rejection) && rejection.ClientID != "" {
+						key = server.Transport + ":client:" + rejection.ClientID
+					}
+					if server.limitFailedAuth(ctx, key) == nil {
+						server.auditTokenRejection(ctx, err, "")
+					}
 					err = errAgentUnauthenticated
+				} else {
+					server.logger().Error("mcp agent resolution failed", "method", method, "error", err)
+					err = errAgentUnavailable
 				}
-				if method == mcpCallMethod && errors.Is(err, errAgentUnauthenticated) {
+				if method == mcpCallMethod {
 					result, _, _ := expected(err.Error())
 					return result, nil
 				}

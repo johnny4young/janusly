@@ -165,8 +165,8 @@ func (e *Engine) executeSubworkflowNode(
 			childWorkflow, _ = domain.Parse(row.DagJson)
 			childVersionID, childVersion = row.ID, int(row.Version)
 		} else {
-			ownerState, err := q.GetWorkflowIngestState(ctx, workflowID)
-			if err != nil || ownerState.OrgID != claim.OrgID || ownerState.DeletedAt != nil {
+			ownerState, err := q.GetWorkflowIngestState(ctx, store.GetWorkflowIngestStateParams{OrgID: claim.OrgID, ID: workflowID})
+			if err != nil || ownerState.DeletedAt != nil {
 				return nil, fmt.Errorf("Subworkflow not found: %s (org: %s)", workflowID, claim.OrgID) //nolint:staticcheck // contract message is the wire contract
 			}
 			row, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{

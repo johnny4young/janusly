@@ -126,7 +126,7 @@ RETURNING *;
 -- name: CountBufferedTriggerEvents :one
 SELECT count(*) FROM trigger_events te
 WHERE te.org_id = sqlc.arg(org_id) AND te.workflow_id = sqlc.arg(workflow_id) AND te.status = 'buffered'
-  AND te.backfill_claim_token IS NULL;
+  AND (te.backfill_claim_token IS NULL OR te.backfill_claimed_at < now() - interval '5 minutes');
 
 -- name: NextCredentialSecretVersion :one
 SELECT (coalesce(max(version), 0) + 1)::int AS next_version

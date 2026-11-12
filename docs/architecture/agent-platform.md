@@ -36,7 +36,7 @@ creates in Settings or through `POST /agent-clients`:
 | `name` | Shown in audit, approvals and the run map |
 | `capabilities` | The ceiling: any of `read`, `propose`, `test`, `publish`, `operate`, `report` |
 | `scope` | Optional workflow ids and workflow tags; empty means the whole organization |
-| `expiresAt` | Required, at most 90 days ahead; default 30 days |
+| `expiresAt` | Required, at most 90 days (2160 hours) ahead; default 30 days |
 | `rateLimitPerMinute` | Calls per minute across every tool; default 120, at most 600 |
 | `createdBy` | The person the client acts for |
 | `revokedAt` | Set by revoke; effective on the next request |
@@ -46,7 +46,9 @@ once at creation or rotation. The database keeps only its SHA-256 digest and
 last four characters; lookup is by digest, so no comparison runs on the
 plaintext. The fixed prefix lets secret scanners recognise a leaked token.
 Rotation replaces the token immediately and keeps the client id, so audit
-history stays continuous. Only the creator rotates: the new token acts with
+history stays continuous. An expired client ends like a revoked one: rotating
+it is refused with `agent_client_expired`, and the person creates a new
+client. Only the creator rotates: the new token acts with
 the creator's authority, so nobody else may hold it.
 
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
@@ -246,7 +248,17 @@ public listener, before `webdist`:
 - **Authentication.** `Authorization: Bearer jly_agent_…` only. Browser
   sessions, Supabase tokens, the service token and development headers are
   refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`;
-  a token store failure answers 500 with fixed text.
+  a token store failure answers 500 with fixed text. Each rejected token
+  writes an `mcp.auth.rejected` audit row with the reason (`malformed`,
+  `unknown`, `revoked`, `expired`, `invalid_capabilities` or
+  `creator_removed`), the transport and the client address, in the client's
+  organization when the token matched one and in `system` otherwise; the
+  token, its digest and its last characters are never recorded. After 20
+  rejected tokens in a minute from one address (with `JANUSLY_TRUSTED_PROXY`,
+  the last `X-Forwarded-For` hop), further rejections
+  answer 429 with `Retry-After` and the standard `rate_limited` body, and are
+  no longer audited one by one. A request without a bearer token gets the
+  plain 401 challenge and is neither counted nor audited.
 - **No tokens in URLs.** A request with `access_token`, `token`, `api_key`,
   `key`, `auth` or `authorization` in the query string, or `jly_agent_`
   anywhere in it, is refused with 400 before authentication; the parameter
@@ -373,12 +385,13 @@ history) and `needsYou` (a person step or a tool approval a person with
 editor rank may decide, never one they caused),
 plus agent lanes from `agent.*` and `multi_agent.*` events and run totals.
 `GET /needs-you` lists, for the signed-in person, tool approvals they did not
-cause, approval and form steps (both with `runs.start`) and agent publish
+cause, approval and form steps (both with `runs.start` and `runs.read`) and agent publish
 requests (with `workflows.write`, and not to the people a second-person rule
 excludes). Both are in the versioned contract (`/v1/runs/{runId}/map`,
 `/v1/needs-you`). A lane step carries only its type, time and the string or
 integer fields `tool`, `status`, `agent` (a crew agent's `name`) and
-`iteration`.
+`iteration`. A lane keeps its latest 200 events; `truncated` says it dropped
+older ones, and the Agents tab says so.
 
 The canvas reads the map through one shared feed per run
 (`web/src/hooks/useRunMap.ts`): it refetches 400 ms after the run projection
@@ -393,7 +406,9 @@ approval id and parameter digest read when the dialog opened to
 `POST /runs/tool-approvals/decide` (a request that changed meanwhile is
 refused, refreshed and shown again), an
 approval step resumes through `POST /resume` (there is no reject route for an
-approval step), and a form opens the existing form dialog. Rerun uses the
+approval step), and a form opens the existing form dialog bound to the
+step's resume token: the dialog closes when the step stops waiting or its
+token changes, and never reopens by itself. Rerun uses the
 existing preview and side-effect acknowledgement. The Agents tab reads the
 same feed. Not built yet: expanding a child run inline (the node links to
 it), the MCP activity lane, and recovery approvals and publish requests on

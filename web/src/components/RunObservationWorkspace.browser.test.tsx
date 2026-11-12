@@ -157,3 +157,73 @@ describe('run map canvas (browser mode)', () => {
     expect(execution.onApproveNode).not.toHaveBeenCalled()
   })
 })
+
+describe('run map form (browser mode)', () => {
+  const formRun: RunSummary = {
+    ...run,
+    inputJson: {
+      workflow: {
+        id: 'wf', name: 'Intake', dslVersion: '1.0',
+        nodes: [{ id: 'ask', type: 'human_form', label: 'Ask requester', config: {} }],
+        edges: [],
+        ui: { positions: { ask: { x: 0, y: 0 } } },
+      },
+    },
+  }
+  const formMap: RunMap = {
+    ...map,
+    nodes: [{ nodeId: 'ask', type: 'human_form', status: 'waiting', attempts: 1, startedAt: '2026-11-07T10:00:00Z', finishedAt: null,
+      elapsedMs: 1_000, costUsd: 0, tokens: 0, stuck: false, needsYou: true, waitingKind: 'human_form', childRunId: null }],
+  }
+  const waiting = (resumeToken: string, field: string): RunNode[] => [{
+    nodeId: 'ask', status: 'waiting', startedAt: '2026-11-07T10:00:00Z',
+    stateJson: { waiting: { kind: 'human_form', resumeToken, schema: { type: 'object', properties: { [field]: { type: 'string' } } } } },
+  }]
+  const settled: RunNode[] = [{ nodeId: 'ask', status: 'succeeded', startedAt: '2026-11-07T10:00:00Z' }]
+
+  function mountForm(nodes: RunNode[]) {
+    const execution = { onApproveNode: vi.fn(), onSubmitHumanForm: vi.fn(async () => undefined), onOpenRun: vi.fn() }
+    const element = (current: RunNode[]) => (
+      <div style={{ width: 1100, height: 760, display: 'flex' }}>
+        <RunObservationWorkspace run={formRun} runNodes={current} panel={null} permissions={['runs.read', 'runs.start']} execution={execution} />
+      </div>
+    )
+    const view = render(element(nodes))
+    return { execution, update: (next: RunNode[]) => view.rerender(element(next)) }
+  }
+
+  beforeEach(() => {
+    vi.mocked(api).mockResolvedValue(formMap)
+  })
+
+  it('closes the form when its resume token changes, so new input goes with the new token', async () => {
+    const { execution, update } = mountForm(waiting('tok-1', 'reason'))
+    ;(await screen.findByRole('button', { name: 'Fill in the form for Ask requester' })).click()
+    expect(await screen.findByLabelText(/reason/i)).toBeInTheDocument()
+
+    update(waiting('tok-2', 'amount'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    ;(await screen.findByRole('button', { name: 'Fill in the form for Ask requester' })).click()
+    const amount = await screen.findByLabelText(/amount/i)
+    expect(screen.queryByLabelText(/reason/i)).not.toBeInTheDocument()
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(amount, '12')
+      amount.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    screen.getByRole('button', { name: /Submit form/i }).click()
+    await waitFor(() => expect(execution.onSubmitHumanForm).toHaveBeenCalledWith('ask', { amount: '12' }, 'tok-2'))
+  })
+
+  it('does not reopen a form by itself after its step stopped waiting', async () => {
+    const { update } = mountForm(waiting('tok-1', 'reason'))
+    ;(await screen.findByRole('button', { name: 'Fill in the form for Ask requester' })).click()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+
+    update(settled)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    update(waiting('tok-3', 'reason'))
+    expect(await screen.findByRole('button', { name: 'Fill in the form for Ask requester' })).toBeVisible()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})

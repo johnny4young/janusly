@@ -22,7 +22,7 @@ export type RunMapSnapshot = { runId: string; map: RunMap; receivedAt: number }
 export type RunMapDecision =
   | { kind: 'tool_approval'; approvalId: string; paramsDigest: string }
   | { kind: 'approval' }
-  | { kind: 'human_form' }
+  | { kind: 'human_form'; resumeToken: string }
 
 export type RunMapNodeOverlay = {
   attempts: number
@@ -44,7 +44,8 @@ function decisionFor(node: RunNode | undefined): RunMapDecision | null {
   if (node?.status !== 'waiting') return null
   const toolApproval = getToolApprovalRequest(node)
   if (toolApproval) return { kind: 'tool_approval', approvalId: toolApproval.approvalId, paramsDigest: toolApproval.paramsDigest }
-  if (readHumanFormWaiting(node)) return { kind: 'human_form' }
+  const form = readHumanFormWaiting(node)
+  if (form) return { kind: 'human_form', resumeToken: form.resumeToken }
   const waiting = node.stateJson?.waiting
   const kind = waiting && typeof waiting === 'object' && !Array.isArray(waiting) ? (waiting as { kind?: unknown }).kind : undefined
   return kind === 'approval' ? { kind: 'approval' } : null
@@ -101,7 +102,7 @@ export function formatTokenCount(tokens: number, locale: string): string {
 export type LaneStepLabel = { key: string; params: Record<string, string | number> }
 export type LaneStepView = { key: string; step: RunMapLaneStep; label: LaneStepLabel; tone: 'tool' | 'success' | 'error' | 'info' }
 export type LaneTrack = { agent: string | null; steps: LaneStepView[] }
-export type AgentLaneView = { nodeId: string; kind: string; stepCount: number; tracks: LaneTrack[] }
+export type AgentLaneView = { nodeId: string; kind: string; stepCount: number; truncated: boolean; tracks: LaneTrack[] }
 
 // The crew emits both `multi_agent.agent.started` and its inner loop's
 // `multi_agent.agent.<n>.started`; keep one.
@@ -159,6 +160,7 @@ export function projectAgentLanes(lanes: readonly RunMapLane[]): AgentLaneView[]
       nodeId: lane.nodeId,
       kind: lane.kind,
       stepCount,
+      truncated: lane.truncated,
       tracks: [...tracks].map(([agent, steps]) => ({ agent, steps })),
     }
   })

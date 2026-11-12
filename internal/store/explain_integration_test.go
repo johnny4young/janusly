@@ -29,6 +29,7 @@ var watchedTables = map[string]bool{
 	"eval_examples": true, "usage_events": true, "audit_logs": true,
 	"trigger_events": true, "schedule_entries": true,
 	"rate_limit_windows": true, "sso_state_nonces": true, "auto_healing_runs": true,
+	"tool_approval_requests": true,
 }
 
 type explainCase struct {
@@ -87,6 +88,9 @@ func TestHotQueryPlansAreIndexServed(t *testing.T) {
 		{"getRunInvestigationContext", getRunInvestigationContext, []any{"org-x", "run-x"}},
 		{"listRecentWorkflowSuccesses", listRecentWorkflowSuccesses, []any{"org-x", "wf-x", now, int32(200)}},
 		{"listRecentStepOutcomes", listRecentStepOutcomes, []any{"org-x", "wf-x", now, now, int32(200), "node-x"}},
+		// The needs-you inbox reads the organization's live tool approvals.
+		{"listPendingToolApprovalsForOrg", listPendingToolApprovalsForOrg, []any{"org-x", "user-x"}},
+		{"listPendingToolApprovalRequesters", listPendingToolApprovalRequesters, []any{"org-x", "run-x"}},
 	}
 	// Only queries whose predicate no other index can serve pin their index:
 	// on the empty controlled keys the planner is indifferent between two

@@ -60,7 +60,7 @@ describe('run map node overlay', () => {
 
   it('opens the form, the rerun preview and the child run', () => {
     const actions = actionsMock()
-    render(renderFacts(overlay({ needsYou: true, decision: { kind: 'human_form' }, rerun: true, childRunId: 'run-2' }), actions))
+    render(renderFacts(overlay({ needsYou: true, decision: { kind: 'human_form', resumeToken: 'tok' }, rerun: true, childRunId: 'run-2' }), actions))
     fireEvent.click(screen.getByRole('button', { name: 'Fill in the form for Send invoice' }))
     expect(actions.openForm).toHaveBeenCalledWith('gate')
     fireEvent.click(screen.getByRole('button', { name: 'Rerun from Send invoice' }))

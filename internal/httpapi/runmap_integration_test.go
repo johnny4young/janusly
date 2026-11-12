@@ -141,6 +141,19 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 		t.Fatalf("a viewer-rank role was offered decisions: %v", kinds)
 	}
 
+	// runs.start without runs.read must not list the organization's runs.
+	blind := "blind-" + suffix
+	exec(`INSERT INTO org_roles (id, org_id, name, inherits_from, granted_permissions) VALUES ($1, $2, 'blind-starter', 'editor', '["runs.start"]')`,
+		"role-blind-"+suffix, h.org)
+	exec(`INSERT INTO org_members (id, org_id, user_id, role) VALUES ($1, $2, $3, 'blind-starter')`, "m-"+blind, h.org, blind)
+	if kinds := inbox(blind); len(kinds) != 0 {
+		t.Fatalf("runs.start without runs.read listed runs: %v", kinds)
+	}
+	if res := h.callWithHeaders("GET", "/v1/needs-you", nil, "", as(blind)); res.status != 200 ||
+		len(res.body["data"].(map[string]any)["items"].([]any)) != 0 {
+		t.Fatalf("versioned needs-you without runs.read: %d %v", res.status, res.body)
+	}
+
 	// With a second person required, the agent's creator is not offered its publish request.
 	clientID := "client-" + suffix
 	exec(`INSERT INTO agent_clients (id, org_id, name, capabilities, token_digest, token_last4, created_by, expires_at)
@@ -158,6 +171,12 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 	if kinds := inbox(editor); kinds["publish_request"] != 1 {
 		t.Fatalf("a second person does not see the request: %v", kinds)
 	}
+	// A drafting agent whose creator cannot be found counts as the viewer's own.
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, 'wf-gone', 'draft', 'qual', '{first_publish}', $3, 'someone-else', $3, now() + interval '1 day')`, "pub-gone-"+suffix, h.org, "agent:gone-"+suffix)
+	if kinds := inbox(editor); kinds["publish_request"] != 1 {
+		t.Fatalf("a request from an unknown agent was offered under the second-person rule: %v", kinds)
+	}
 
 	// Approvals the viewer caused, or on runs no longer waiting, never crowd out one they can decide.
 	exec(`INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json)
@@ -170,5 +189,49 @@ func TestRunMapShowsTimeCostStuckLanesAndNeedsYou(t *testing.T) {
 		FROM generate_series(0, 54) g`, "flood-"+suffix+"-", h.org, other, editor)
 	if kinds := inbox(other); kinds["tool_approval"] != 1 {
 		t.Fatalf("the approver's decidable tool approval was crowded out or a cancelled run's approval was offered: %v", kinds)
+	}
+}
+
+// A lane past its event bound keeps the latest steps and says it dropped some.
+func TestRunMapLaneReportsTruncation(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	runID := "run-lanes-" + suffix
+	doc, _ := json.Marshal(map[string]any{"workflow": map[string]any{"id": "wf-lanes-" + suffix, "nodes": []any{
+		map[string]any{"id": "busy", "type": "agent"}, map[string]any{"id": "quiet", "type": "agent"},
+	}}})
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO runs (id, org_id, workflow_version_id, workflow_id, status, input_json) VALUES ($1, $2, 'v', $3, 'running', $4)`,
+			[]any{runID, h.org, "wf-lanes-" + suffix, doc}},
+		{`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload)
+			SELECT $1 || g, $2, $3, 'busy', 'agent.step.started', jsonb_build_object('iteration', g) FROM generate_series(0, 200) g`,
+			[]any{"busy-" + suffix + "-", runID, h.org}},
+		{`INSERT INTO run_events (id, run_id, org_id, node_id, type, payload) VALUES ($1, $2, $3, 'quiet', 'agent.completed', '{}')`,
+			[]any{"quiet-" + suffix, runID, h.org}},
+	} {
+		if _, err := pool.Exec(t.Context(), stmt.sql, stmt.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := h.call("GET", "/v1/runs/"+runID+"/map", nil, "")
+	if res.status != 200 {
+		t.Fatalf("run map: %d %v", res.status, res.body)
+	}
+	lanes := map[string]map[string]any{}
+	for _, raw := range res.body["data"].(map[string]any)["lanes"].([]any) {
+		lane := raw.(map[string]any)
+		lanes[lane["nodeId"].(string)] = lane
+	}
+	busy, quiet := lanes["busy"], lanes["quiet"]
+	steps, _ := busy["steps"].([]any)
+	if busy["truncated"] != true || len(steps) != 200 || steps[0].(map[string]any)["iteration"] != 1.0 {
+		t.Fatalf("busy lane: truncated=%v steps=%d first=%v", busy["truncated"], len(steps), steps[0])
+	}
+	if quiet["truncated"] != false {
+		t.Fatalf("quiet lane: %v", quiet)
 	}
 }

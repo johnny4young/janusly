@@ -39,8 +39,8 @@ to `127.0.0.1:3001`.
 
 - Go 1.26.11
 - PostgreSQL 18
-- Node.js 24 (pinned in `.nvmrc`)
-- pnpm 11.17.0, pinned in `web/package.json`; `corepack enable` provides it
+- Node.js 26 LTS, 26.13.1 or newer (the line is in `.nvmrc`)
+- pnpm 11.17.0, pinned in `web/package.json`; `npm install -g corepack@0.36.0 && corepack enable` provides it (Node 26 no longer bundles corepack)
 - Docker with Compose v2 for the supported local database and image build
 
 ## Start locally

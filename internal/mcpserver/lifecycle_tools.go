@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -274,8 +275,10 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 	if visible, err := d.workflowVisible(ctx, args.WorkflowID); err != nil || !visible {
 		return hiddenResult(err, "workflow not found")
 	}
-	reason := boundedMCPText(args.Reason, engine.MaxPauseReasonRunes)
-	previous, current, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, reason)
+	if utf8.RuneCountInString(args.Reason) > engine.MaxPauseReasonRunes {
+		return gateError("invalid_argument", "reason must be at most 500 characters", "/reason", "Shorten the reason to 500 characters or fewer.")
+	}
+	pause, err := d.Engine.PauseWorkflow(ctx, d.OrgID, args.WorkflowID, args.Reason)
 	switch {
 	case err == nil:
 	case errors.Is(err, engine.ErrWorkflowLifecycleNotFound):
@@ -283,14 +286,14 @@ func (d Deps) pauseWorkflow(ctx context.Context, args workflowPauseArgs) (*mcp.C
 	default:
 		return nil, nil, err
 	}
-	changed := previous != current
+	changed := pause.Previous != pause.Status
 	if changed {
 		d.Audit.Write(ctx, d.Pool, d.auditContext(), "workflow.paused", audit.Options{
 			TargetType: "workflow", TargetID: args.WorkflowID,
-			Metadata: map[string]any{"previousStatus": previous, "hasReason": reason != ""},
+			Metadata: map[string]any{"previousStatus": pause.Previous, "hasReason": pause.Reason != ""},
 		})
 	}
-	return ok(map[string]any{"workflowId": args.WorkflowID, "status": current, "changed": changed})
+	return ok(map[string]any{"workflowId": args.WorkflowID, "status": pause.Status, "changed": changed})
 }
 
 func (d Deps) resumeWorkflow(ctx context.Context, workflowID string) (*mcp.CallToolResult, any, error) {

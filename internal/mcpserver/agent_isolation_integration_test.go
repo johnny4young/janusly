@@ -327,6 +327,14 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(session, "revoked")
+	for range failedAuthLimit.Max + 5 {
+		expectInvalid(session, "revoked, retried")
+	}
+	var rejections int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs WHERE org_id = $1 AND action = 'mcp.auth.rejected'
+		AND target_id = $2`, tenant.org, revoked.Client.ID).Scan(&rejections); err != nil || rejections != failedAuthLimit.Max {
+		t.Fatalf("retried rejections must be audited up to the limit: %d %v", rejections, err)
+	}
 
 	expired := issueAgentClient(t, pool, tenant, agentclient.IssueInput{})
 	if _, err := pool.Exec(ctx, `UPDATE agent_clients SET token_issued_at = now() - interval '2 days',
@@ -363,6 +371,15 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(operatorSession, "creator removed")
+
+	for clientID, want := range map[string]string{revoked.Client.ID: "revoked", expired.Client.ID: "expired", operator.Client.ID: "creator_removed"} {
+		var reason, transport string
+		if err := pool.QueryRow(ctx, `SELECT metadata->>'reason', metadata->>'transport' FROM audit_logs
+			WHERE org_id = $1 AND action = 'mcp.auth.rejected' AND target_id = $2 LIMIT 1`, tenant.org, clientID).Scan(&reason, &transport); err != nil ||
+			reason != want || transport != "stdio" {
+			t.Fatalf("rejection audit for %s: %q %q %v", want, reason, transport, err)
+		}
+	}
 }
 
 func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {
@@ -596,4 +613,39 @@ func operatorSession(t *testing.T, pool *pgxpool.Pool, eng *engine.Engine, org s
 	}
 	t.Cleanup(func() { _ = session.Close(); <-done })
 	return session
+}
+
+// The pause reason follows the HTTP rules: too long is refused, and a reason
+// that sanitizes to nothing is recorded as no reason.
+func TestAgentPauseReasonMatchesHTTPRules(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	tenant := seedAgentTenant(t, pool, eng, "pause-reason")
+	operator := issueAgentClient(t, pool, tenant, agentclient.IssueInput{Capabilities: []string{"operate"}})
+	session := agentSession(t, pool, eng, operator.Token)
+
+	res, _ := callTool(t, session, "workflows.pause", map[string]any{
+		"workflowId": tenant.workflowID, "reason": strings.Repeat("r", engine.MaxPauseReasonRunes+1),
+	})
+	if !res.IsError || !strings.Contains(resultText(res), `"invalid_argument"`) || !strings.Contains(resultText(res), `"/reason"`) {
+		t.Fatalf("over-long reason: %q", resultText(res))
+	}
+	var status string
+	if err := pool.QueryRow(t.Context(), `SELECT status FROM workflows WHERE org_id = $1 AND id = $2`,
+		tenant.org, tenant.workflowID).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("a refused pause changed the workflow: %q %v", status, err)
+	}
+
+	if res, _ := callTool(t, session, "workflows.pause", map[string]any{"workflowId": tenant.workflowID, "reason": " \t\u0007\n "}); res.IsError {
+		t.Fatalf("pause: %q", resultText(res))
+	}
+	var hasReason bool
+	var stored *string
+	if err := pool.QueryRow(t.Context(), `SELECT (a.metadata->>'hasReason')::boolean, w.paused_reason
+		FROM audit_logs a JOIN workflows w ON w.org_id = a.org_id AND w.id = a.target_id
+		WHERE a.org_id = $1 AND a.target_id = $2 AND a.action = 'workflow.paused'`, tenant.org, tenant.workflowID).Scan(&hasReason, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if hasReason || stored != nil {
+		t.Fatalf("blank reason recorded as present: hasReason=%v stored=%v", hasReason, stored)
+	}
 }

@@ -66,6 +66,12 @@ type Deps struct {
 	actor *callActor
 }
 
+// AuditTokenRejection records an agent token refused outside a tools call,
+// such as at stdio startup.
+func (d Deps) AuditTokenRejection(ctx context.Context, err error) {
+	d.auditTokenRejection(ctx, err, "")
+}
+
 // auditContext derives the audit identity for MCP-originated writes. An
 // agent client is recorded as itself; the operator actor keeps the service
 // token identity the MCP proxy has always used.

@@ -958,6 +958,7 @@ export type RunMapLane = {
     "tool"?: string
     "type": string
   })[]
+  "truncated": boolean
 }
 
 export type RunMapNode = {

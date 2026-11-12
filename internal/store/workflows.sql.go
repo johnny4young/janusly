@@ -773,19 +773,23 @@ func (q *Queries) GetWorkflowBreakerStatus(ctx context.Context, arg GetWorkflowB
 }
 
 const getWorkflowIngestState = `-- name: GetWorkflowIngestState :one
-SELECT org_id, status, deleted_at FROM workflows WHERE id = $1
+SELECT status, deleted_at FROM workflows WHERE org_id = $1 AND id = $2
 `
 
+type GetWorkflowIngestStateParams struct {
+	OrgID string
+	ID    string
+}
+
 type GetWorkflowIngestStateRow struct {
-	OrgID     string
 	Status    string
 	DeletedAt *time.Time
 }
 
-func (q *Queries) GetWorkflowIngestState(ctx context.Context, id string) (GetWorkflowIngestStateRow, error) {
-	row := q.db.QueryRow(ctx, getWorkflowIngestState, id)
+func (q *Queries) GetWorkflowIngestState(ctx context.Context, arg GetWorkflowIngestStateParams) (GetWorkflowIngestStateRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowIngestState, arg.OrgID, arg.ID)
 	var i GetWorkflowIngestStateRow
-	err := row.Scan(&i.OrgID, &i.Status, &i.DeletedAt)
+	err := row.Scan(&i.Status, &i.DeletedAt)
 	return i, err
 }
 
@@ -822,19 +826,19 @@ func (q *Queries) GetWorkflowMetadata(ctx context.Context, arg GetWorkflowMetada
 }
 
 const getWorkflowOwnerState = `-- name: GetWorkflowOwnerState :one
-SELECT org_id, deleted_at FROM workflows WHERE id = $1
+SELECT deleted_at FROM workflows WHERE org_id = $1 AND id = $2
 `
 
-type GetWorkflowOwnerStateRow struct {
-	OrgID     string
-	DeletedAt *time.Time
+type GetWorkflowOwnerStateParams struct {
+	OrgID string
+	ID    string
 }
 
-func (q *Queries) GetWorkflowOwnerState(ctx context.Context, id string) (GetWorkflowOwnerStateRow, error) {
-	row := q.db.QueryRow(ctx, getWorkflowOwnerState, id)
-	var i GetWorkflowOwnerStateRow
-	err := row.Scan(&i.OrgID, &i.DeletedAt)
-	return i, err
+func (q *Queries) GetWorkflowOwnerState(ctx context.Context, arg GetWorkflowOwnerStateParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, getWorkflowOwnerState, arg.OrgID, arg.ID)
+	var deleted_at *time.Time
+	err := row.Scan(&deleted_at)
+	return deleted_at, err
 }
 
 const getWorkflowRolloutRow = `-- name: GetWorkflowRolloutRow :one
@@ -1076,6 +1080,34 @@ func (q *Queries) InsertWorkflow(ctx context.Context, arg InsertWorkflowParams) 
 		arg.CreatedBy,
 	)
 	return err
+}
+
+const insertWorkflowIfAbsent = `-- name: InsertWorkflowIfAbsent :execrows
+INSERT INTO workflows (id, org_id, name, created_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT DO NOTHING
+`
+
+type InsertWorkflowIfAbsentParams struct {
+	ID        string
+	OrgID     string
+	Name      string
+	CreatedBy pgtype.Text
+}
+
+// Workflow ids are global keys: a conflict with another organization's id
+// inserts nothing, and the caller reports the id as taken.
+func (q *Queries) InsertWorkflowIfAbsent(ctx context.Context, arg InsertWorkflowIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertWorkflowIfAbsent,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.CreatedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertWorkflowRollout = `-- name: InsertWorkflowRollout :one
@@ -2369,6 +2401,19 @@ func (q *Queries) RenameWorkflowTagBulk(ctx context.Context, arg RenameWorkflowT
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const resolvePublicCallbackWorkflowOrg = `-- name: ResolvePublicCallbackWorkflowOrg :one
+SELECT org_id FROM workflows WHERE id = $1 AND deleted_at IS NULL
+`
+
+// A signed public callback names only its workflow, so the workflow's
+// organization comes from its global id.
+func (q *Queries) ResolvePublicCallbackWorkflowOrg(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, resolvePublicCallbackWorkflowOrg, id)
+	var org_id string
+	err := row.Scan(&org_id)
+	return org_id, err
 }
 
 const restoreWorkflow = `-- name: RestoreWorkflow :execrows

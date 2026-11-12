@@ -59,7 +59,7 @@ describe('projectRunMapOverlays', () => {
     ]
     const overlays = projectRunMapOverlays(map, nodes, running, true)
     expect(overlays.get('sign')?.decision).toEqual({ kind: 'approval' })
-    expect(overlays.get('form')?.decision).toEqual({ kind: 'human_form' })
+    expect(overlays.get('form')?.decision).toEqual({ kind: 'human_form', resumeToken: 'tok' })
   })
 
   it('keeps counting elapsed time for an unfinished step until the run ends', () => {
@@ -99,7 +99,7 @@ describe('projectAgentLanes', () => {
         { type: 'agent.step.started', at: '2026-11-07T10:00:00Z', agent: 'agent', iteration: 0 },
         { type: 'agent.tool.started', at: '2026-11-07T10:00:01Z', tool: 'http.request' },
         { type: 'agent.completed', at: '2026-11-07T10:00:02Z' },
-      ] },
+      ], truncated: false },
       { nodeId: 'crew', kind: 'multi_agent', steps: [
         { type: 'multi_agent.started', at: null },
         { type: 'multi_agent.agent.started', at: null, name: 'researcher', index: 0 },
@@ -108,9 +108,10 @@ describe('projectAgentLanes', () => {
         { type: 'agent.reasoning', at: null, agent: 'researcher' },
         { type: 'multi_agent.agent.failed', at: null, name: 'writer', index: 1, status: 'failed' },
         { type: 'multi_agent.completed', at: null },
-      ] },
+      ], truncated: true },
     ])
-    expect(lanes[0]).toMatchObject({ nodeId: 'think', kind: 'agent', stepCount: 3 })
+    expect(lanes[0]).toMatchObject({ nodeId: 'think', kind: 'agent', stepCount: 3, truncated: false })
+    expect(lanes[1]).toMatchObject({ nodeId: 'crew', truncated: true })
     expect(lanes[0]!.tracks).toHaveLength(1)
     expect(lanes[0]!.tracks[0]!.steps.map(view => view.tone)).toEqual(['info', 'tool', 'success'])
     expect(lanes[1]!.stepCount).toBe(6)

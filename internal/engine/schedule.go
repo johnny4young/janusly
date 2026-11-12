@@ -188,7 +188,7 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 	// Active-parent guard: a stale entry must never re-run a tombstoned or
 	// foreign workflow (delete the orphan entry), and a paused workflow
 	// DROPS the tick loudly.
-	owner, err := q.GetWorkflowIngestState(ctx, entry.WorkflowID)
+	owner, err := q.GetWorkflowIngestState(ctx, store.GetWorkflowIngestStateParams{OrgID: entry.OrgID, ID: entry.WorkflowID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = q.DeleteScheduleEntry(ctx, entry.ID)
@@ -196,7 +196,7 @@ func (e *Engine) fireScheduleEntry(ctx context.Context, entry store.ClaimDueSche
 		}
 		return false, fmt.Errorf("read schedule owner %s: %w", entry.WorkflowID, err)
 	}
-	if owner.OrgID != entry.OrgID || owner.DeletedAt != nil {
+	if owner.DeletedAt != nil {
 		_ = q.DeleteScheduleEntry(ctx, entry.ID)
 		return false, nil
 	}

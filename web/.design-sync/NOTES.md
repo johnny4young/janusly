@@ -451,6 +451,6 @@ What can silently go stale, roughly in order of how likely it is to bite:
   them in, not a regression. The known-weak one is `QueueLagChip`, whose
   default state is "queue status unavailable" because it reads the queue store
   rather than an endpoint the stub can answer.
-- **Build assumptions:** node 24 (`.nvmrc`), pnpm 11.17, playwright 1.61.1 with
+- **Build assumptions:** node 26 (`.nvmrc`), pnpm 11.17, playwright 1.61.1 with
   chromium-1228 already cached, and the Google-Fonts woff2 files committed under
   `.design-sync/fonts/` (never re-fetched, so the build is reproducible offline).

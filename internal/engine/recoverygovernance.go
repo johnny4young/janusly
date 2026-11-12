@@ -332,11 +332,11 @@ func (e *Engine) ApproveRecoveryCandidate(ctx context.Context, input ApproveReco
 			clientIDs = append(clientIDs, id)
 		}
 	}
-	creators, err := q.ListAgentClientCreators(ctx, store.ListAgentClientCreatorsParams{OrgID: input.Auth.OrgID, ClientIds: clientIDs})
+	creators, err := q.ListAgentClientCreators(ctx, store.ListAgentClientCreatorsParams{OrgID: input.Auth.OrgID, Ids: clientIDs})
 	if err != nil {
 		return store.RecoveryApprovalGrant{}, fmt.Errorf("read recovery requesters: %w", err)
 	}
-	if slices.Contains(creators, input.Auth.UserID) {
+	if slices.ContainsFunc(creators, func(row store.ListAgentClientCreatorsRow) bool { return row.CreatedBy == input.Auth.UserID }) {
 		return store.RecoveryApprovalGrant{}, ErrRecoverySelfApproval
 	}
 	// A fresh human approval supersedes any unconsumed grant for this case.

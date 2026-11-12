@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 
 	"github.com/jackc/pgx/v5"
@@ -196,7 +197,7 @@ func redirectNoStore(w http.ResponseWriter, target string) {
 var ssoStartLimit = ratelimit.Options{Name: "auth:sso-start", Max: 60, Window: time.Minute}
 
 func (s *V1Server) startSso(w http.ResponseWriter, r *http.Request) {
-	if err := s.limiter.Enforce(r.Context(), "ip:"+clientAddress(r), ssoStartLimit); err != nil {
+	if err := s.limiter.Enforce(r.Context(), "ip:"+httpkit.ClientAddress(r), ssoStartLimit); err != nil {
 		writeUnversioned(w, limitedResult(err))
 		return
 	}

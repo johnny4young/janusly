@@ -48,9 +48,12 @@ does not maintain another task store.
 
 An agent client is an organization's credential for one external agent,
 created by a member through `POST /agent-clients` (`agents.write`) and listed
-with `GET /agent-clients` (`agents.read`). The token (`jly_agent_…`) is shown
+with `GET /agent-clients` (`agents.read`), newest first, up to `limit` (at
+most and by default 200) per page; `nextCursor` is the opaque `cursor` for the
+next page. The token (`jly_agent_…`) is shown
 once at creation or `POST /agent-clients/{id}/rotate`; only its SHA-256 digest
-is stored. `POST /agent-clients/{id}/revoke` ends it. Only the creator may
+is stored. `POST /agent-clients/{id}/revoke` ends it, and so does expiry: an
+expired client cannot be rotated. Only the creator may
 rotate, the creator or an admin may revoke, and service tokens can manage none.
 
 A client carries a capability ceiling (`read`, `propose`, `test`, `publish`,
@@ -85,6 +88,10 @@ call's tool approval, so the person accountable for an agent cannot approve its
 writes alone. Likewise the creator cannot approve a recovery fix whose
 candidate or validation the agent produced. Approval and grant decisions accept only person modes. `agent.info` describes the client, its tools, its effective and
 missing permissions, scope, expiry and limit, and needs no business permission.
+It is the only tool that may name no permission; for any other tool an empty
+permission list denies. A rejected token writes `mcp.auth.rejected` (see
+`agent-platform.md`), and a store failure while resolving the agent answers
+with fixed text while the detail goes to the server log.
 
 ## Publish gate
 
@@ -308,11 +315,12 @@ recovery tools keep their withheld projections.
 `runs.cancel` (`runs.cancel`) call the same engine operations as the HTTP
 rollback, pause, resume, trash, restore and cancel routes. They are
 business writes, so they also need write consent, and deactivate and cancel are
-annotated destructive. Neither an agent nor the stdio operator can lift a
-circuit-breaker pause: `workflows.resume` answers `permission_denied` and only
-a person resumes it, through the UI or `POST /workflows/{id}/resume` (which
-also refuses service tokens with
-`workflow_circuit_breaker_resume_requires_person`).
+annotated destructive. A pause reason over 500 characters is refused with
+`invalid_argument` at `/reason`, as the HTTP route refuses it. Neither an
+agent nor the stdio operator can lift a circuit-breaker pause:
+`workflows.resume` answers `permission_denied` and only a person resumes it,
+through the UI or `POST /workflows/{id}/resume` (which also refuses service
+tokens with `workflow_circuit_breaker_resume_requires_person`).
 
 Never expose credential material, identity secrets, organization-wide security
 settings, or unbounded raw evidence through MCP.

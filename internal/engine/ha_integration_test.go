@@ -204,10 +204,20 @@ func TestHACampaignNoDoubleDispatch(t *testing.T) {
 		t.Fatalf("every cohort dead letter must carry one replay claim: %d unclaimed", unclaimed)
 	}
 	// Exactly one system completion audit — the CAS on status='running'
-	// guarantees one winner even with two pumps racing the finish line.
+	// guarantees one winner even with two pumps racing the finish line. The
+	// audit is a separate write after that CAS, so wait for it to land.
 	var completions int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs
-		WHERE org_id = $1 AND action = 'recovery.campaign.completed'`, org).Scan(&completions)
+	auditDeadline := time.Now().Add(10 * time.Second)
+	for {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs
+			WHERE org_id = $1 AND action = 'recovery.campaign.completed'`, org).Scan(&completions); err != nil {
+			t.Fatalf("read completion audit: %v", err)
+		}
+		if completions > 0 || time.Now().After(auditDeadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if completions != 1 {
 		t.Fatalf("exactly one completion audit: %d", completions)
 	}

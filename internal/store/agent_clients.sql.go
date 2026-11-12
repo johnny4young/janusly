@@ -197,30 +197,33 @@ func (q *Queries) GetRunWorkflowForOrg(ctx context.Context, arg GetRunWorkflowFo
 }
 
 const listAgentClientCreators = `-- name: ListAgentClientCreators :many
-SELECT DISTINCT created_by FROM agent_clients
+SELECT id, created_by FROM agent_clients
 WHERE org_id = $1 AND id = ANY($2::text[])
-ORDER BY created_by
 `
 
 type ListAgentClientCreatorsParams struct {
-	OrgID     string
-	ClientIds []string
+	OrgID string
+	Ids   []string
 }
 
-// The people accountable for these agent clients.
-func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClientCreatorsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.ClientIds)
+type ListAgentClientCreatorsRow struct {
+	ID        string
+	CreatedBy string
+}
+
+func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClientCreatorsParams) ([]ListAgentClientCreatorsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientCreators, arg.OrgID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []ListAgentClientCreatorsRow
 	for rows.Next() {
-		var created_by string
-		if err := rows.Scan(&created_by); err != nil {
+		var i ListAgentClientCreatorsRow
+		if err := rows.Scan(&i.ID, &i.CreatedBy); err != nil {
 			return nil, err
 		}
-		items = append(items, created_by)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -231,12 +234,25 @@ func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClie
 const listAgentClients = `-- name: ListAgentClients :many
 SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients
 WHERE org_id = $1
+  AND (created_at, id) < ($2::timestamptz, $3::text)
 ORDER BY created_at DESC, id DESC
-LIMIT 200
+LIMIT $4
 `
 
-func (q *Queries) ListAgentClients(ctx context.Context, orgID string) ([]AgentClient, error) {
-	rows, err := q.db.Query(ctx, listAgentClients, orgID)
+type ListAgentClientsParams struct {
+	OrgID           string
+	BeforeCreatedAt time.Time
+	BeforeID        string
+	PageLimit       int32
+}
+
+func (q *Queries) ListAgentClients(ctx context.Context, arg ListAgentClientsParams) ([]AgentClient, error) {
+	rows, err := q.db.Query(ctx, listAgentClients,
+		arg.OrgID,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -544,6 +560,7 @@ UPDATE agent_clients
 SET token_digest = $1, token_last4 = $2,
     token_issued_at = $3, expires_at = $4
 WHERE org_id = $5 AND id = $6 AND revoked_at IS NULL
+  AND expires_at > $3
 RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at
 `
 

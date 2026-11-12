@@ -309,8 +309,8 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 
 	// Resolve the target workflow + trigger node. Unknown and tombstoned
 	// answer the same opaque 404.
-	ownerState, err := q.GetWorkflowIngestState(ctx, workflowID)
-	if errors.Is(err, pgx.ErrNoRows) || ownerState.DeletedAt != nil {
+	orgID, err := q.ResolvePublicCallbackWorkflowOrg(ctx, workflowID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeUnversioned(w, notFound)
 		return
 	}
@@ -334,7 +334,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	currentInvalid := false
 	currentResolutionFailed := false
 	version, err := q.GetLatestWorkflowVersion(ctx, store.GetLatestWorkflowVersionParams{
-		WorkflowID: workflowID, OrgID: ownerState.OrgID,
+		WorkflowID: workflowID, OrgID: orgID,
 	})
 	if err == nil {
 		wf, _ := domain.Parse(version.DagJson)
@@ -360,7 +360,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	currentVerified := false
 	if currentCredential != "" {
 		currentVerified, err = verifyPagerDutyCredential(
-			ctx, q, ownerState.OrgID, currentCredential, now, rawBody, signatureHeader,
+			ctx, q, orgID, currentCredential, now, rawBody, signatureHeader,
 		)
 		if err != nil {
 			currentResolutionFailed = true
@@ -373,7 +373,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	// below deliberately resolves its current live secret. The untrusted ID
 	// selects only the scoped dedupe row.
 	capturedCredential, accepted, capturedResult := capturedPagerDutyCredential(
-		ctx, q, ownerState.OrgID, workflowID, nodeID, parsePagerDutyRoutingEventID(rawBody),
+		ctx, q, orgID, workflowID, nodeID, parsePagerDutyRoutingEventID(rawBody),
 	)
 	if capturedResult.status != 0 {
 		writeUnversioned(w, capturedResult)
@@ -383,7 +383,7 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	if accepted {
 		verifiedCredential = capturedCredential
 		verified, verifyErr := verifyPagerDutyCredential(
-			ctx, q, ownerState.OrgID, capturedCredential, now, rawBody, signatureHeader,
+			ctx, q, orgID, capturedCredential, now, rawBody, signatureHeader,
 		)
 		if verifyErr != nil {
 			writeUnversioned(w, opError(http.StatusInternalServerError, "internal_error", "Internal error", nil))
@@ -437,13 +437,13 @@ func (s *V1Server) pagerDutyCallbackHandler(w http.ResponseWriter, r *http.Reque
 	// The signature — not a session — is the authority; audits carry the
 	// system actor like the contract's system:pagerduty.
 	result := s.ingestTriggerEventCore(ctx, triggerIngestRequest{
-		orgID:        ownerState.OrgID,
-		authContext:  &auth.Context{OrgID: ownerState.OrgID, UserID: "system:pagerduty"},
+		orgID:        orgID,
+		authContext:  &auth.Context{OrgID: orgID, UserID: "system:pagerduty"},
 		createdBy:    "system:pagerduty",
 		workflowID:   workflowID,
 		triggerType:  "pagerduty_incident",
 		eventPayload: eventPayload,
-		eventID:      pagerDutyTriggerEventID(ownerState.OrgID, workflowID, nodeID, event.eventID),
+		eventID:      pagerDutyTriggerEventID(orgID, workflowID, nodeID, event.eventID),
 		dedupeKey:    "pagerduty:" + workflowID + ":" + nodeID + ":" + event.eventID,
 		noMatch:      notFound,
 		matchNode: func(candidate *domain.Workflow, noMatch opResult) (string, opResult) {
