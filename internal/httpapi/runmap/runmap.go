@@ -309,13 +309,14 @@ func (s *service) deciderPermissions(r *http.Request, rc httpkit.Request) map[st
 }
 
 // needsYou lists the decisions waiting on the viewer: tool approvals they did
-// not cause, approval and form steps, and agent publish requests.
+// not cause, approval and form steps (runs.start and runs.read, since each
+// names a run), and agent publish requests.
 func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 	ctx := r.Context()
 	q := store.New(s.pool)
 	permissions := s.deciderPermissions(r, rc)
 	items := []map[string]any{}
-	if permissions["runs.start"] {
+	if permissions["runs.start"] && permissions["runs.read"] {
 		approvals, err := q.ListPendingToolApprovalsForOrg(ctx, store.ListPendingToolApprovalsForOrgParams{OrgID: rc.OrgID, Viewer: rc.UserID})
 		if err != nil {
 			return internalError()
