@@ -325,6 +325,12 @@ func StubRequired(wf *domain.Workflow) []string {
 	return ids
 }
 
+// OutputsReachOut reports declared outputs that mention a secret or the
+// environment, the outputs entry of ReachesOut.
+func OutputsReachOut(wf *domain.Workflow) bool {
+	return mentionsSensitive(wf.Outputs)
+}
+
 // ReachesOut lists what keeps a publication from going live on its receipt
 // alone: every step that is not pure, triggers included, and declared
 // outputs that mention a secret.

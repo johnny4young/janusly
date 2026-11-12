@@ -34,7 +34,7 @@ function detail(row = request()) {
     request: row,
     proposed: doc([{ id: 'post', type: 'http', config: { url: 'https://api.example.com' } }]),
     current: { versionId: 'v3', version: 3, document: doc([{ id: 'post', type: 'http', config: {} }, { id: 'audit', type: 'noop', config: {} }]) },
-    effects: [{ nodeId: 'post', type: 'http', tool: '', target: 'api.example.com', writes: true, credentials: ['refunds_token'] }],
+    effects: [{ kind: 'step', nodeId: 'post', type: 'http', tool: '', target: 'api.example.com', writes: true, credentials: ['refunds_token'] }],
     changes: { triggersChanged: [], stepsRemoved: ['audit'], outputsRemoved: [] },
     qualification: {
       status: 'passed',
@@ -264,7 +264,10 @@ describe('<PublishRequestsPanel />', () => {
 
   it('names a rename apart and lists outputs that name a secret', async () => {
     const row = request({ proposedName: 'Daily digest' })
-    const renamed = { ...detail(row), effects: [{ nodeId: '/outputs', type: 'outputs', tool: '', target: '', writes: false, credentials: ['api_token'] }] }
+    const renamed = { ...detail(row), effects: [
+      { kind: 'step', nodeId: '/outputs', type: 'http', tool: '', target: 'evil.example.com', writes: true, credentials: [] },
+      { kind: 'outputs', nodeId: '', type: '', tool: '', target: '', writes: false, credentials: ['api_token'] },
+    ] }
     routeApi({
       'GET /v1/publish-requests': () => ({ requests: [row] }),
       'GET /v1/publish-requests/pub-1': () => renamed,
@@ -273,6 +276,8 @@ describe('<PublishRequestsPanel />', () => {
     const article = await openRequest()
     expect(within(article).getByRole('heading', { name: 'Refunds' })).toBeInTheDocument()
     expect(within(article).getByTestId('publish-request-renamed')).toHaveTextContent('Daily digest')
-    expect(within(article).getByTestId('publish-request-effects')).toHaveTextContent(/Outputs name a secret.*with api_token/)
+    const effects = within(article).getByTestId('publish-request-effects')
+    expect(effects).toHaveTextContent(/Outputs name a secret.*with api_token/)
+    expect(effects).toHaveTextContent(/\/outputsWrites.*to evil\.example\.com/)
   })
 })

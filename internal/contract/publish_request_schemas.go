@@ -33,8 +33,9 @@ var publishRequestDetail = closedObj(map[string]any{
 	"proposed": workflowDoc,
 	// Null when the stored draft cannot be read as a workflow.
 	"effects": nullable(arr(closedObj(map[string]any{
-		"nodeId": str(), "type": str(), "tool": str(), "target": str(), "writes": boolT(), "credentials": arr(str()),
-	}, "nodeId", "type", "tool", "target", "writes", "credentials"))),
+		"kind": strEnum([]string{"step", "outputs"}), "nodeId": str(), "type": str(), "tool": str(), "target": str(),
+		"writes": boolT(), "credentials": arr(str()),
+	}, "kind", "nodeId", "type", "tool", "target", "writes", "credentials"))),
 	// What the draft takes away from production; null on a first publish.
 	"changes": nullable(closedObj(map[string]any{
 		"triggersChanged": arr(str()), "stepsRemoved": arr(str()), "outputsRemoved": arr(str()),

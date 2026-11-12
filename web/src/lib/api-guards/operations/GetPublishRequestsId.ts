@@ -15,6 +15,7 @@ export function isGetPublishRequestsIdResponse(value: unknown): value is Api.Api
     })),
     effects: nullable(arrayOf(shape({
       credentials: arrayOf(isString),
+      kind: literal("step", "outputs"),
       nodeId: isString,
       target: isString,
       tool: isString,

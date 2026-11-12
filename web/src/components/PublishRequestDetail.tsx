@@ -168,8 +168,8 @@ export function PublishRequestDetail({
         {effects !== null && effects.length > 0 && (
           <ul className="we-publish-request__effects" data-testid="publish-request-effects">
             {effects.map((effect) => (
-              <li key={effect.nodeId}>
-                {effect.nodeId === '/outputs'
+              <li key={`${effect.kind}-${effect.nodeId}`}>
+                {effect.kind === 'outputs'
                   ? <span>{t('publishRequests.effects.outputs')}</span>
                   : (
                     <>

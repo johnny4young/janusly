@@ -1853,14 +1853,15 @@ export interface ApiResponses {
       "version": number
       "versionId": string
     }
-    "effects": {
+    "effects": ({
       "credentials": string[]
+      "kind": "step" | "outputs"
       "nodeId": string
       "target": string
       "tool": string
       "type": string
       "writes": boolean
-    }[] | null
+    })[] | null
     "proposed": WorkflowDoc
     "qualification": {
       "checks": ({

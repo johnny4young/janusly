@@ -176,24 +176,31 @@ var secretReference = regexp.MustCompile(`\{\{\s*secret\.([A-Za-z0-9_.-]+)\s*\}\
 // alone: what each one may write, where it reaches and which credentials it
 // names. Only names travel; values never leave the credential store.
 func effects(wf *domain.Workflow) []map[string]any {
-	reaching := map[string]bool{}
+	// ReachesOut mixes node ids with the outputs sentinel; count so a node
+	// named like the sentinel neither hides nor invents an entry.
+	reaching := map[string]int{}
 	for _, id := range publishgate.ReachesOut(wf) {
-		reaching[id] = true
+		reaching[id]++
+	}
+	outputs := publishgate.OutputsReachOut(wf)
+	if outputs {
+		reaching["/outputs"]--
 	}
 	out := []map[string]any{}
 	for _, node := range wf.Nodes {
-		if !reaching[node.ID] {
+		if reaching[node.ID] <= 0 {
 			continue
 		}
 		tool, _ := node.Config["tool"].(string)
 		out = append(out, map[string]any{
-			"nodeId": node.ID, "type": node.Type, "tool": tool, "target": target(node.Config),
+			"kind": "step", "nodeId": node.ID, "type": node.Type, "tool": tool, "target": target(node.Config),
 			"writes": engine.NodeMayHaveEffect(node), "credentials": credentialNames(node.Config),
 		})
 	}
-	if reaching["/outputs"] {
+	// Its own kind, never a node id, so a step cannot pass itself off as outputs.
+	if outputs {
 		out = append(out, map[string]any{
-			"nodeId": "/outputs", "type": "outputs", "tool": "", "target": "", "writes": false,
+			"kind": "outputs", "nodeId": "", "type": "", "tool": "", "target": "", "writes": false,
 			"credentials": credentialNames(map[string]any{"outputs": wf.Outputs}),
 		})
 	}

