@@ -325,6 +325,11 @@ func manifestConformanceRows() map[string]conformanceRow {
 			}
 		}},
 		"POST /v1/ai/workflow-proposals":          onlyIntegration(),
+		"GET /v1/agent-clients":                   onlyIntegration(),
+		"GET /v1/agent-clients/{id}":              onlyIntegration(),
+		"POST /v1/agent-clients":                  onlyIntegration(),
+		"POST /v1/agent-clients/{id}/rotate":      onlyIntegration(),
+		"POST /v1/agent-clients/{id}/revoke":      onlyIntegration(),
 		"GET /v1/authoring/experiences":           onlyIntegration(),
 		"POST /v1/authoring/experiences/register": onlyIntegration(),
 		"POST /v1/authoring/experiences/revoke":   onlyIntegration(),

@@ -4,9 +4,11 @@ package agentclients
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -52,20 +54,34 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	}
 	read := httpkit.Gate{Role: auth.RoleViewer, Permission: "agents.read"}
 	write := httpkit.Gate{Role: auth.RoleEditor, Permission: "agents.write"}
-	deps.Routes.Route(mux, "GET /agent-clients", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-		httpkit.WriteUnversioned(w, s.list(r, rc))
-	})
-	deps.Routes.Route(mux, "POST /agent-clients", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		httpkit.WriteUnversioned(w, s.create(r, rc))
-	})
-	deps.Routes.Route(mux, "POST /agent-clients/{id}/rotate", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		httpkit.WriteUnversioned(w, s.rotate(r, rc))
-	})
-	deps.Routes.Route(mux, "POST /agent-clients/{id}/revoke", write, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
-		httpkit.WriteUnversioned(w, s.revoke(r, rc))
-	})
+	routes := []struct {
+		pattern string
+		gate    httpkit.Gate
+		issues  bool
+		handle  func(*http.Request, httpkit.Request) httpkit.Result
+	}{
+		{"GET /agent-clients", read, false, s.list},
+		{"GET /agent-clients/{id}", read, false, s.detail},
+		{"POST /agent-clients", write, true, s.create},
+		{"POST /agent-clients/{id}/rotate", write, true, s.rotate},
+		{"POST /agent-clients/{id}/revoke", write, false, s.revoke},
+	}
+	for _, route := range routes {
+		method, path, _ := strings.Cut(route.pattern, " ")
+		handle, issues := route.handle, route.issues
+		deps.Routes.Route(mux, route.pattern, route.gate, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+			if issues {
+				w.Header().Set("Cache-Control", "no-store")
+			}
+			httpkit.WriteUnversioned(w, handle(r, rc))
+		})
+		deps.Routes.Route(mux, method+" /v1"+path, route.gate, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+			if issues {
+				w.Header().Set("Cache-Control", "no-store")
+			}
+			httpkit.WriteVersioned(w, rc.ID, handle(r, rc))
+		})
+	}
 }
 
 // requirePerson refuses automation: a service token has no person to act
@@ -99,7 +115,8 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 		}
 		beforeAt, beforeID = at, id
 	}
-	rows, err := store.New(s.pool).ListAgentClients(r.Context(), store.ListAgentClientsParams{
+	q := store.New(s.pool)
+	rows, err := q.ListAgentClients(r.Context(), store.ListAgentClientsParams{
 		OrgID: rc.OrgID, BeforeCreatedAt: beforeAt, BeforeID: beforeID, PageLimit: int32(limit + 1),
 	})
 	if err != nil {
@@ -111,12 +128,159 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 		last := rows[limit-1]
 		next = encodeCursor(last.CreatedAt, last.ID)
 	}
+	creators := creatorGrants{q: q, orgID: rc.OrgID, held: map[string]map[string]bool{}}
+	held, err := creators.of(r, rc.UserID)
+	if err != nil {
+		return internalError()
+	}
 	now := s.now()
 	clients := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		clients = append(clients, view(row, now))
+		access, err := creators.access(r, row)
+		if err != nil {
+			return internalError()
+		}
+		clients = append(clients, withAccess(view(row, now), access))
 	}
-	return httpkit.OK(map[string]any{"clients": clients, "nextCursor": next})
+	// What the caller could grant and the issuing limits, so a form never
+	// copies policy the server owns.
+	capabilities := make([]map[string]any, 0, len(agentclient.AllCapabilities))
+	for _, capability := range agentclient.AllCapabilities {
+		missing := agentclient.MissingPermissions([]agentclient.Capability{capability}, held)
+		capabilities = append(capabilities, map[string]any{
+			"name": string(capability), "grantable": held != nil && len(missing) == 0, "missingPermissions": missing,
+		})
+	}
+	return httpkit.OK(map[string]any{
+		"clients": clients, "nextCursor": next, "capabilities": capabilities,
+		"limits": map[string]any{
+			"defaultExpiryDays": agentclient.DefaultExpiryDays, "maxExpiryDays": agentclient.MaxExpiryDays,
+			"defaultRateLimitPerMinute": agentclient.DefaultRatePerMinute, "maxRateLimitPerMinute": agentclient.MaxRatePerMinute,
+		},
+	})
+}
+
+// detail is what a person checks before trusting or ending a client: the
+// tools each capability reaches, what the creator no longer holds, its latest
+// calls and the publications it is waiting on.
+func (s *service) detail(r *http.Request, rc httpkit.Request) httpkit.Result {
+	q := store.New(s.pool)
+	row, err := q.GetAgentClient(r.Context(), store.GetAgentClientParams{OrgID: rc.OrgID, ID: r.PathValue("id")})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpkit.Error(http.StatusNotFound, "agent_client_not_found", "agent client not found", nil)
+	}
+	if err != nil {
+		return internalError()
+	}
+	creators := creatorGrants{q: q, orgID: rc.OrgID, held: map[string]map[string]bool{}}
+	access, err := creators.access(r, row)
+	if err != nil {
+		return internalError()
+	}
+	held := creators.held[row.CreatedBy]
+	parsed, _ := agentclient.ParseCapabilities(row.Capabilities)
+	capabilities := make([]map[string]any, 0, len(parsed))
+	for _, capability := range parsed {
+		tools := slices.Sorted(maps.Keys(agentclient.CeilingTools([]agentclient.Capability{capability})))
+		capabilities = append(capabilities, map[string]any{
+			"name": string(capability), "tools": nonNil(tools),
+			"missingPermissions": agentclient.MissingPermissions([]agentclient.Capability{capability}, held),
+		})
+	}
+	calls, err := q.ListAgentClientToolCalls(r.Context(), store.ListAgentClientToolCallsParams{OrgID: rc.OrgID, ClientID: row.ID})
+	if err != nil {
+		return internalError()
+	}
+	recent := make([]map[string]any, 0, len(calls))
+	for _, call := range calls {
+		var decision struct {
+			Allowed bool   `json:"allowed"`
+			Denial  string `json:"denial"`
+		}
+		_ = json.Unmarshal(call.Metadata, &decision)
+		var denial any
+		if !decision.Allowed && decision.Denial != "" {
+			denial = decision.Denial
+		}
+		recent = append(recent, map[string]any{
+			"tool": call.TargetID.String, "allowed": decision.Allowed, "denial": denial, "at": optionalTime(call.CreatedAt),
+		})
+	}
+	requests, err := q.ListAgentClientOpenRequests(r.Context(), store.ListAgentClientOpenRequestsParams{
+		OrgID: rc.OrgID, Actor: "agent:" + row.ID,
+	})
+	if err != nil {
+		return internalError()
+	}
+	open := make([]map[string]any, 0, len(requests))
+	for _, request := range requests {
+		open = append(open, map[string]any{
+			"id": request.ID, "workflowId": request.WorkflowID, "reasons": nonNil(request.Reasons),
+			"createdAt": request.CreatedAt.UTC().Format(time.RFC3339), "expiresAt": request.ExpiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return httpkit.OK(map[string]any{
+		"client": withAccess(view(row, s.now()), access), "capabilities": capabilities,
+		"recentCalls": recent, "openRequests": open,
+	})
+}
+
+// creatorGrants caches each creator's current grant for one response.
+type creatorGrants struct {
+	q     *store.Queries
+	orgID string
+	held  map[string]map[string]bool
+}
+
+func (c creatorGrants) of(r *http.Request, userID string) (map[string]bool, error) {
+	if held, cached := c.held[userID]; cached {
+		return held, nil
+	}
+	held, err := agentclient.CreatorPermissions(r.Context(), c.q, c.orgID, userID)
+	if err != nil {
+		return nil, err
+	}
+	c.held[userID] = held
+	return held, nil
+}
+
+// access says whether the creator still stands behind the client: removed
+// when they left the organization, reduced when they lost a permission the
+// client's capabilities rely on. Either way the server already narrows or
+// refuses the token.
+func (c creatorGrants) access(r *http.Request, row store.AgentClient) (map[string]any, error) {
+	held, err := c.of(r, row.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	if held == nil {
+		return map[string]any{"state": "removed", "missingPermissions": []string{}}, nil
+	}
+	parsed, err := agentclient.ParseCapabilities(row.Capabilities)
+	if err != nil {
+		return map[string]any{"state": "reduced", "missingPermissions": []string{}}, nil
+	}
+	missing := agentclient.MissingPermissions(parsed, held)
+	if len(missing) > 0 {
+		return map[string]any{"state": "reduced", "missingPermissions": missing}, nil
+	}
+	return map[string]any{"state": "member", "missingPermissions": []string{}}, nil
+}
+
+// rendered is a client view after a change. The change already succeeded, so
+// an unreadable grant degrades to an unknown state instead of an error.
+func (s *service) rendered(r *http.Request, row store.AgentClient, now time.Time) map[string]any {
+	creators := creatorGrants{q: store.New(s.pool), orgID: row.OrgID, held: map[string]map[string]bool{}}
+	access, err := creators.access(r, row)
+	if err != nil {
+		access = map[string]any{"state": "unknown", "missingPermissions": []string{}}
+	}
+	return withAccess(view(row, now), access)
+}
+
+func withAccess(client map[string]any, access map[string]any) map[string]any {
+	client["creatorAccess"] = access
+	return client
 }
 
 func encodeCursor(createdAt time.Time, id string) string {
@@ -182,7 +346,7 @@ func (s *service) create(r *http.Request, rc httpkit.Request) httpkit.Result {
 		},
 	})
 	return httpkit.Result{Status: http.StatusCreated, Data: map[string]any{
-		"client": view(issued.Client, now), "token": issued.Token,
+		"client": s.rendered(r, issued.Client, now), "token": issued.Token,
 	}}
 }
 
@@ -217,7 +381,7 @@ func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
 		TargetType: "agent_client", TargetID: existing.ID,
 		Metadata: map[string]any{"expiresAt": issued.Client.ExpiresAt.UTC().Format(time.RFC3339)},
 	})
-	return httpkit.OK(map[string]any{"client": view(issued.Client, now), "token": issued.Token})
+	return httpkit.OK(map[string]any{"client": s.rendered(r, issued.Client, now), "token": issued.Token})
 }
 
 func (s *service) revoke(r *http.Request, rc httpkit.Request) httpkit.Result {
@@ -237,7 +401,7 @@ func (s *service) revoke(r *http.Request, rc httpkit.Request) httpkit.Result {
 	s.audit.Write(r.Context(), s.pool, rc.Auth, "agent_client.revoked", audit.Options{
 		TargetType: "agent_client", TargetID: existing.ID,
 	})
-	return httpkit.OK(map[string]any{"client": view(row, s.now())})
+	return httpkit.OK(map[string]any{"client": s.rendered(r, row, s.now())})
 }
 
 // managed loads a client the caller may change: their own, or, for revoke,

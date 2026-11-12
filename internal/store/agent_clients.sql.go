@@ -231,6 +231,98 @@ func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClie
 	return items, nil
 }
 
+const listAgentClientOpenRequests = `-- name: ListAgentClientOpenRequests :many
+SELECT id, workflow_id, reasons, created_at, expires_at FROM publish_requests
+WHERE org_id = $1 AND requested_by = $2::text
+  AND status = 'pending' AND expires_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT 20
+`
+
+type ListAgentClientOpenRequestsParams struct {
+	OrgID string
+	Actor string
+}
+
+type ListAgentClientOpenRequestsRow struct {
+	ID         string
+	WorkflowID string
+	Reasons    []string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+}
+
+func (q *Queries) ListAgentClientOpenRequests(ctx context.Context, arg ListAgentClientOpenRequestsParams) ([]ListAgentClientOpenRequestsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientOpenRequests, arg.OrgID, arg.Actor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientOpenRequestsRow
+	for rows.Next() {
+		var i ListAgentClientOpenRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkflowID,
+			&i.Reasons,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentClientToolCalls = `-- name: ListAgentClientToolCalls :many
+SELECT recent.target_id, recent.metadata, recent.created_at FROM (
+  SELECT id, target_id, metadata, created_at FROM audit_logs
+  WHERE org_id = $1 AND action = 'mcp.tool.invoked'
+  ORDER BY created_at DESC, id DESC
+  LIMIT 5000
+) recent
+WHERE recent.metadata->'agentClient'->>'id' = $2::text
+ORDER BY recent.created_at DESC, recent.id DESC
+LIMIT 20
+`
+
+type ListAgentClientToolCallsParams struct {
+	OrgID    string
+	ClientID string
+}
+
+type ListAgentClientToolCallsRow struct {
+	TargetID  pgtype.Text
+	Metadata  json.RawMessage
+	CreatedAt *time.Time
+}
+
+// Bounded to the organization's latest tool calls, so a rarely used agent
+// never turns the read into a scan of the whole audit log.
+func (q *Queries) ListAgentClientToolCalls(ctx context.Context, arg ListAgentClientToolCallsParams) ([]ListAgentClientToolCallsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientToolCalls, arg.OrgID, arg.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientToolCallsRow
+	for rows.Next() {
+		var i ListAgentClientToolCallsRow
+		if err := rows.Scan(&i.TargetID, &i.Metadata, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentClients = `-- name: ListAgentClients :many
 SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients
 WHERE org_id = $1

@@ -106,3 +106,23 @@ WHERE dl.org_id = $1 AND dl.id = $2;
 
 -- name: GetRecoveryCaseWorkflowForOrg :one
 SELECT coalesce(workflow_id, '')::text FROM recovery_cases WHERE org_id = $1 AND id = $2;
+
+-- Bounded to the organization's latest tool calls, so a rarely used agent
+-- never turns the read into a scan of the whole audit log.
+-- name: ListAgentClientToolCalls :many
+SELECT recent.target_id, recent.metadata, recent.created_at FROM (
+  SELECT id, target_id, metadata, created_at FROM audit_logs
+  WHERE org_id = sqlc.arg(org_id) AND action = 'mcp.tool.invoked'
+  ORDER BY created_at DESC, id DESC
+  LIMIT 5000
+) recent
+WHERE recent.metadata->'agentClient'->>'id' = sqlc.arg(client_id)::text
+ORDER BY recent.created_at DESC, recent.id DESC
+LIMIT 20;
+
+-- name: ListAgentClientOpenRequests :many
+SELECT id, workflow_id, reasons, created_at, expires_at FROM publish_requests
+WHERE org_id = sqlc.arg(org_id) AND requested_by = sqlc.arg(actor)::text
+  AND status = 'pending' AND expires_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
