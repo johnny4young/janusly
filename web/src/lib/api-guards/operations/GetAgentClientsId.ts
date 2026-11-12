@@ -14,6 +14,7 @@ export function isGetAgentClientsIdResponse(value: unknown): value is Api.ApiRes
     })),
     client: shape({
       capabilities: arrayOf(literal("read", "propose", "test", "publish", "operate", "report")),
+      captureContent: isBoolean,
       createdAt: isString,
       createdBy: isString,
       creatorAccess: shape({
@@ -21,9 +22,11 @@ export function isGetAgentClientsIdResponse(value: unknown): value is Api.ApiRes
         state: literal("member", "reduced", "removed", "unknown"),
       }),
       expiresAt: isString,
+      gateTools: arrayOf(isString),
       id: isString,
       lastUsedAt: nullable(isString),
       name: isString,
+      origin: literal("static", "oauth"),
       rateLimitPerMinute: isInteger,
       revokedAt: nullable(isString),
       scope: shape({

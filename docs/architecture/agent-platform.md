@@ -67,10 +67,13 @@ of `mcp.tool.invoked` by caller keeps that read bounded.
 The token is shown once with paste-ready remote MCP setup for Claude Code and
 Codex; closing asks first and drops the only copy the page held, which never
 reaches the store, browser storage, the request cache or a clipboard
-fallback element. Rotate appears only to the creator of an active client and
-revoke to the creator or an admin, with a confirmation that names the token
-and the capabilities that stop working. Every route also has a `/v1` form in
-the contract.
+fallback element. Choosing `report` reveals the tools to hold for a person
+(`gateTools`) and whether the decider sees their input (`captureContent`).
+Rotate appears only to the creator of an active static client, never for an
+OAuth connection, which refreshes its own token; revoke appears to the
+creator or an admin, with a confirmation that names the token or the OAuth
+connection and the capabilities that stop working. Every route also has a
+`/v1` form in the contract.
 
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
 up) and `agents.write`. A person can only grant capabilities whose

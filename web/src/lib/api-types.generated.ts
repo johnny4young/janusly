@@ -1709,7 +1709,9 @@ export interface ApiRequests {
   /** Create an agent client; the response carries its token once */
   "POST /agent-clients": {
     "capabilities"?: ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+    "captureContent"?: boolean
     "expiresInDays"?: number
+    "gateTools"?: string[]
     "name": string
     "rateLimitPerMinute"?: number
     "scope"?: {
@@ -1915,6 +1917,7 @@ export interface ApiResponses {
     })[]
     "clients": ({
       "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
       "createdAt": string
       "createdBy": string
       "creatorAccess": {
@@ -1922,9 +1925,11 @@ export interface ApiResponses {
         "state": "member" | "reduced" | "removed" | "unknown"
       }
       "expiresAt": string
+      "gateTools": string[]
       "id": string
       "lastUsedAt": string | null
       "name": string
+      "origin": "static" | "oauth"
       "rateLimitPerMinute": number
       "revokedAt": string | null
       "scope": {
@@ -1952,6 +1957,7 @@ export interface ApiResponses {
     })[]
     "client": {
       "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
       "createdAt": string
       "createdBy": string
       "creatorAccess": {
@@ -1959,9 +1965,11 @@ export interface ApiResponses {
         "state": "member" | "reduced" | "removed" | "unknown"
       }
       "expiresAt": string
+      "gateTools": string[]
       "id": string
       "lastUsedAt": string | null
       "name": string
+      "origin": "static" | "oauth"
       "rateLimitPerMinute": number
       "revokedAt": string | null
       "scope": {
@@ -2199,6 +2207,7 @@ export interface ApiResponses {
   "POST /agent-clients": {
     "client": {
       "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
       "createdAt": string
       "createdBy": string
       "creatorAccess": {
@@ -2206,9 +2215,11 @@ export interface ApiResponses {
         "state": "member" | "reduced" | "removed" | "unknown"
       }
       "expiresAt": string
+      "gateTools": string[]
       "id": string
       "lastUsedAt": string | null
       "name": string
+      "origin": "static" | "oauth"
       "rateLimitPerMinute": number
       "revokedAt": string | null
       "scope": {
@@ -2225,6 +2236,7 @@ export interface ApiResponses {
   "POST /agent-clients/{id}/revoke": {
     "client": {
       "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
       "createdAt": string
       "createdBy": string
       "creatorAccess": {
@@ -2232,9 +2244,11 @@ export interface ApiResponses {
         "state": "member" | "reduced" | "removed" | "unknown"
       }
       "expiresAt": string
+      "gateTools": string[]
       "id": string
       "lastUsedAt": string | null
       "name": string
+      "origin": "static" | "oauth"
       "rateLimitPerMinute": number
       "revokedAt": string | null
       "scope": {
@@ -2250,6 +2264,7 @@ export interface ApiResponses {
   "POST /agent-clients/{id}/rotate": {
     "client": {
       "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
       "createdAt": string
       "createdBy": string
       "creatorAccess": {
@@ -2257,9 +2272,11 @@ export interface ApiResponses {
         "state": "member" | "reduced" | "removed" | "unknown"
       }
       "expiresAt": string
+      "gateTools": string[]
       "id": string
       "lastUsedAt": string | null
       "name": string
+      "origin": "static" | "oauth"
       "rateLimitPerMinute": number
       "revokedAt": string | null
       "scope": {

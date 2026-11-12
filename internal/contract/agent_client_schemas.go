@@ -13,12 +13,14 @@ var agentClient = closedObj(map[string]any{
 	"rateLimitPerMinute": map[string]any{"type": "integer", "minimum": 1},
 	"tokenLast4":         str(), "createdBy": str(), "createdAt": str(), "tokenIssuedAt": str(), "expiresAt": str(),
 	"revokedAt": nullableString(), "lastUsedAt": nullableString(),
+	"gateTools": arr(str()), "captureContent": boolT(),
+	"origin": strEnum([]string{"static", "oauth"}),
 	"creatorAccess": closedObj(map[string]any{
 		"state":              strEnum([]string{"member", "reduced", "removed", "unknown"}),
 		"missingPermissions": arr(str()),
 	}, "state", "missingPermissions"),
 }, "id", "name", "status", "capabilities", "scope", "rateLimitPerMinute", "tokenLast4", "createdBy",
-	"createdAt", "tokenIssuedAt", "expiresAt", "revokedAt", "lastUsedAt", "creatorAccess")
+	"createdAt", "tokenIssuedAt", "expiresAt", "revokedAt", "lastUsedAt", "gateTools", "captureContent", "origin", "creatorAccess")
 
 var agentClientList = closedObj(map[string]any{
 	"clients":    arr(agentClient),
@@ -53,4 +55,5 @@ var agentClientCreate = closedObj(map[string]any{
 		"workflowIds": arr(str()), "tags": arr(str()),
 	}),
 	"expiresInDays": intT(), "rateLimitPerMinute": intT(),
+	"gateTools": arr(str()), "captureContent": boolT(),
 }, "name")

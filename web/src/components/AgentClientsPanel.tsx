@@ -148,7 +148,9 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
     const capabilities = client.capabilities.map((capability) => t(`agentClients.capability.${capability}.label`)).join(', ')
     if (!(await confirm({
       title: t('agentClients.revoke.title', { name: client.name }),
-      body: t('agentClients.revoke.body', { last4: client.tokenLast4, capabilities }),
+      body: client.origin === 'oauth'
+        ? t('agentClients.revoke.bodyOauth', { capabilities })
+        : t('agentClients.revoke.body', { last4: client.tokenLast4, capabilities }),
       confirmLabel: t('agentClients.action.revoke'),
       tone: 'danger',
     }))) return
@@ -231,7 +233,8 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
               {clients.map((client) => {
                 const state = agentClientState(client)
                 const own = viewer.userId !== null && client.createdBy === viewer.userId
-                const canRotate = canWrite && own && client.status === 'active'
+                // An OAuth grant refreshes its own token; the API refuses a rotation.
+                const canRotate = canWrite && own && client.status === 'active' && client.origin !== 'oauth'
                 const canRevoke = canWrite && (own || viewer.isAdmin) && client.status !== 'revoked'
                 const open = openId === client.id
                 const scope = client.scope.workflowIds.length + client.scope.tags.length === 0
@@ -255,7 +258,9 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
                         {open ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
                         <span className="we-agent-clients__name">{client.name}</span>
                       </button>
-                      <span className="we-agent-clients__meta">…{client.tokenLast4}</span>
+                      <span className="we-agent-clients__meta">
+                        {client.origin === 'oauth' ? t('agentClients.origin.oauth') : `…${client.tokenLast4}`}
+                      </span>
                     </th>
                     <td>
                       <ul className="we-agent-clients__caps" aria-label={t('agentClients.column.capabilities')}>

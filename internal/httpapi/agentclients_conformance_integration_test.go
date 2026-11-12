@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 )
@@ -30,6 +31,13 @@ func conformanceAgentClients(t *testing.T, h *apiHarness, rec *conformanceRecord
 		"scope": map[string]any{"tags": []string{"billing"}}, "expiresInDays": 7,
 	}, "", as), http.StatusCreated)
 	clientID := issued["client"].(map[string]any)["id"].(string)
+	gated := rec.record("POST /v1/agent-clients", h.callWithHeaders("POST", "/v1/agent-clients", map[string]any{
+		"name": "Conformance hooks", "capabilities": []string{"report"}, "gateTools": []string{"Bash", "mcp__github__*"},
+		"captureContent": true,
+	}, "", as), http.StatusCreated)
+	if client := gated["client"].(map[string]any); fmt.Sprint(client["gateTools"]) != "[Bash mcp__github__*]" || client["captureContent"] != true {
+		t.Fatalf("a reporting client must keep its gates: %+v", client)
+	}
 	rec.record("POST /v1/agent-clients/{id}/rotate", h.callWithHeaders("POST", "/v1/agent-clients/"+clientID+"/rotate",
 		map[string]any{"expiresInDays": 3}, "", as), http.StatusOK)
 

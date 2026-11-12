@@ -42,6 +42,8 @@ export function CreateAgentClientDialog({
   const [tags, setTags] = useState('')
   const [expiresInDays, setExpiresInDays] = useState(String(catalog.limits.defaultExpiryDays))
   const [rateLimit, setRateLimit] = useState(String(catalog.limits.defaultRateLimitPerMinute))
+  const [gateTools, setGateTools] = useState('')
+  const [captureContent, setCaptureContent] = useState(false)
   const [workflows, setWorkflows] = useState<SavedWorkflow[] | null | 'failed'>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +65,9 @@ export function CreateAgentClientDialog({
   const readGrantable = catalog.capabilities.find((capability) => capability.name === 'read')?.grantable ?? false
   const canSubmit = name.trim().length > 0 && expiryValid && rateValid && readGrantable && !submitting
   const scopeTags = parseTags(tags)
+  // Gates and their content only apply to a client that reports its sessions.
+  const reports = capabilities.has('report')
+  const gates = reports ? parseTags(gateTools) : []
 
   const toggle = <Value,>(set: ReadonlySet<Value>, value: Value, on: boolean): ReadonlySet<Value> => {
     const next = new Set(set)
@@ -82,6 +87,8 @@ export function CreateAgentClientDialog({
         scope: { workflowIds: [...workflowIds], tags: scopeTags },
         expiresInDays: expiry,
         rateLimitPerMinute: rate,
+        gateTools: gates,
+        captureContent: gates.length > 0 && captureContent,
       }, { guard: isPostAgentClientsResponse, signal: new AbortController().signal })
       onCreated(issued)
     } catch (createError) {
@@ -206,6 +213,36 @@ export function CreateAgentClientDialog({
                 )}
               </FormField>
             </fieldset>
+
+            {reports && (
+              <fieldset className="we-agent-dialog__group" disabled={submitting} data-testid="agent-client-report-options">
+                <legend>{t('agentClients.capability.report.label')}</legend>
+                <FormField id={`${formId}-gates`} label={t('agentClients.field.gateTools')}>
+                  {(controlProps) => (
+                    <input
+                      {...controlProps}
+                      value={gateTools}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder={t('agentClients.field.gateToolsPlaceholder')}
+                      onChange={(event) => setGateTools(event.target.value)}
+                    />
+                  )}
+                </FormField>
+                <div className="we-agent-dialog__option">
+                  <input
+                    id={`${formId}-capture`}
+                    type="checkbox"
+                    checked={gates.length > 0 && captureContent}
+                    disabled={gates.length === 0}
+                    onChange={(event) => setCaptureContent(event.target.checked)}
+                  />
+                  <label htmlFor={`${formId}-capture`}>
+                    <span className="we-agent-dialog__option-name">{t('agentClients.field.captureContent')}</span>
+                  </label>
+                </div>
+              </fieldset>
+            )}
 
             <div className="we-agent-dialog__limits">
               <FormField
@@ -413,6 +450,12 @@ export function AgentClientDetail({ clientId }: { clientId: string }) {
     <div className="we-agent-detail" data-testid={`agent-client-detail-${client.id}`}>
       {client.creatorAccess.state === 'removed' && (
         <p className="we-agent-detail__notice" role="status">{t('agentClients.detail.removed')}</p>
+      )}
+      {client.gateTools.length > 0 && (
+        <p className="we-agent-detail__notice" data-testid={`agent-client-gates-${client.id}`}>
+          {t('agentClients.detail.gates', { tools: client.gateTools.join(', ') })}
+          {client.captureContent && ` · ${t('agentClients.detail.gatesContent')}`}
+        </p>
       )}
       <section aria-labelledby={`${client.id}-tools`}>
         <h4 id={`${client.id}-tools`}>{t('agentClients.detail.tools')}</h4>

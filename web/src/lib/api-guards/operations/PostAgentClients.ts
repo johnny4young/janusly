@@ -2,13 +2,14 @@
 // Do not edit: run `make generate` after changing the Go manifest.
 
 import type * as Api from "../../api-types.generated"
-import { arrayOf, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
+import { arrayOf, isBoolean, isInteger, isShape, isString, literal, nullable, shape } from "../../guards"
 
 /** POST /agent-clients */
 export function isPostAgentClientsResponse(value: unknown): value is Api.ApiResponses["POST /agent-clients"] {
   return isShape(value, {
     client: shape({
       capabilities: arrayOf(literal("read", "propose", "test", "publish", "operate", "report")),
+      captureContent: isBoolean,
       createdAt: isString,
       createdBy: isString,
       creatorAccess: shape({
@@ -16,9 +17,11 @@ export function isPostAgentClientsResponse(value: unknown): value is Api.ApiResp
         state: literal("member", "reduced", "removed", "unknown"),
       }),
       expiresAt: isString,
+      gateTools: arrayOf(isString),
       id: isString,
       lastUsedAt: nullable(isString),
       name: isString,
+      origin: literal("static", "oauth"),
       rateLimitPerMinute: isInteger,
       revokedAt: nullable(isString),
       scope: shape({

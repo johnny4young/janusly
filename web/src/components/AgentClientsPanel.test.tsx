@@ -23,6 +23,7 @@ function client(overrides: Record<string, unknown> = {}) {
     scope: { workflowIds: [], tags: ['billing'] }, rateLimitPerMinute: 120, tokenLast4: 'abcd',
     createdBy: 'me', createdAt: '2026-11-01T10:00:00Z', tokenIssuedAt: '2026-11-01T10:00:00Z',
     expiresAt: '2099-12-01T10:00:00Z', revokedAt: null, lastUsedAt: null,
+    gateTools: [] as string[], captureContent: false, origin: 'static',
     creatorAccess: { state: 'member', missingPermissions: [] as string[] },
     ...overrides,
   }
@@ -117,7 +118,7 @@ describe('<AgentClientsPanel />', () => {
     const tokenDialog = await screen.findByRole('dialog', { name: 'Codex is ready' })
     expect(posted).toEqual([{
       name: 'Codex', capabilities: ['read', 'test'], scope: { workflowIds: [], tags: ['billing', 'ops'] },
-      expiresInDays: 30, rateLimitPerMinute: 120,
+      expiresInDays: 30, rateLimitPerMinute: 120, gateTools: [], captureContent: false,
     }])
     expect(within(tokenDialog).getByTestId('agent-token-value')).toHaveValue(TOKEN)
     const url = `${window.location.origin}/mcp`
@@ -330,5 +331,43 @@ describe('<AgentClientsPanel />', () => {
     const own = await screen.findByTestId('agent-client-c-own')
     expect(within(own).queryByRole('button', { name: /Rotate|Revoke/ })).not.toBeInTheDocument()
     expect(screen.queryByTestId('agent-client-new')).not.toBeInTheDocument()
+  })
+  it('asks for held tools and their input only for a client that reports', async () => {
+    const posted: Record<string, unknown>[] = []
+    routeApi({
+      'GET /v1/agent-clients': () => listPayload([]),
+      'GET /workflows': () => [],
+      'POST /v1/agent-clients': (_path, init) => {
+        posted.push(JSON.parse(String(init?.body)))
+        return { client: client({ id: 'c-new', name: 'Hooks' }), token: TOKEN }
+      },
+    })
+    renderPanel()
+    fireEvent.click(await screen.findByTestId('agent-client-new'))
+    const dialog = await screen.findByRole('dialog', { name: 'New agent client' })
+    expect(within(dialog).queryByTestId('agent-client-report-options')).not.toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Hooks' } })
+    fireEvent.click(within(dialog).getByLabelText(/^Report/))
+    const options = within(dialog).getByTestId('agent-client-report-options')
+    const capture = within(options).getByLabelText("Show the held call's input to whoever decides")
+    expect(capture).toBeDisabled()
+    fireEvent.change(within(options).getByLabelText('Tools held for a person'), { target: { value: 'Bash, mcp__github__*' } })
+    expect(capture).toBeEnabled()
+    fireEvent.click(capture)
+    fireEvent.click(within(dialog).getByTestId('agent-client-create-submit'))
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ capabilities: ['read', 'report'], gateTools: ['Bash', 'mcp__github__*'], captureContent: true })
+  })
+
+  it('never offers to rotate a client connected with OAuth', async () => {
+    signIn('admin')
+    routeApi({ 'GET /v1/agent-clients': () => listPayload([client({ origin: 'oauth' })]) })
+    renderPanel()
+    const row = await screen.findByTestId('agent-client-c-own')
+    expect(row).toHaveTextContent('OAuth')
+    expect(row).not.toHaveTextContent('…abcd')
+    expect(within(row).queryByRole('button', { name: /Rotate/ })).not.toBeInTheDocument()
+    fireEvent.click(within(row).getByRole('button', { name: 'Revoke Claude Code' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('Its OAuth connection stops working on its next call')
   })
 })
