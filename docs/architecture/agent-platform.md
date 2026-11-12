@@ -299,6 +299,84 @@ claude mcp add --transport http janusly https://janusly.example.com/mcp \
   --header "Authorization: Bearer $JANUSLY_AGENT_TOKEN"
 ```
 
+### OAuth for remote MCP
+
+A static agent token still connects every client. OAuth adds a connection a
+person approves in the browser, for MCP clients that speak the MCP
+authorization flow. It exists only with `JANUSLY_MCP_HTTP_ENABLED=true` and a
+`JANUSLY_WEB_BASE_URL`, which is the issuer (`internal/httpapi/oauth`).
+
+1. `/mcp` without a token answers `401` with
+   `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource/mcp"`.
+2. Protected resource metadata (RFC 9728) names the authorization server;
+   `/.well-known/oauth-authorization-server` (RFC 8414) names the endpoints.
+3. `POST /oauth/register` (RFC 7591): public clients only, no secret.
+4. `GET /oauth/authorize` with `code_challenge` (`S256`), `state`, `scope` and
+   `resource`. It stores the request and sends the browser to the web app.
+5. **Consent**, in Settings → Access of the signed-in app. Anyone can
+   register a client under any name and send a person the consent link, so
+   the screen is the defence: the name is plain ASCII and marked unverified,
+   the address the code goes to is shown (with a warning when it is not this
+   computer), and only `read` starts ticked. A capability the person cannot
+   grant is disabled with the permission they lack.
+6. Approving creates an ordinary agent client (`createdBy` the person,
+   `origin: oauth`) and returns a single-use code that lives 60 seconds.
+7. `POST /oauth/token` exchanges it for an access token (15 minutes) and a
+   rotating refresh token.
+
+| Scope | Capability |
+|---|---|
+| `janusly:read` | `read` (implied by every other) |
+| `janusly:propose` | `propose` |
+| `janusly:test` | `test` |
+| `janusly:publish` | `publish` |
+| `janusly:operate` | `operate` |
+
+`report` is never offered: the hooks bridge has no browser and uses a static
+token.
+
+- **Opaque tokens.** The access token is an agent token (`jly_agent_…`),
+  found by its digest and resolved by the same code as a static one, so
+  revocation, expiry, a removed creator and the live intersection with the
+  creator's permissions all apply on the next call. Codes and refresh tokens
+  are stored as digests.
+- **Refreshing never extends the grant.** The client keeps its lifetime
+  (at most 90 days); after that the person consents again. A grant holds one
+  access token at a time.
+- **Replay ends the grant.** A code presented again, or any refresh token
+  the grant ever rotated away (every one is kept as a digest), revokes the
+  client and is audited (`oauth.code_reused`, `oauth.refresh_reused`). The
+  exception is 30 seconds after use, and only for a retry that proves it is
+  the same client (same client id, and for a code the same redirect and PKCE
+  verifier): it gets `invalid_grant` and keeps its grant.
+- **Redirects.** Exact match; `http` only on a loopback address, where the
+  port may differ (RFC 8252); `https` otherwise; no private schemes, wildcards,
+  fragments or credentials. Hosts are lowercase ASCII, so an internationalized
+  name has to arrive as visible punycode. An unknown client or redirect is answered on the
+  page, never redirected.
+- **Audience.** `resource` must be this server's `/mcp`; nothing else is
+  issued for, and Janusly accepts no third-party tokens.
+- **Organization.** The grant belongs to the organization the person is in
+  when they consent; nothing in an OAuth request names one.
+- **Registration is unauthenticated,** so it is bounded: 10 per hour per
+  address (an IPv6 caller counts by its /64), 1000 unused registrations in
+  total, where a new one evicts an older one (first those without a request
+  waiting for consent, never one younger than 10 minutes), and one nobody
+  used within 24 hours is swept. Authorize and token are limited per address
+  too. A client holds at most 20 requests waiting for consent, and past
+  10 000 in total the oldest makes room, so neither cap can be used to lock
+  others out.
+- **Loose ends are closed.** A consent whose code is never exchanged is
+  revoked within minutes by the retention sweep.
+- **Not in this cut:** client metadata documents by URL (CIMD), private
+  redirect schemes, scoping by workflow or tag on the consent screen (the API
+  takes it), and an `insufficient_scope` challenge on a refused tool.
+- A client connected with OAuth cannot be rotated into a static token, by the
+  route or by the query; revoke it and connect again.
+- Known limits: no CORS headers for browser-based MCP clients; an expired
+  token's `401` carries no `error="invalid_token"`; the organization is shown
+  by id; a signed-out person may lose the consent link through SSO sign-in.
+
 ## 4. Publish gate
 
 What exists: saving a version makes it the latest, and the latest version
@@ -435,32 +513,199 @@ the canvas.
 ### External agents through a signed hooks bridge
 
 `janusly hook` is a subcommand of the same executable, configured as a
-`command` hook in Claude Code or Codex. It reads the hook payload on stdin and
-sends it to `POST /agent-sessions/events` with the agent token as bearer and
-`x-janusly-signature: t=<unix>,v1=<hmac>` over `"<t>.<body>"` (the
-`webhooksig` scheme, ±300 seconds), keyed from the token. Event ids are
-deduplicated per client. The client needs the `report` capability.
+`command` hook in Claude Code or Codex. It reduces the hook payload on the
+user's machine and sends one CloudEvents 1.0 event to
+`POST /agent-sessions/events`. The route exists only with remote MCP enabled
+and shares its transport rules: no credentials in the URL, `https` behind a
+proxy, an allowed `Host`, no browser `Origin`.
 
-Before sending, the bridge drops `transcript_path`, keeps only the last
-segment of `cwd`, scrubs secret-shaped strings and truncates fields. Tool
-inputs, commands and prompts are not sent unless the client enables
-`captureContent` (owner decision D6).
+**Authentication.** The agent token is the bearer and resolves like `/mcp`:
+revoked, expired or orphaned clients get `401`, failures are counted per
+address and audited as `mcp.auth.rejected` with `transport: hooks`. The client
+needs the `report` capability (`403 agent_capability_missing`).
 
-The server persists sessions and events in `agent_sessions` and
-`agent_session_events` (retention 14 days, per-organization caps), projects
-the graph server-side, and streams it with the same LISTEN/NOTIFY wake-up and
-polling fallback as runs. Parent links follow the hook schema: the
-`PostToolUse(Agent)` result's `agentId` links a background subagent to its
-parent; `Stop` is not completion while subagents live.
+**Signature.** `x-janusly-signature: t=<unix>,v1=<hex>` is HMAC-SHA256 over
+`"<t>.<raw body>"`, ±300 seconds, compared in constant time
+(`internal/signedingest`, shared with external runtimes). The key is
+`HKDF-SHA256(ikm = SHA-256(token), info = "janusly/hook-sign/v1")`: the bridge
+derives it from the token, the server from the digest it already stores. The
+signature adds body integrity and a replay window, not a second factor; the
+bearer still has to be the token itself.
 
-- **Gate from the map.** For tools the client lists in `gateTools`, a
-  `PreToolUse` event opens a gate request and the bridge long-polls its
-  decision in 25-second windows, up to the hook timeout. A person approves or
-  denies from the map; the bridge prints the hook's allow or deny decision.
-  No goroutine is held per gate, and an agent token cannot decide one.
-- **Save as workflow.** An observed session converts into a draft: subagents
-  become `agent` nodes, overlapping ones run in parallel. It enters the
-  publish gate like any agent draft; it is a starting point, not a replay.
+**Event contract** (`internal/hookwire`). Strict: an unknown envelope or data
+field, or a field of another type, rejects the event. Types:
+`io.janusly.agent.{session.started, prompt.submitted, tool.requested,
+tool.completed, subagent.started, subagent.stopped, turn.stopped,
+session.ended}`; the source names the runtime (`janusly-hook/1/claude-code`,
+`janusly-hook/1/codex`). The event id is a SHA-256 of its content, so a retried
+hook carries the same id. `project` is a single path segment. Identity fields
+and `januslyRefs` that look like secrets, and names with control or invisible
+format characters, reject the event. `content` is not accepted.
+
+**Storage.** `agent_sessions` and `agent_session_events`, both with `org_id`
+and `agent_client_id`. Each event is one receipt per `(client, event id)`: a
+duplicate answers `200` with `duplicate: true` and changes nothing. The server
+assigns the order (`seq`) under the session row lock. Session ids are
+namespaced per client: another client, even in the same organization, that
+reports the same id gets a session of its own and can neither end nor detect
+the first one. Never stored: transcripts or their path, full
+paths, user or host names, environment, the token, its digest or the
+signature, or the raw body.
+
+| Limit | Value | Past it |
+|---|---|---|
+| Events per client | 100 per 10 s, 600 per minute, own buckets (the client's MCP `rateLimitPerMinute` does not apply) | `429` with `Retry-After` |
+| Events per organization | 3000 per minute | `429` |
+| Body | 32 000 bytes | `413` |
+| Live sessions per client | 50 (silent 30 minutes counts as idle) | `429 agent_session_limit` |
+| Events per session | 5000 | truncated; only closing events, else `409` |
+| Stored receipts per session | 5050, stale and closing included | `409` |
+| Late events | session ended over an hour ago | stored as `stale`, not projected |
+| Retention | 14 days after the last event | the retention sweep deletes it |
+
+**The command** (`internal/hookbridge`). `janusly hook claude-code` or
+`janusly hook codex` reads one hook payload from stdin. It keeps only the
+fields it maps (session, agent, tool name and id, MCP server, status,
+duration, model, the last segment of `cwd`) and drops the rest before any
+network call: transcript paths, tool inputs and responses, prompts, messages
+and errors never leave the machine. From a successful `mcp__janusly__*` call
+it keeps only well-formed `workflowId`, `draftId` and `runId` values. It
+prints nothing on stdout, sends once with a 2-second budget, never retries,
+refuses plain `http` to anything but a loopback IP literal, and always exits 0.
+Secret-shaped refs and invisible format characters are dropped before sending.
+
+| Native hook | Event |
+|---|---|
+| `SessionStart` | `session.started` |
+| `UserPromptSubmit` | `prompt.submitted` |
+| `PreToolUse` | `tool.requested` |
+| `PostToolUse` / `PostToolUseFailure` / `PermissionDenied` | `tool.completed` with `ok` / `error` / `denied` |
+| `SubagentStart` / `SubagentStop` | `subagent.started` / `subagent.stopped` |
+| `Stop` | `turn.stopped` |
+| `SessionEnd` | `session.ended` |
+
+Other hooks are ignored. The event id hashes the session, hook, tool use,
+agent and turn (`turn_id` in Codex, `prompt_id` in Claude Code), so a retried
+hook is a duplicate and the next turn is not.
+
+Setup. Use a dedicated agent client with only the `report` capability: the
+hook runs as the same OS user as the agent, so the agent's own shell tools can
+read its token. Put the token in a file and point `JANUSLY_AGENT_TOKEN_FILE` at
+it (or set `JANUSLY_AGENT_TOKEN`), and set `JANUSLY_URL`:
+
+```bash
+janusly hook doctor                 # token, capability and signature, nothing stored
+janusly hook config claude-code     # merge into .claude/settings.json
+janusly hook config codex           # merge into .codex/hooks.json
+```
+
+**Session map.** `GET /v1/agent-sessions` lists the organization's sessions,
+newest first, by cursor; `GET /v1/agent-sessions/{id}/map` returns the session,
+one lane per agent shaped like run map lanes (`external_agent` for the main
+agent, `external_subagent` with `parentId` for each subagent, the latest 200
+steps each), totals, live subagents and the Janusly runs its calls named.
+Both need `runs.read` and `agents.read` (sessions name agent clients); another
+organization's session answers `404`; agent tokens are refused like on every
+people route. Janusly references are what the agent reported, so a run counts
+as linked only when an agent client of the same creator started it. A session reads `idle` after 30 silent
+minutes and `ended` only on `session.ended`: a stopped turn with a live
+subagent is still running. The run map lists those linked sessions (empty
+without `agents.read`), and the session links back to the run. In the web app the sessions
+live in the Agent activity tab (`#/multiAgent/sessions/<id>`), loaded on
+demand; a running session refreshes every 5 seconds by polling, since no run
+stream carries it.
+
+**Gate from the map.** An agent client lists `gateTools`: exact tool names or
+prefixes ending in `*` (`mcp__stripe__*`), at most 20, with the `report`
+capability.
+
+1. The ingest answers a matching `tool.requested` with `gate: true`.
+2. The bridge opens a gate with `POST /agent-sessions/gates` (same bearer and
+   signature) and long-polls `GET /agent-sessions/gates/{id}/decision?wait=25`
+   (the signature covers the path) until its wait runs out
+   (`JANUSLY_HOOK_GATE_SECONDS`, 120 by default).
+3. A person decides with `POST /v1/agent-sessions/gates/{id}/decide` from the
+   session map; `/needs-you` lists the gate as `agent_gate`.
+4. The bridge prints the runtime's `PreToolUse` decision.
+
+Rules:
+
+- **Who decides.** A signed-in person with editor rank and `agents.write`;
+  agent and service tokens never. The client's creator may decide (it is their
+  agent on their machine), unless the organization sets
+  `agents.publishRequiresSecondPerson`; then the route refuses them and
+  `/needs-you` does not offer it.
+- **No answer is `ask`.** A gate lives as long as its bridge waits (30
+  seconds to 10 minutes). Expired, unanswered, refused, unreachable, or past
+  20 open gates per client: the bridge prints `ask` and the person decides in
+  their terminal. Nothing defaults to `allow`.
+- **A decision is for one call, briefly.** A repeated open answers with the
+  stored gate only when it names the same tool and server; an approval stops
+  answering `allow` two minutes after it is given.
+- **`--gate`.** The bridge learns a call is gated from the ingest's answer. If
+  the event itself is refused (rate limit, a full session, an outage) a hook
+  run as `janusly hook <runtime> --gate` asks the gate route, and prints `ask`
+  when that cannot answer either. Hooks of clients with `gateTools` must use
+  it (`janusly hook config <runtime> --gate` prints it, with a `PreToolUse`
+  timeout that covers `JANUSLY_HOOK_GATE_SECONDS`); without it a refused
+  event leaves the call to the runtime's own policy.
+- **Codex.** Its hooks have no `ask` and no documented plain `allow`, so the
+  bridge prints only denials there; an approval or an unanswered gate leaves
+  the call to Codex's own approval policy.
+- **Content.** Without `captureContent` the decider sees the tool, server,
+  agent and session, not the arguments, and the card says so.
+  `captureContent` applies only to `gateTools`: the bridge then sends the
+  gated call's input, scrubbed on both sides and cut to 8000 bytes; a client
+  without it that sends content is refused. Input that does not fit whole
+  is stored as not captured, never cut off. Only people of the deciding role
+  read the captured input; a viewer sees that it exists. It is cleared after 7
+  days and never enters audit rows (`agent_gate.decided` records the tool,
+  session, client and decision).
+- A gate belongs to its client: another client, or another organization, gets
+  `404` reading or opening it. The poll holds nothing beyond its own request,
+  and one client holds at most 20 waiting polls per process.
+- A denial's reason reaches the agent labelled as a reviewer note; an approval
+  carries no free text.
+- The second-person rule keys on who created the client, not on who runs the
+  agent with its token.
+
+**Save as workflow** (`internal/sessiondraft`). An observed session becomes a
+draft of a new workflow: a starting point, not a replay.
+
+- **What converts.** Only MCP tool calls. Each agent that made at least one
+  becomes an `agent` step, in the order they started; agents whose activity
+  overlapped run between a `parallel_fork` and its `join`. Local tools (a
+  shell, file edits) have no workflow equivalent, and `mcp__janusly__*` calls
+  are the authoring, not the work: both are left out. A session with no MCP
+  tool calls does not convert (`422 agent_session_not_convertible`).
+- **Said before converting.** The session map carries `conversion`
+  (`convertibleSteps` of `totalSteps`, the MCP servers used) and the screen
+  states it above the button.
+- **What stays open.** A session shows what ran, not what it was for. Each
+  agent's goal and the workflow's outputs are written as
+  `observed_placeholder: …` values, and the publish gate reports every value
+  that still contains the marker as an `observed_placeholder` check with its
+  path, so `workflows.qualify` fails until they are replaced. The check is a
+  reminder, not a boundary: publication still needs a person.
+- **Observed names are untrusted.** Tool names, agent types and the project
+  come from the agent's hooks. They never enter the goal; an agent type or
+  project is used as a label or in the name only when it is plain text, and
+  the observed tools travel in the response, not in the document.
+- **One draft per session and author.** Converting again returns the first
+  draft. The draft is readable like any draft in the organization, so it
+  shows the session's agent structure to whoever can read drafts. The draft has no fixtures (`fixtures_missing`), and
+  the existing write, credential and recovery checks apply unchanged.
+- **Entry points.** A person: `POST /v1/agent-sessions/{id}/draft` (editor
+  rank, `workflows.write`, plus the session read permissions). An agent: the
+  MCP tool `sessions.to_draft` (`propose` capability), only for sessions its
+  own client reported; another client's session reads exactly like a missing
+  one. The stdio operator also needs `agents.read` and `runs.read`. Both store an ordinary draft with
+  `origin: {kind: "observed_session", sessionId}`, audit
+  `agent_session.converted`, and return the observed tools and a suggested
+  timeout (twice the 95th percentile of the observed calls) per agent.
+- **After that, nothing special.** `workflows.test`, `workflows.qualify`,
+  `workflows.publish`. A new workflow has no published version, so publishing
+  always opens a publish request for a person.
 
 The run map is measured with five people answering what runs, what is stuck,
 what needs them and what it has cost, each within 30 seconds.

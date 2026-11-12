@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Remote MCP accepts OAuth when `JANUSLY_WEB_BASE_URL` is set: an MCP client
+  registers itself, a signed-in person approves the connection and its
+  capabilities in Settings → Access, and the client gets a 15-minute access
+  token with a rotating refresh token. The grant is an ordinary agent client,
+  so revoking it or demoting its creator applies on the next call. Static
+  agent tokens keep working.
+- Agent clients with the `report` capability can send their sessions to
+  `POST /agent-sessions/events` when remote MCP is enabled: signed
+  CloudEvents with tool names, status and timing, never paths, transcripts or
+  tool inputs. Sessions are kept 14 days. `janusly hook claude-code` and
+  `janusly hook codex` send them from the agent's hooks; `janusly hook doctor`
+  checks the setup and `janusly hook config <runtime>` prints the hook
+  configuration. The Agent activity tab lists the observed sessions and shows
+  each one's agents and subagents as lanes; a run started from a session links
+  to it.
+- An agent client can list `gateTools`. `janusly hook` then holds those tool
+  calls until a person approves or denies them from the session map; with no
+  answer the agent's own permission prompt decides, never an automatic allow.
+  `captureContent` lets the decider see the held call's arguments.
+- An observed session can be saved as a workflow draft, from the session map
+  or with the MCP tool `sessions.to_draft`. Only its MCP tool calls convert,
+  and the screen says how many before converting. Each agent's goal and the
+  outputs are left as placeholders that `workflows.qualify` refuses until
+  they are filled in.
 - The agent cycle harness runs every Claude Code and Codex session in a
   throwaway home with only the `janusly` MCP server and a dedicated model key
   from `CYCLE_PASS_ENV`, and never touches `~/.claude`, `~/.codex` or

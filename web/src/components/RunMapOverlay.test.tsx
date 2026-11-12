@@ -78,7 +78,7 @@ describe('run map node overlay', () => {
   it('totals cost and tokens and counts what is stuck or waiting on the viewer', () => {
     const map: RunMap = {
       run: { id: 'run-1', status: 'running', workflowVersionId: 'v', parentRunId: null },
-      nodes: [], lanes: [], totals: { costUsd: 1.5, tokens: 12_400 },
+      nodes: [], lanes: [], totals: { costUsd: 1.5, tokens: 12_400 }, sessions: [],
     }
     const overlays = new Map([
       ['a', overlay({ stuck: true })], ['b', overlay({ needsYou: true })], ['c', overlay({ needsYou: true })],

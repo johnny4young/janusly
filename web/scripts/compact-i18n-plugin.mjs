@@ -24,6 +24,7 @@ const CORE_PREFIXES = [
 
 const WORKSPACE_PREFIXES = [
   'activity.',
+  'agentSessions.',
   'aiStudio.',
   'aiGuidance.',
   'aiReview.',
@@ -43,6 +44,7 @@ const WORKSPACE_PREFIXES = [
   'multiAgent.',
   'nodeDefaults.',
   'nodes.',
+  'oauthConsent.',
   'operations.',
   'permissions.',
   'problems.',

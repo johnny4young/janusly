@@ -26,6 +26,9 @@ func loadMCPHTTP(getenv func(string) string, production bool, problems []string)
 				problems = append(problems, "remote MCP in production requires an https JANUSLY_WEB_BASE_URL")
 			}
 			cfg.AllowedHosts = append(cfg.AllowedHosts, strings.ToLower(parsed.Hostname()))
+			if (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.User == nil {
+				cfg.BaseURL = parsed.Scheme + "://" + parsed.Host
+			}
 		}
 	} else if production {
 		problems = append(problems, "remote MCP in production requires an https JANUSLY_WEB_BASE_URL")

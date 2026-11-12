@@ -3,6 +3,7 @@ package agentclient
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -42,6 +43,11 @@ type IssueInput struct {
 	ScopeTags          []string
 	ExpiresInDays      int
 	RateLimitPerMinute int
+	// GateTools are tool names, or prefixes ending in "*", the hooks bridge
+	// holds for a person's decision. They need the report capability.
+	GateTools []string
+	// CaptureContent keeps the input of gated tool calls for the decider.
+	CaptureContent bool
 }
 
 // Issued carries the only copy of the plaintext token.
@@ -87,11 +93,24 @@ func Issue(ctx context.Context, q *store.Queries, id string, now time.Time, in I
 		return Issued{}, &InputError{Code: "invalid_rate_limit", Field: "rateLimitPerMinute",
 			Message: "rateLimitPerMinute must be between 1 and 600"}
 	}
+	gateTools, err := gatePatterns(in.GateTools)
+	if err != nil {
+		return Issued{}, err
+	}
+	if len(gateTools) > 0 && !slices.Contains(capabilities, CapabilityReport) {
+		return Issued{}, &InputError{Code: "gate_requires_report", Field: "gateTools",
+			Message: "gateTools need the report capability"}
+	}
+	if in.CaptureContent && len(gateTools) == 0 {
+		return Issued{}, &InputError{Code: "capture_requires_gate", Field: "captureContent",
+			Message: "captureContent applies only to gateTools; list at least one"}
+	}
 	token, digest, last4, err := NewToken()
 	if err != nil {
 		return Issued{}, err
 	}
 	row, err := q.CreateAgentClient(ctx, store.CreateAgentClientParams{
+		GateTools: gateTools, CaptureContent: in.CaptureContent,
 		ID: id, OrgID: in.OrgID, Name: name, Capabilities: Strings(capabilities),
 		ScopeWorkflowIds: workflowIDs, ScopeTags: tags,
 		TokenDigest: digest, TokenLast4: last4, RateLimitPerMinute: int32(rate),
@@ -154,4 +173,40 @@ func scopeValues(values []string, limit, maxLen int, field string) ([]string, er
 	}
 	slices.Sort(out)
 	return out, nil
+}
+
+const maxGateTools = 20
+
+var gatePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,199}\*?$`)
+
+func gatePatterns(values []string) ([]string, error) {
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if !gatePattern.MatchString(value) {
+			return nil, &InputError{Code: "invalid_gate_tools", Field: "gateTools",
+				Message: "each gate tool is a tool name, or a prefix ending in *"}
+		}
+		if !slices.Contains(out, value) {
+			out = append(out, value)
+		}
+	}
+	if len(out) > maxGateTools {
+		return nil, &InputError{Code: "invalid_gate_tools", Field: "gateTools", Message: "at most 20 gate tools"}
+	}
+	return out, nil
+}
+
+// GateMatches reports whether tool matches an exact pattern or a "prefix*".
+func GateMatches(patterns []string, tool string) bool {
+	for _, pattern := range patterns {
+		if prefix, ok := strings.CutSuffix(pattern, "*"); ok {
+			if strings.HasPrefix(tool, prefix) {
+				return true
+			}
+		} else if pattern == tool {
+			return true
+		}
+	}
+	return false
 }

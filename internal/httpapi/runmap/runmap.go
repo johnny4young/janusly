@@ -128,12 +128,26 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	if err != nil {
 		return internalError()
 	}
+	// Sessions name agent clients, so only viewers with agents.read see them.
+	var linked []store.ListAgentSessionsForRunRow
+	if s.viewerHolds(r, rc, "agents.read") {
+		linked, err = q.ListAgentSessionsForRun(ctx, store.ListAgentSessionsForRunParams{OrgID: rc.OrgID, RunID: runID})
+		if err != nil {
+			return internalError()
+		}
+	}
+	sessions := make([]map[string]any, 0, len(linked))
+	for _, session := range linked {
+		sessions = append(sessions, map[string]any{
+			"id": session.ID, "agentClientName": session.AgentClientName, "runtime": session.Runtime,
+		})
+	}
 	return httpkit.OK(map[string]any{
 		"run": map[string]any{
 			"id": run.ID, "status": run.Status, "workflowVersionId": run.WorkflowVersionID,
 			"parentRunId": optionalText(run.ParentRunID),
 		},
-		"nodes": views, "lanes": lanes, "totals": totals,
+		"nodes": views, "lanes": lanes, "totals": totals, "sessions": sessions,
 	})
 }
 
@@ -297,6 +311,21 @@ func laneStep(event store.ListRunAgentEventsRow) map[string]any {
 	return step
 }
 
+// viewerHolds reports whether the viewer's live grant includes permission,
+// resolved the way the route gate resolves it.
+func (s *service) viewerHolds(r *http.Request, rc httpkit.Request, permission string) bool {
+	if rc.Auth == nil {
+		return false
+	}
+	q := store.New(s.pool)
+	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
+	if err != nil || role == nil {
+		return false
+	}
+	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
+	return err == nil && permissions[permission]
+}
+
 // deciderPermissions is the viewer's grant when they can decide at all: a
 // person with at least editor rank, as every decision route requires.
 func (s *service) deciderPermissions(r *http.Request, rc httpkit.Request) map[string]bool {
@@ -369,6 +398,22 @@ func (s *service) needsYou(r *http.Request, rc httpkit.Request) httpkit.Result {
 			}
 			items = append(items, map[string]any{"kind": "publish_request", "id": row.ID, "workflowId": row.WorkflowID,
 				"reasons": reasons, "requestedBy": row.RequestedBy, "expiresAt": row.ExpiresAt.UTC().Format(time.RFC3339)})
+		}
+	}
+	if permissions["agents.write"] && permissions["agents.read"] {
+		// Under the second-person rule a creator is never offered their own
+		// client's gates; filtered in the query so they cannot crowd the page.
+		secondPerson, err := s.secondPersonRequired(r, rc)
+		exclude := pgtype.Text{String: rc.UserID, Valid: secondPerson || err != nil}
+		gates, err := q.ListPendingAgentGatesForOrg(ctx, store.ListPendingAgentGatesForOrgParams{
+			OrgID: rc.OrgID, Now: s.now().UTC(), ExcludeCreator: exclude,
+		})
+		if err != nil {
+			return internalError()
+		}
+		for _, gate := range gates {
+			items = append(items, map[string]any{"kind": "agent_gate", "id": gate.ID, "sessionId": gate.SessionID,
+				"tool": gate.Tool, "agentClientName": gate.AgentClientName, "expiresAt": gate.ExpiresAt.UTC().Format(time.RFC3339)})
 		}
 	}
 	return httpkit.OK(map[string]any{"items": items})

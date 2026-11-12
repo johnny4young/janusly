@@ -1,6 +1,320 @@
 {
   "components": {
     "schemas": {
+      "AgentSession": {
+        "additionalProperties": false,
+        "properties": {
+          "agentClientId": {
+            "type": "string"
+          },
+          "agentClientName": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eventCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastEventAt": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "idle",
+              "ended"
+            ],
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "agentClientId",
+          "agentClientName",
+          "runtime",
+          "project",
+          "model",
+          "status",
+          "truncated",
+          "eventCount",
+          "startedAt",
+          "lastEventAt",
+          "endedAt"
+        ],
+        "type": "object"
+      },
+      "AgentSessionMap": {
+        "additionalProperties": false,
+        "properties": {
+          "canConvert": {
+            "type": "boolean"
+          },
+          "conversion": {
+            "additionalProperties": false,
+            "properties": {
+              "agents": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "convertible": {
+                "type": "boolean"
+              },
+              "convertibleSteps": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mcpServers": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "totalSteps": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "totalSteps",
+              "convertibleSteps",
+              "agents",
+              "mcpServers",
+              "convertible"
+            ],
+            "type": "object"
+          },
+          "gates": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "contentCaptured": {
+                  "type": "boolean"
+                },
+                "expiresAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "input": {},
+                "mcpServer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "needsYou": {
+                  "type": "boolean"
+                },
+                "tool": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "tool",
+                "mcpServer",
+                "agentId",
+                "contentCaptured",
+                "input",
+                "expiresAt",
+                "needsYou"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "lanes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agentType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "external_agent",
+                    "external_subagent"
+                  ],
+                  "type": "string"
+                },
+                "live": {
+                  "type": "boolean"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "parentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "steps": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "agent": {
+                        "type": "string"
+                      },
+                      "at": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "tool": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "at",
+                      "index"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "nodeId",
+                "kind",
+                "parentId",
+                "agentType",
+                "live",
+                "steps",
+                "truncated"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "liveSubagents": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refs": {
+            "additionalProperties": false,
+            "properties": {
+              "draftIds": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "runIds": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "workflowIds": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "workflowIds",
+              "draftIds",
+              "runIds"
+            ],
+            "type": "object"
+          },
+          "session": {
+            "$ref": "#/components/schemas/AgentSession"
+          },
+          "totals": {
+            "additionalProperties": false,
+            "properties": {
+              "errors": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "events": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mcpCalls": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "toolCalls": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "events",
+              "toolCalls",
+              "mcpCalls",
+              "errors"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "session",
+          "lanes",
+          "totals",
+          "liveSubagents",
+          "refs",
+          "gates",
+          "conversion",
+          "canConvert"
+        ],
+        "type": "object"
+      },
       "AuthoringCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -1766,6 +2080,38 @@
               "workflowId",
               "reasons",
               "requestedBy",
+              "expiresAt"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "agentClientName": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "agent_gate"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "sessionId",
+              "tool",
+              "agentClientName",
               "expiresAt"
             ],
             "type": "object"
@@ -4110,6 +4456,29 @@
             ],
             "type": "object"
           },
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agentClientName": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "runtime": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "agentClientName",
+                "runtime"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "totals": {
             "additionalProperties": false,
             "properties": {
@@ -4132,7 +4501,8 @@
           "run",
           "nodes",
           "lanes",
-          "totals"
+          "totals",
+          "sessions"
         ],
         "type": "object"
       },
@@ -6854,6 +7224,337 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/agent-sessions": {
+      "get": {
+        "operationId": "get_v1_agent-sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "nextCursor": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "sessions": {
+                              "items": {
+                                "$ref": "#/components/schemas/AgentSession"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "sessions",
+                            "nextCursor"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "External agent sessions observed through the hooks bridge, newest first"
+      }
+    },
+    "/agent-sessions/gates/{gateId}/decide": {
+      "post": {
+        "operationId": "post_v1_agent-sessions_gates_gateId_decide",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "approve",
+                      "deny"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "decision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "gate": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "approved",
+                                    "denied"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "status"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "gate"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Approve or deny a tool call an agent's hook is holding"
+      }
+    },
+    "/agent-sessions/{sessionId}/draft": {
+      "post": {
+        "operationId": "post_v1_agent-sessions_sessionId_draft",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "agents": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "agentType": {
+                                    "type": "string"
+                                  },
+                                  "nodeId": {
+                                    "type": "string"
+                                  },
+                                  "suggestedTimeoutMs": {
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "tools": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "nodeId",
+                                  "tools"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "conversion": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "agents": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "convertible": {
+                                  "type": "boolean"
+                                },
+                                "convertibleSteps": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "mcpServers": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "totalSteps": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "totalSteps",
+                                "convertibleSteps",
+                                "agents",
+                                "mcpServers",
+                                "convertible"
+                              ],
+                              "type": "object"
+                            },
+                            "digest": {
+                              "type": "string"
+                            },
+                            "draftId": {
+                              "type": "string"
+                            },
+                            "mcpServers": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "next": {
+                              "type": "string"
+                            },
+                            "placeholders": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "workflowId": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "draftId",
+                            "workflowId",
+                            "digest",
+                            "conversion",
+                            "agents",
+                            "mcpServers",
+                            "placeholders",
+                            "next"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses"
+      }
+    },
+    "/agent-sessions/{sessionId}/map": {
+      "get": {
+        "operationId": "get_v1_agent-sessions_sessionId_map",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/AgentSessionMap"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Agent lanes, totals and Janusly references of one observed session"
+      }
+    },
     "/ai/patch-workflow": {
       "post": {
         "operationId": "post_v1_ai_patch-workflow",

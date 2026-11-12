@@ -118,3 +118,17 @@ func (d Deps) auditTokenRejection(ctx context.Context, err error, address string
 		TargetType: "agent_client", TargetID: clientID, Metadata: metadata,
 	})
 }
+
+// AgentAuth authenticates an agent bearer token for an endpoint outside /mcp
+// with the same counting, audit and challenge, then hands next the principal.
+func AgentAuth(deps Deps, next func(http.ResponseWriter, *http.Request, *agentclient.Principal)) http.Handler {
+	resolver := agentclient.Resolver{Pool: deps.Pool}
+	return challenge("", authGate(deps, resolver, deps.Logger, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := r.Context().Value(verifiedPrincipalKey{}).(*agentclient.Principal)
+		if principal == nil {
+			http.Error(w, sdkauth.ErrInvalidToken.Error(), http.StatusUnauthorized)
+			return
+		}
+		next(w, r, principal)
+	})))
+}

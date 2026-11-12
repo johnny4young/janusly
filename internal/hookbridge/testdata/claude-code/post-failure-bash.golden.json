@@ -1,0 +1,17 @@
+{
+  "specversion": "1.0",
+  "id": "37f4b757449caaf40eb2823506c35f1b53142fb7eb35fcc36c046acbaa2bf975",
+  "source": "janusly-hook/1/claude-code",
+  "type": "io.janusly.agent.tool.completed",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+    "agentId": "agent-7",
+    "toolUseId": "toolu_03",
+    "tool": "Bash",
+    "toolKind": "builtin",
+    "status": "error",
+    "durationMs": 15
+  }
+}

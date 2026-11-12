@@ -1,0 +1,12 @@
+{
+  "specversion": "1.0",
+  "id": "647f1a0d302779812dd7599e522a9b1924db44b5313fffbddea9f003a78605cd",
+  "source": "janusly-hook/1/claude-code",
+  "type": "io.janusly.agent.session.ended",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+    "status": "ok"
+  }
+}

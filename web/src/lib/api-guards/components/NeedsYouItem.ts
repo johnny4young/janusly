@@ -26,5 +26,12 @@ export function isNeedsYouItem(value: unknown): value is Api.NeedsYouItem {
     reasons: arrayOf(isString),
     requestedBy: isString,
     workflowId: isString,
+  }), shape({
+    agentClientName: isString,
+    expiresAt: isString,
+    id: isString,
+    kind: literal("agent_gate"),
+    sessionId: isString,
+    tool: isString,
   }))(value)
 }

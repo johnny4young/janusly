@@ -1,0 +1,11 @@
+{
+  "specversion": "1.0",
+  "id": "7f6630fa42983fb3c7e2d921006268a256f1daa1b773371e07434748a659b8ff",
+  "source": "janusly-hook/1/codex",
+  "type": "io.janusly.agent.turn.stopped",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3"
+  }
+}

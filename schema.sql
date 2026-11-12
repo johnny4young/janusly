@@ -167,13 +167,107 @@ CREATE TABLE public.agent_clients (
     revoked_at timestamp with time zone,
     revoked_by text,
     last_used_at timestamp with time zone,
+    gate_tools text[] DEFAULT '{}'::text[] NOT NULL,
+    capture_content boolean DEFAULT false NOT NULL,
+    oauth_client_id text,
+    access_expires_at timestamp with time zone,
+    refresh_digest bytea,
     CONSTRAINT agent_clients_capabilities_check CHECK ((((cardinality(capabilities) >= 1) AND (cardinality(capabilities) <= 6)) AND (capabilities <@ ARRAY['read'::text, 'propose'::text, 'test'::text, 'publish'::text, 'operate'::text, 'report'::text]))),
     CONSTRAINT agent_clients_digest_check CHECK ((octet_length(token_digest) = 32)),
     CONSTRAINT agent_clients_expiry_check CHECK (((expires_at > token_issued_at) AND (expires_at <= (token_issued_at + '2160:00:00'::interval)))),
+    CONSTRAINT agent_clients_gate_check CHECK (((cardinality(gate_tools) <= 20) AND ((NOT capture_content) OR (cardinality(gate_tools) > 0)))),
     CONSTRAINT agent_clients_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 120))),
+    CONSTRAINT agent_clients_oauth_check CHECK ((((oauth_client_id IS NOT NULL) OR ((access_expires_at IS NULL) AND (refresh_digest IS NULL))) AND ((refresh_digest IS NULL) OR (octet_length(refresh_digest) = 32)))),
     CONSTRAINT agent_clients_rate_check CHECK (((rate_limit_per_minute >= 1) AND (rate_limit_per_minute <= 600))),
     CONSTRAINT agent_clients_revocation_check CHECK (((revoked_at IS NULL) = (revoked_by IS NULL))),
     CONSTRAINT agent_clients_scope_check CHECK (((cardinality(scope_workflow_ids) <= 100) AND (cardinality(scope_tags) <= 20)))
+);
+
+
+--
+-- Name: agent_session_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_session_events (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL,
+    event_id text NOT NULL,
+    seq bigint,
+    outcome text NOT NULL,
+    type text NOT NULL,
+    agent_id text,
+    parent_agent_id text,
+    agent_type text,
+    tool_use_id text,
+    tool text,
+    tool_kind text,
+    mcp_server text,
+    status text,
+    duration_ms bigint,
+    janusly_refs jsonb,
+    occurred_at timestamp with time zone NOT NULL,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_events_duration_check CHECK (((duration_ms IS NULL) OR (duration_ms >= 0))),
+    CONSTRAINT agent_session_events_id_check CHECK ((event_id ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT agent_session_events_outcome_check CHECK ((((outcome = 'applied'::text) = (seq IS NOT NULL)) AND (outcome = ANY (ARRAY['applied'::text, 'stale'::text]))))
+);
+
+
+--
+-- Name: agent_session_gates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_session_gates (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    session_id text NOT NULL,
+    tool_use_id text NOT NULL,
+    tool text NOT NULL,
+    mcp_server text,
+    agent_id text,
+    content jsonb,
+    status text DEFAULT 'pending'::text NOT NULL,
+    decided_by text,
+    decided_at timestamp with time zone,
+    reason text,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_session_gates_decision_check CHECK (((status = ANY (ARRAY['approved'::text, 'denied'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
+    CONSTRAINT agent_session_gates_reason_check CHECK (((reason IS NULL) OR (char_length(reason) <= 500))),
+    CONSTRAINT agent_session_gates_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text, 'expired'::text])))
+);
+
+
+--
+-- Name: agent_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_sessions (
+    id text NOT NULL,
+    org_id text NOT NULL,
+    agent_client_id text NOT NULL,
+    external_session_id text NOT NULL,
+    runtime text NOT NULL,
+    project text,
+    runtime_version text,
+    model text,
+    status text DEFAULT 'running'::text NOT NULL,
+    end_status text,
+    truncated boolean DEFAULT false NOT NULL,
+    event_count integer DEFAULT 0 NOT NULL,
+    last_seq bigint DEFAULT 0 NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    last_event_at timestamp with time zone NOT NULL,
+    ended_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT agent_sessions_counts_check CHECK (((event_count >= 0) AND (last_seq >= 0))),
+    CONSTRAINT agent_sessions_ended_check CHECK (((status = 'ended'::text) = (ended_at IS NOT NULL))),
+    CONSTRAINT agent_sessions_external_check CHECK (((char_length(external_session_id) >= 1) AND (char_length(external_session_id) <= 200))),
+    CONSTRAINT agent_sessions_runtime_check CHECK ((runtime = ANY (ARRAY['claude-code'::text, 'codex'::text]))),
+    CONSTRAINT agent_sessions_status_check CHECK ((status = ANY (ARRAY['running'::text, 'ended'::text])))
 );
 
 
@@ -710,6 +804,60 @@ CREATE TABLE public.memory_entries (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     retain_until timestamp with time zone NOT NULL,
     hold_until timestamp with time zone
+);
+
+
+--
+-- Name: oauth_authorization_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_authorization_requests (
+    id text NOT NULL,
+    oauth_client_id text NOT NULL,
+    redirect_uri text NOT NULL,
+    code_challenge text NOT NULL,
+    scopes text[] NOT NULL,
+    state text NOT NULL,
+    resource text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    org_id text,
+    decided_by text,
+    agent_client_id text,
+    code_digest bytea,
+    code_expires_at timestamp with time zone,
+    code_used_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT oauth_requests_approved_check CHECK (((status = 'approved'::text) = ((code_digest IS NOT NULL) AND (agent_client_id IS NOT NULL) AND (org_id IS NOT NULL)))),
+    CONSTRAINT oauth_requests_challenge_check CHECK ((char_length(code_challenge) = 43)),
+    CONSTRAINT oauth_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'denied'::text])))
+);
+
+
+--
+-- Name: oauth_clients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_clients (
+    id text NOT NULL,
+    client_name text NOT NULL,
+    redirect_uris text[] NOT NULL,
+    registered_from text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp with time zone,
+    CONSTRAINT oauth_clients_name_check CHECK (((char_length(client_name) >= 1) AND (char_length(client_name) <= 100))),
+    CONSTRAINT oauth_clients_redirects_check CHECK (((cardinality(redirect_uris) >= 1) AND (cardinality(redirect_uris) <= 5)))
+);
+
+
+--
+-- Name: oauth_refresh_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_refresh_history (
+    digest bytea NOT NULL,
+    agent_client_id text NOT NULL,
+    rotated_at timestamp with time zone NOT NULL
 );
 
 
@@ -1708,6 +1856,7 @@ CREATE TABLE public.workflow_drafts (
     digest text NOT NULL,
     created_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    origin jsonb,
     CONSTRAINT workflow_drafts_digest_check CHECK ((char_length(digest) = 64))
 );
 
@@ -1885,6 +2034,30 @@ CREATE TABLE public.workflows (
 
 ALTER TABLE ONLY public.agent_clients
     ADD CONSTRAINT agent_clients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent_session_events agent_session_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_events
+    ADD CONSTRAINT agent_session_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent_session_gates agent_session_gates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_gates
+    ADD CONSTRAINT agent_session_gates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent_sessions agent_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_sessions
+    ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
 
 
 --
@@ -2093,6 +2266,30 @@ ALTER TABLE ONLY public.mcp_tool_descriptors
 
 ALTER TABLE ONLY public.memory_entries
     ADD CONSTRAINT memory_entries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oauth_authorization_requests oauth_authorization_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_requests
+    ADD CONSTRAINT oauth_authorization_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oauth_clients oauth_clients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_clients
+    ADD CONSTRAINT oauth_clients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: oauth_refresh_history oauth_refresh_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_refresh_history
+    ADD CONSTRAINT oauth_refresh_history_pkey PRIMARY KEY (digest);
 
 
 --
@@ -2623,10 +2820,94 @@ CREATE INDEX agent_clients_org_created_idx ON public.agent_clients USING btree (
 
 
 --
+-- Name: agent_clients_refresh_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_clients_refresh_idx ON public.agent_clients USING btree (refresh_digest) WHERE (refresh_digest IS NOT NULL);
+
+
+--
 -- Name: agent_clients_token_digest_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX agent_clients_token_digest_idx ON public.agent_clients USING btree (token_digest);
+
+
+--
+-- Name: agent_session_events_receipt_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_session_events_receipt_idx ON public.agent_session_events USING btree (agent_client_id, event_id);
+
+
+--
+-- Name: agent_session_events_run_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_events_run_idx ON public.agent_session_events USING btree (org_id, ((janusly_refs ->> 'runId'::text))) WHERE ((janusly_refs ->> 'runId'::text) IS NOT NULL);
+
+
+--
+-- Name: agent_session_events_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_session_events_session_idx ON public.agent_session_events USING btree (session_id, seq);
+
+
+--
+-- Name: agent_session_gates_call_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_session_gates_call_idx ON public.agent_session_gates USING btree (session_id, tool_use_id);
+
+
+--
+-- Name: agent_session_gates_client_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_client_pending_idx ON public.agent_session_gates USING btree (agent_client_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: agent_session_gates_content_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_content_idx ON public.agent_session_gates USING btree (created_at) WHERE (content IS NOT NULL);
+
+
+--
+-- Name: agent_session_gates_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_session_gates_pending_idx ON public.agent_session_gates USING btree (org_id, created_at) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: agent_sessions_client_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_sessions_client_live_idx ON public.agent_sessions USING btree (agent_client_id, last_event_at) WHERE (status = 'running'::text);
+
+
+--
+-- Name: agent_sessions_external_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX agent_sessions_external_idx ON public.agent_sessions USING btree (org_id, agent_client_id, external_session_id);
+
+
+--
+-- Name: agent_sessions_last_event_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_sessions_last_event_idx ON public.agent_sessions USING btree (last_event_at);
+
+
+--
+-- Name: agent_sessions_org_recent_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX agent_sessions_org_recent_idx ON public.agent_sessions USING btree (org_id, last_event_at DESC, id DESC);
 
 
 --
@@ -3047,6 +3328,41 @@ CREATE INDEX memory_entries_org_retain_until_idx ON public.memory_entries USING 
 --
 
 CREATE UNIQUE INDEX memory_entries_run_summary_key ON public.memory_entries USING btree (org_id, run_id, kind) WHERE ((kind = 'run_summary'::text) AND (run_id IS NOT NULL));
+
+
+--
+-- Name: oauth_clients_unused_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_clients_unused_idx ON public.oauth_clients USING btree (created_at) WHERE (last_used_at IS NULL);
+
+
+--
+-- Name: oauth_refresh_history_rotated_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_refresh_history_rotated_idx ON public.oauth_refresh_history USING btree (rotated_at);
+
+
+--
+-- Name: oauth_requests_code_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX oauth_requests_code_idx ON public.oauth_authorization_requests USING btree (code_digest) WHERE (code_digest IS NOT NULL);
+
+
+--
+-- Name: oauth_requests_expiry_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_requests_expiry_idx ON public.oauth_authorization_requests USING btree (expires_at);
+
+
+--
+-- Name: oauth_requests_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX oauth_requests_pending_idx ON public.oauth_authorization_requests USING btree (oauth_client_id, created_at) WHERE (status = 'pending'::text);
 
 
 --
@@ -3827,6 +4143,13 @@ CREATE INDEX workflow_drafts_org_created_idx ON public.workflow_drafts USING btr
 
 
 --
+-- Name: workflow_drafts_origin_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX workflow_drafts_origin_session_idx ON public.workflow_drafts USING btree (org_id, ((origin ->> 'sessionId'::text))) WHERE ((origin ->> 'sessionId'::text) IS NOT NULL);
+
+
+--
 -- Name: workflow_improvements_org_workflow_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3974,6 +4297,22 @@ CREATE TRIGGER run_nodes_stamp_org BEFORE INSERT ON public.run_nodes FOR EACH RO
 
 
 --
+-- Name: agent_session_events agent_session_events_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_events
+    ADD CONSTRAINT agent_session_events_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: agent_session_gates agent_session_gates_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_session_gates
+    ADD CONSTRAINT agent_session_gates_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.agent_sessions(id) ON DELETE CASCADE;
+
+
+--
 -- Name: authoring_experiences authoring_experiences_version_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3987,6 +4326,14 @@ ALTER TABLE ONLY public.authoring_experiences
 
 ALTER TABLE ONLY public.authoring_experiences
     ADD CONSTRAINT authoring_experiences_workflow_fk FOREIGN KEY (org_id, workflow_id) REFERENCES public.workflows(org_id, id) ON DELETE CASCADE;
+
+
+--
+-- Name: oauth_authorization_requests oauth_authorization_requests_oauth_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_authorization_requests
+    ADD CONSTRAINT oauth_authorization_requests_oauth_client_id_fkey FOREIGN KEY (oauth_client_id) REFERENCES public.oauth_clients(id) ON DELETE CASCADE;
 
 
 --

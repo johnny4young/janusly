@@ -16,14 +16,16 @@ import (
 const createAgentClient = `-- name: CreateAgentClient :one
 INSERT INTO agent_clients (
   id, org_id, name, capabilities, scope_workflow_ids, scope_tags,
-  token_digest, token_last4, rate_limit_per_minute, created_by, token_issued_at, expires_at
+  token_digest, token_last4, rate_limit_per_minute, created_by, token_issued_at, expires_at,
+  gate_tools, capture_content
 ) VALUES (
   $1, $2, $3, $4::text[],
   $5::text[], $6::text[],
   $7, $8, $9,
-  $10, $11, $12
+  $10, $11, $12,
+  $13::text[], $14
 )
-RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at
+RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest
 `
 
 type CreateAgentClientParams struct {
@@ -39,6 +41,8 @@ type CreateAgentClientParams struct {
 	CreatedBy          string
 	TokenIssuedAt      time.Time
 	ExpiresAt          time.Time
+	GateTools          []string
+	CaptureContent     bool
 }
 
 func (q *Queries) CreateAgentClient(ctx context.Context, arg CreateAgentClientParams) (AgentClient, error) {
@@ -55,6 +59,8 @@ func (q *Queries) CreateAgentClient(ctx context.Context, arg CreateAgentClientPa
 		arg.CreatedBy,
 		arg.TokenIssuedAt,
 		arg.ExpiresAt,
+		arg.GateTools,
+		arg.CaptureContent,
 	)
 	var i AgentClient
 	err := row.Scan(
@@ -74,12 +80,17 @@ func (q *Queries) CreateAgentClient(ctx context.Context, arg CreateAgentClientPa
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.LastUsedAt,
+		&i.GateTools,
+		&i.CaptureContent,
+		&i.OauthClientID,
+		&i.AccessExpiresAt,
+		&i.RefreshDigest,
 	)
 	return i, err
 }
 
 const getAgentClient = `-- name: GetAgentClient :one
-SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients WHERE org_id = $1 AND id = $2
+SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest FROM agent_clients WHERE org_id = $1 AND id = $2
 `
 
 type GetAgentClientParams struct {
@@ -107,12 +118,17 @@ func (q *Queries) GetAgentClient(ctx context.Context, arg GetAgentClientParams) 
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.LastUsedAt,
+		&i.GateTools,
+		&i.CaptureContent,
+		&i.OauthClientID,
+		&i.AccessExpiresAt,
+		&i.RefreshDigest,
 	)
 	return i, err
 }
 
 const getAgentClientByTokenDigest = `-- name: GetAgentClientByTokenDigest :one
-SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients WHERE token_digest = $1
+SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest FROM agent_clients WHERE token_digest = $1
 `
 
 func (q *Queries) GetAgentClientByTokenDigest(ctx context.Context, tokenDigest []byte) (AgentClient, error) {
@@ -135,6 +151,11 @@ func (q *Queries) GetAgentClientByTokenDigest(ctx context.Context, tokenDigest [
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.LastUsedAt,
+		&i.GateTools,
+		&i.CaptureContent,
+		&i.OauthClientID,
+		&i.AccessExpiresAt,
+		&i.RefreshDigest,
 	)
 	return i, err
 }
@@ -232,7 +253,7 @@ func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClie
 }
 
 const listAgentClients = `-- name: ListAgentClients :many
-SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at FROM agent_clients
+SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest FROM agent_clients
 WHERE org_id = $1
   AND (created_at, id) < ($2::timestamptz, $3::text)
 ORDER BY created_at DESC, id DESC
@@ -277,6 +298,11 @@ func (q *Queries) ListAgentClients(ctx context.Context, arg ListAgentClientsPara
 			&i.RevokedAt,
 			&i.RevokedBy,
 			&i.LastUsedAt,
+			&i.GateTools,
+			&i.CaptureContent,
+			&i.OauthClientID,
+			&i.AccessExpiresAt,
+			&i.RefreshDigest,
 		); err != nil {
 			return nil, err
 		}
@@ -522,7 +548,7 @@ func (q *Queries) ResolveAgentScopeWorkflowIDs(ctx context.Context, arg ResolveA
 const revokeAgentClient = `-- name: RevokeAgentClient :one
 UPDATE agent_clients SET revoked_at = now(), revoked_by = $1::text
 WHERE org_id = $2 AND id = $3 AND revoked_at IS NULL
-RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at
+RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest
 `
 
 type RevokeAgentClientParams struct {
@@ -551,6 +577,11 @@ func (q *Queries) RevokeAgentClient(ctx context.Context, arg RevokeAgentClientPa
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.LastUsedAt,
+		&i.GateTools,
+		&i.CaptureContent,
+		&i.OauthClientID,
+		&i.AccessExpiresAt,
+		&i.RefreshDigest,
 	)
 	return i, err
 }
@@ -560,8 +591,8 @@ UPDATE agent_clients
 SET token_digest = $1, token_last4 = $2,
     token_issued_at = $3, expires_at = $4
 WHERE org_id = $5 AND id = $6 AND revoked_at IS NULL
-  AND expires_at > $3
-RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at
+  AND expires_at > $3 AND oauth_client_id IS NULL
+RETURNING id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest
 `
 
 type RotateAgentClientTokenParams struct {
@@ -600,6 +631,11 @@ func (q *Queries) RotateAgentClientToken(ctx context.Context, arg RotateAgentCli
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.LastUsedAt,
+		&i.GateTools,
+		&i.CaptureContent,
+		&i.OauthClientID,
+		&i.AccessExpiresAt,
+		&i.RefreshDigest,
 	)
 	return i, err
 }

@@ -1,0 +1,23 @@
+{
+  "session_id": "3f6c1a2e-7d1b-4c9e-9a51-0c8a6a7f2b10",
+  "transcript_path": "/Users/alex/.claude/projects/-Users-alex-work-billing/3f6c1a2e.jsonl",
+  "cwd": "/Users/alex/work/billing-automation",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__janusly__runs.start",
+  "mcp_server": "janusly",
+  "tool_input": {
+    "workflowId": "wf_refunds"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"runId\":\"run_8c1\",\"workflowId\":\"wf_refunds\",\"status\":\"queued\"}"
+      }
+    ]
+  },
+  "tool_use_id": "toolu_02",
+  "duration_ms": 812,
+  "prompt_id": "p-1"
+}

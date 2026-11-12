@@ -45,7 +45,7 @@ const map: RunMap = {
       elapsedMs: 1_000, costUsd: 0, tokens: 0, stuck: false, needsYou: true, waitingKind: 'tool_approval', childRunId: null },
   ],
   lanes: [],
-  totals: { costUsd: 0.02, tokens: 3_000 },
+  totals: { costUsd: 0.02, tokens: 3_000 }, sessions: [],
 }
 
 function makeExecution(onApproveNode = vi.fn(async () => undefined)) {

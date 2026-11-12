@@ -143,8 +143,10 @@ type createBody struct {
 		WorkflowIDs []string `json:"workflowIds"`
 		Tags        []string `json:"tags"`
 	} `json:"scope"`
-	ExpiresInDays      int `json:"expiresInDays"`
-	RateLimitPerMinute int `json:"rateLimitPerMinute"`
+	ExpiresInDays      int      `json:"expiresInDays"`
+	RateLimitPerMinute int      `json:"rateLimitPerMinute"`
+	GateTools          []string `json:"gateTools"`
+	CaptureContent     bool     `json:"captureContent"`
 }
 
 func (s *service) create(r *http.Request, rc httpkit.Request) httpkit.Result {
@@ -169,6 +171,7 @@ func (s *service) create(r *http.Request, rc httpkit.Request) httpkit.Result {
 		OrgID: rc.OrgID, CreatedBy: rc.UserID, Name: body.Name, Capabilities: body.Capabilities,
 		ScopeWorkflowIDs: body.Scope.WorkflowIDs, ScopeTags: body.Scope.Tags,
 		ExpiresInDays: body.ExpiresInDays, RateLimitPerMinute: body.RateLimitPerMinute,
+		GateTools: body.GateTools, CaptureContent: body.CaptureContent,
 	}, held)
 	if result, failed := inputFailure(err); failed {
 		return result
@@ -179,6 +182,7 @@ func (s *service) create(r *http.Request, rc httpkit.Request) httpkit.Result {
 			"capabilities": issued.Client.Capabilities,
 			"scope":        map[string]any{"workflowIds": issued.Client.ScopeWorkflowIds, "tags": issued.Client.ScopeTags},
 			"expiresAt":    issued.Client.ExpiresAt.UTC().Format(time.RFC3339),
+			"gateTools":    issued.Client.GateTools, "captureContent": issued.Client.CaptureContent,
 		},
 	})
 	return httpkit.Result{Status: http.StatusCreated, Data: map[string]any{
@@ -200,6 +204,10 @@ func (s *service) rotate(r *http.Request, rc httpkit.Request) httpkit.Result {
 		if err := httpkit.DecodeBodyBounded(r, &body, maxBodyBytes); err != nil {
 			return httpkit.Error(http.StatusBadRequest, "invalid_body", "request body is not a valid rotation", nil)
 		}
+	}
+	// An OAuth grant has no static token to hand out; its client refreshes it.
+	if existing.OauthClientID.Valid {
+		return httpkit.Error(http.StatusConflict, "agent_client_oauth", "this agent client was connected with OAuth; revoke it and connect again", nil)
 	}
 	now := s.now()
 	// Expiry ends a client like revocation does; rotation never revives it.
@@ -312,13 +320,15 @@ func view(row store.AgentClient, now time.Time) map[string]any {
 		"capabilities":       row.Capabilities,
 		"scope":              map[string]any{"workflowIds": nonNil(row.ScopeWorkflowIds), "tags": nonNil(row.ScopeTags)},
 		"rateLimitPerMinute": row.RateLimitPerMinute,
-		"tokenLast4":         row.TokenLast4,
-		"createdBy":          row.CreatedBy,
-		"createdAt":          row.CreatedAt.UTC().Format(time.RFC3339),
-		"tokenIssuedAt":      row.TokenIssuedAt.UTC().Format(time.RFC3339),
-		"expiresAt":          row.ExpiresAt.UTC().Format(time.RFC3339),
-		"revokedAt":          optionalTime(row.RevokedAt),
-		"lastUsedAt":         optionalTime(row.LastUsedAt),
+		"gateTools":          nonNil(row.GateTools), "captureContent": row.CaptureContent,
+		"origin":        map[bool]string{true: "oauth", false: "static"}[row.OauthClientID.Valid],
+		"tokenLast4":    row.TokenLast4,
+		"createdBy":     row.CreatedBy,
+		"createdAt":     row.CreatedAt.UTC().Format(time.RFC3339),
+		"tokenIssuedAt": row.TokenIssuedAt.UTC().Format(time.RFC3339),
+		"expiresAt":     row.ExpiresAt.UTC().Format(time.RFC3339),
+		"revokedAt":     optionalTime(row.RevokedAt),
+		"lastUsedAt":    optionalTime(row.LastUsedAt),
 	}
 }
 

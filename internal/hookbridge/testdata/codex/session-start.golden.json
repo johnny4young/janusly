@@ -1,0 +1,13 @@
+{
+  "specversion": "1.0",
+  "id": "ae81dfb033a7f26ae22b89f5e7a2d6bffc53584daae78d6c5a5d1553d612dbdc",
+  "source": "janusly-hook/1/codex",
+  "type": "io.janusly.agent.session.started",
+  "time": "2026-11-12T15:04:05.123Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "sessionId": "019a7b2e-5f0c-7c31-b8e2-44d0a1c9e7f3",
+    "project": "notion-sync",
+    "model": "gpt-5.5-codex"
+  }
+}

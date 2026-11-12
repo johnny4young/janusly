@@ -38,22 +38,20 @@ import (
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/secretstore"
 	"github.com/johnny4young/janusly/internal/signature"
+	"github.com/johnny4young/janusly/internal/signedingest"
 	"github.com/johnny4young/janusly/internal/store"
-	"github.com/johnny4young/janusly/internal/webhooksig"
 )
 
 const (
-	externalRuntimeBodyMaxBytes     = 128_000
-	externalRuntimePayloadMaxBytes  = 64_000
-	externalRuntimeToleranceSeconds = 300
-	externalRuntimeNameMax          = 120
-	externalRuntimeKeyMax           = 120
-	externalRuntimeCredentialMax    = 200
+	externalRuntimeBodyMaxBytes    = 128_000
+	externalRuntimePayloadMaxBytes = 64_000
+	externalRuntimeNameMax         = 120
+	externalRuntimeKeyMax          = 120
+	externalRuntimeCredentialMax   = 200
 )
 
 var (
 	externalRuntimeKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
-	externalHexSigPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	externalStatuses          = map[string]bool{
 		"queued": true, "running": true, "waiting": true, "succeeded": true,
 		"failed": true, "cancelled": true, "unknown": true,
@@ -63,21 +61,10 @@ var (
 
 /* ------------------------------ signature ----------------------------- */
 
-// verifyExternalRuntimeSignature ports external-runtime-signature.ts:
-// `t=<unix-seconds>,v1=<hex>` over `${timestamp}.${rawBody}`, constant
-// time, bounded clock skew.
+// verifyExternalRuntimeSignature checks `t=<unix-seconds>,v1=<hex>` over
+// `${timestamp}.${rawBody}`, constant time, bounded clock skew.
 func verifyExternalRuntimeSignature(signatureHeader, rawBody, secret string, nowSeconds int64) bool {
-	timestampRaw, candidates := webhooksig.ParseHeader(signatureHeader, "t", "v1")
-	for _, candidate := range candidates {
-		if !externalHexSigPattern.MatchString(candidate) {
-			return false
-		}
-	}
-	_, reason := webhooksig.Verify(timestampRaw, candidates, rawBody, secret, nowSeconds, webhooksig.Posture{
-		Compose:          func(t, body string) string { return t + "." + body },
-		ToleranceSeconds: externalRuntimeToleranceSeconds,
-	})
-	return reason == ""
+	return signedingest.VerifyTimestamped(signatureHeader, rawBody, secret, nowSeconds)
 }
 
 /* ------------------------- strict event contract ----------------------- */
@@ -157,14 +144,9 @@ func parseExternalTimestamp(value string) (time.Time, bool) {
 // parseExternalRuntimeEvent validates the strict CloudEvents contract;
 // nil means "invalid external runtime event".
 func parseExternalRuntimeEvent(rawBody []byte) *externalRuntimeEvent {
-	var rawEnvelope map[string]json.RawMessage
-	if err := json.Unmarshal(rawBody, &rawEnvelope); err != nil {
+	rawEnvelope, ok := signedingest.StrictObject(rawBody, allowedExternalEnvelopeFields)
+	if !ok {
 		return nil
-	}
-	for field := range rawEnvelope {
-		if !allowedExternalEnvelopeFields[field] {
-			return nil
-		}
 	}
 	var event externalRuntimeEvent
 	if err := json.Unmarshal(rawBody, &event); err != nil {
@@ -174,14 +156,10 @@ func parseExternalRuntimeEvent(rawBody []byte) *externalRuntimeEvent {
 	if !knownType {
 		return nil
 	}
-	var rawData map[string]json.RawMessage
-	if dataRaw, ok := rawEnvelope["data"]; !ok || json.Unmarshal(dataRaw, &rawData) != nil {
+	if dataRaw, ok := rawEnvelope["data"]; !ok {
 		return nil
-	}
-	for field := range rawData {
-		if !allowedData[field] {
-			return nil
-		}
+	} else if _, ok := signedingest.StrictObject(dataRaw, allowedData); !ok {
+		return nil
 	}
 
 	eventTime, timeOK := parseExternalTimestamp(event.Time)
@@ -246,42 +224,14 @@ func parseExternalRuntimeEvent(rawBody []byte) *externalRuntimeEvent {
 // secret material — scrubbing would corrupt them, so they must not enter
 // the projection at all.
 func externalIdentitySensitive(event *externalRuntimeEvent) bool {
-	for _, value := range []string{
-		event.ID, event.Source, event.Data.ExternalWorkflowID,
-		event.Data.ExternalRunID, event.Data.ExternalStepID,
-	} {
-		if value != "" && signature.ScrubSecretShapes(value) != value {
-			return true
-		}
-	}
-	return false
+	return signedingest.IdentitySensitive(event.ID, event.Source, event.Data.ExternalWorkflowID,
+		event.Data.ExternalRunID, event.Data.ExternalStepID)
 }
 
 /* ------------------------ scrubbed safe payloads ----------------------- */
 
-func scrubExternalValue(value any) any {
-	switch typed := value.(type) {
-	case string:
-		return signature.ScrubSecretShapes(typed)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, scrubExternalValue(item))
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = scrubExternalValue(item)
-		}
-		return out
-	default:
-		return value
-	}
-}
-
 func safeExternalPayload(value any) []byte {
-	return grammar.SafePersistPayload(scrubExternalValue(value),
+	return grammar.SafePersistPayload(signedingest.Scrub(value),
 		grammar.PersistOptions{MaxBytes: externalRuntimePayloadMaxBytes})
 }
 

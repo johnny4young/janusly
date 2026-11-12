@@ -41,7 +41,7 @@ export { WorkspaceSectionNav }
 // preload. Chunk grouping lives in vite.config.ts; shared dependencies can
 // load a chunk before its lazy component mounts.
 
-const MultiAgentTimeline = lazy(() => panelLoaders.multiAgent().then((m) => ({ default: m.MultiAgentTimeline })))
+const AgentActivityPanel = lazy(() => panelLoaders.multiAgent().then((m) => ({ default: m.AgentActivityPanel })))
 const WorkflowsDashboard = lazy(() => panelLoaders.workflows().then((m) => ({ default: m.WorkflowsDashboard })))
 const MembersPanel = lazy(() => panelLoaders.members().then((m) => ({ default: m.MembersPanel })))
 const ConnectionsPanel = lazy(() => panelLoaders.credentials().then((m) => ({ default: m.ConnectionsPanel })))
@@ -257,7 +257,8 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'multiAgent') return (
     <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')}>
-      <MultiAgentTimeline events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents} />
+      <AgentActivityPanel events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents}
+        canReadSessions={can('runs.read')} onOpenRun={onOpenRun} />
     </PanelChrome>
   )
   if (props.tab === 'reports') return (
