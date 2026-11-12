@@ -17,7 +17,7 @@
  */
 
 import { ReactFlowProvider, addEdge, applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import '../styles/canvas.css'
@@ -29,13 +29,15 @@ import { describeRecoveryError } from '../recovery-error-summary'
 import { getRunWorkflowSnapshot, projectVisibleEdges, projectVisibleNodes, workflowToGraph } from '../canvas-projections'
 import { refreshRunMap, useRunMap } from '../hooks/useRunMap'
 import { projectRunMapOverlays, type RunMapNodeOverlay } from '../run-map'
-import { getRunWorkflowIdentity, readHumanFormWaiting } from '../run-observability'
+import { getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, readHumanFormWaiting } from '../run-observability'
+import { useConfirm } from './ConfirmDialog'
 import { useT } from '../i18n'
 import type { RunNode, RunSummary, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 
 // From the run panel's chunk, which the run map always shows beside the canvas.
 const HumanFormDialog = lazy(() => import('./RunsPanel').then(module => ({ default: module.HumanFormDialog })))
 const RerunStepDialog = lazy(() => import('./RunsPanel').then(module => ({ default: module.RerunStepDialog })))
+const ToolApprovalDetails = lazy(() => import('./RunsPanel').then(module => ({ default: module.ToolApprovalDetails })))
 
 // Hand the store React Flow's change-appliers as soon as this (lazy) chunk
 // evaluates — before any canvas interaction can fire a reducer. Keeping the
@@ -147,16 +149,41 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
   const onApproveNode = execution?.onApproveNode
   const onSubmitHumanForm = execution?.onSubmitHumanForm
   const onOpenRun = execution?.onOpenRun
+  const confirm = useConfirm()
+  const live = useRef({ overlays, runNodes })
+  useEffect(() => { live.current = { overlays, runNodes } })
   const actions = useMemo<RunMapActions | null>(() => onApproveNode && onOpenRun ? {
     pendingNodeId,
-    decide: (nodeId, choice) => {
-      const decision = overlays.get(nodeId)?.decision
+    // The person decides the request the dialog showed; a request that changed meanwhile is shown again.
+    decide: async function review(nodeId, choice, step, changed = false) {
+      const decision = live.current.overlays.get(nodeId)?.decision
       if (!decision || decision.kind === 'human_form' || (decision.kind === 'approval' && choice === 'deny')) return
+      const node = live.current.runNodes.find(candidate => candidate.nodeId === nodeId)
+      const request = node && getToolApprovalRequest(node)
+      const confirmed = await confirm({
+        title: t(choice === 'approve' ? 'canvas.runMap.approveAria' : 'canvas.runMap.denyAria', { step }),
+        body: changed ? t('canvas.runMap.decisionChanged') : (node && getRunWaitingInfo(node).title) ?? step,
+        details: request && (
+          <>
+            <code data-testid={`tool-approval-tool-${nodeId}`}>{request.tool}</code>
+            <Suspense fallback={null}><ToolApprovalDetails nodeId={nodeId} request={request} /></Suspense>
+          </>
+        ),
+        confirmLabel: t(`rightPanel.runs.toolApproval.${choice}`),
+        tone: choice === 'deny' ? 'danger' : 'default',
+      })
+      if (!confirmed) return
+      const current = live.current.overlays.get(nodeId)?.decision
+      const unchanged = current?.kind === 'tool_approval'
+        ? request?.approvalId === current.approvalId && request.paramsDigest === current.paramsDigest
+        : current?.kind === 'approval' && !request
+      if (!unchanged) {
+        refreshRunMap(runId)
+        return review(nodeId, choice, step, true)
+      }
       setPendingNodeId(nodeId)
-      const toolDecision = decision.kind === 'tool_approval'
-        ? { approvalId: decision.approvalId, paramsDigest: decision.paramsDigest, decision: choice }
-        : undefined
-      void Promise.resolve(onApproveNode(nodeId, toolDecision)).finally(() => {
+      const toolDecision = request ? { approvalId: request.approvalId, paramsDigest: request.paramsDigest, decision: choice } : undefined
+      await Promise.resolve(onApproveNode(nodeId, toolDecision)).finally(() => {
         setPendingNodeId(current => (current === nodeId ? null : current))
         refreshRunMap(runId)
       })
@@ -164,7 +191,7 @@ export function RunObservationWorkspace({ run, runNodes, panel, onRecoverNode, p
     openForm: nodeId => setForm({ nodeId, errors: [], submitting: false }),
     rerun: setRerunNodeId,
     openRun: (childRunId) => { void onOpenRun(childRunId) },
-  } : null, [onApproveNode, onOpenRun, overlays, pendingNodeId, runId])
+  } : null, [confirm, onApproveNode, onOpenRun, pendingNodeId, runId, t])
   const summary = useMemo(
     () => snapshot && <RunMapTotals map={snapshot.map} overlays={overlays} />,
     [overlays, snapshot],

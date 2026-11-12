@@ -27,6 +27,7 @@ import { getResolvedLocale, useT } from '../i18n'
 import { DeadLettersPanel } from './DeadLettersPanel'
 export { DeadLetterCloseDialog } from './DeadLetterCloseDialog'
 export { RerunStepDialog } from './RerunStepDialog'
+export { ToolApprovalDetails }
 export { RunExplainChat } from './RunExplainChat'
 export { HumanFormDialog } from './HumanFormDialog'
 import { HumanFormDialog } from './HumanFormDialog'
@@ -40,6 +41,7 @@ import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './Vita
 import { pickErrorMessage } from './recovery-dialog/recovery-dialog-model'
 import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity, getToolApprovalRequest, readHumanFormWaiting, type RunWaitKind, type ToolApprovalDecision } from '../run-observability'
 import { RunHistoryList } from './RunHistoryList'
+import { ToolApprovalDetails } from './ToolApprovalDetails'
 import { ValidationEvidencePill } from './ValidationEvidencePill'
 import { SemanticOutcomePill } from './SemanticOutcomePill'
 import './RunsPanel.css'
@@ -463,37 +465,7 @@ export function RunsPanel({
                     : <strong>{waiting.title ?? t('rightPanel.runs.waitingStep', { nodeId: node.nodeId })}</strong>}
                   {waiting.description && <p className="helper-text">{waiting.description}</p>}
                 </div>
-                {toolApproval && (
-                  <div className="we-run-overview__payload">
-                    <strong>{t('rightPanel.runs.toolApproval.params')}</strong>
-                    <pre className="code-field" data-testid={`tool-approval-params-${node.nodeId}`}>
-                      {JSON.stringify(toolApproval.params, null, 2)}
-                    </pre>
-                    {toolApproval.maskedPaths.length > 0 && (
-                      <p className="helper-text" data-testid={`tool-approval-masked-${node.nodeId}`}>
-                        {t('rightPanel.runs.toolApproval.masked', { paths: toolApproval.maskedPaths.join(', ') })}
-                      </p>
-                    )}
-                    <dl className="we-run-overview__facts" data-testid={`tool-approval-policy-${node.nodeId}`}>
-                      <div>
-                        <dt>{t('rightPanel.runs.toolApproval.approvers')}</dt>
-                        <dd>{toolApproval.requiredApprovals}</dd>
-                      </div>
-                      <div>
-                        <dt>{t('rightPanel.runs.toolApproval.selfApproval')}</dt>
-                        <dd>{t('rightPanel.runs.toolApproval.selfApprovalOff')}</dd>
-                      </div>
-                      <div>
-                        <dt>{t('rightPanel.runs.toolApproval.onDeny')}</dt>
-                        <dd>{t('rightPanel.runs.toolApproval.onDenyValue')}</dd>
-                      </div>
-                      <div>
-                        <dt>{t('rightPanel.runs.toolApproval.onTimeout')}</dt>
-                        <dd>{t('rightPanel.runs.toolApproval.onTimeoutValue')}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                )}
+                {toolApproval && <ToolApprovalDetails nodeId={node.nodeId} request={toolApproval} />}
                 {(waitDuration || wakeDuration || deadlineDuration || waiting.assignee || waiting.kind === 'approval') && (
                   <div className="we-wait-card__timing">
                     {waitDuration && <span>{t('rightPanel.runs.waitingFor', { duration: waitDuration })}</span>}

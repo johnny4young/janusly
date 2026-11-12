@@ -28,6 +28,7 @@ import { Button } from './ui/Button'
 export type ConfirmOptions = {
   title?: string
   body: string
+  details?: React.ReactNode
   confirmLabel?: string
   cancelLabel?: string
   tone?: 'default' | 'danger'
@@ -116,6 +117,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 <p id="confirm-dialog-body" className="helper-text">{options.body}</p>
               </div>
             </header>
+            {options.details && <div className="run-input-dialog__body">{options.details}</div>}
             <footer className="run-input-dialog__footer">
               <Button ref={cancelButtonRef} variant="secondary" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
                 {options.cancelLabel ?? (t('common.cancel'))}

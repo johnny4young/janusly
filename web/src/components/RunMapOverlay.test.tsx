@@ -47,9 +47,9 @@ describe('run map node overlay', () => {
     const actions = actionsMock()
     render(renderFacts(overlay({ needsYou: true, decision: { kind: 'tool_approval', approvalId: 'ta', paramsDigest: 'd' } }), actions))
     fireEvent.click(screen.getByRole('button', { name: 'Deny Send invoice' }))
-    expect(actions.decide).toHaveBeenCalledWith('gate', 'deny')
+    expect(actions.decide).toHaveBeenCalledWith('gate', 'deny', 'Send invoice')
     fireEvent.click(screen.getByRole('button', { name: 'Approve Send invoice' }))
-    expect(actions.decide).toHaveBeenCalledWith('gate', 'approve')
+    expect(actions.decide).toHaveBeenCalledWith('gate', 'approve', 'Send invoice')
   })
 
   it('disables the decision while it is being sent', () => {

@@ -7,11 +7,12 @@ import { useWorkflowStore } from '../store'
 import { leadingAccents } from '../test/leading-accent'
 import type { RunNode, RunSummary } from '../types'
 import { RunObservationWorkspace } from './CanvasWorkspace'
+import { ConfirmProvider } from './ConfirmDialog'
 
 vi.mock('../api', async () => {
   const { contractApiOver } = await import('../test/contract-api-mock')
   const api = vi.fn()
-  return { api, contractApi: contractApiOver(api) }
+  return { api, contractApi: contractApiOver(api), downloadFromApi: vi.fn() }
 })
 
 const run: RunSummary = {
@@ -32,10 +33,7 @@ const run: RunSummary = {
 
 const runNodes: RunNode[] = [
   { nodeId: 'fetch', status: 'running', attempts: 2, startedAt: '2026-11-07T10:00:00Z' },
-  {
-    nodeId: 'gate', status: 'waiting', startedAt: '2026-11-07T10:00:00Z',
-    stateJson: { waiting: { kind: 'tool_approval', approvalId: 'ta-1', tool: 'stripe.charge', paramsDigest: 'digest-1', params: { amount: 5 } } },
-  },
+  waitingGate({}),
 ]
 
 const map: RunMap = {
@@ -50,14 +48,31 @@ const map: RunMap = {
   totals: { costUsd: 0.02, tokens: 3_000 },
 }
 
-function mount(onApproveNode = vi.fn(async () => undefined)) {
-  const execution = { onApproveNode, onSubmitHumanForm: vi.fn(), onOpenRun: vi.fn() }
-  const view = render(
-    <div style={{ width: 1100, height: 760, display: 'flex' }}>
-      <RunObservationWorkspace run={run} runNodes={runNodes} panel={null} permissions={['runs.read', 'runs.start']} execution={execution} />
-    </div>,
+function makeExecution(onApproveNode = vi.fn(async () => undefined)) {
+  return { onApproveNode, onSubmitHumanForm: vi.fn(), onOpenRun: vi.fn() }
+}
+type Execution = ReturnType<typeof makeExecution>
+
+function waitingGate(waiting: Record<string, unknown>): RunNode {
+  return {
+    nodeId: 'gate', status: 'waiting', startedAt: '2026-11-07T10:00:00Z',
+    stateJson: { waiting: { kind: 'tool_approval', approvalId: 'ta-1', tool: 'stripe.charge', paramsDigest: 'digest-1', params: { amount: 5 }, ...waiting } },
+  }
+}
+
+function view(execution: Execution, nodes: RunNode[] = runNodes) {
+  return (
+    <ConfirmProvider>
+      <div style={{ width: 1100, height: 760, display: 'flex' }}>
+        <RunObservationWorkspace run={run} runNodes={nodes} panel={null} permissions={['runs.read', 'runs.start']} execution={execution} />
+      </div>
+    </ConfirmProvider>
   )
-  return { ...view, execution }
+}
+
+function mount() {
+  const execution = makeExecution()
+  return { ...render(view(execution)), execution }
 }
 
 beforeEach(() => {
@@ -100,14 +115,43 @@ describe('run map canvas (browser mode)', () => {
     expect(screen.getByRole('group', { name: /Charge card.*Needs you/ })).toBeInTheDocument()
   })
 
-  it('approves the exact tool call from the node and refreshes the map', async () => {
+  it('approves the tool call the dialog showed and refreshes the map', async () => {
     const { execution } = mount()
     const approve = await screen.findByRole('button', { name: 'Approve Charge card' })
     approve.focus()
     expect(approve).toHaveFocus()
     expect((approve.closest('.react-flow') as HTMLElement).scrollTop).toBe(0)
     approve.click()
-    expect(execution.onApproveNode).toHaveBeenCalledWith('gate', { approvalId: 'ta-1', paramsDigest: 'digest-1', decision: 'approve' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'Approve Charge card' })
+    expect(within(dialog).getByTestId('tool-approval-tool-gate')).toHaveTextContent('stripe.charge')
+    expect(await within(dialog).findByTestId('tool-approval-params-gate')).toHaveTextContent('"amount": 5')
+    expect(execution.onApproveNode).not.toHaveBeenCalled()
+    within(dialog).getByTestId('confirm-dialog-confirm').click()
+    await waitFor(() => expect(execution.onApproveNode).toHaveBeenCalledWith('gate', { approvalId: 'ta-1', paramsDigest: 'digest-1', decision: 'approve' }))
     await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([path]) => path === `/v1/runs/${run.id}/map`).length).toBeGreaterThan(1))
+  })
+
+  it('refuses a decision whose request changed while the dialog was open and shows it again', async () => {
+    const { execution, rerender } = mount()
+    ;(await screen.findByRole('button', { name: 'Deny Charge card' })).click()
+    const dialog = await screen.findByRole('alertdialog', { name: 'Deny Charge card' })
+    rerender(view(execution, [runNodes[0], waitingGate({ approvalId: 'ta-2', paramsDigest: 'digest-2', params: { amount: 500 } })]))
+    within(dialog).getByTestId('confirm-dialog-confirm').click()
+    await waitFor(() => expect(screen.getByRole('alertdialog', { name: 'Deny Charge card' })).toHaveTextContent('This request changed'))
+    const again = screen.getByRole('alertdialog', { name: 'Deny Charge card' })
+    expect(await within(again).findByTestId('tool-approval-params-gate')).toHaveTextContent('"amount": 500')
+    expect(execution.onApproveNode).not.toHaveBeenCalled()
+    within(again).getByTestId('confirm-dialog-confirm').click()
+    await waitFor(() => expect(execution.onApproveNode).toHaveBeenCalledWith('gate', { approvalId: 'ta-2', paramsDigest: 'digest-2', decision: 'deny' }))
+  })
+
+  it('decides nothing once the step stopped waiting', async () => {
+    const { execution, rerender } = mount()
+    ;(await screen.findByRole('button', { name: 'Approve Charge card' })).click()
+    const dialog = await screen.findByRole('alertdialog', { name: 'Approve Charge card' })
+    rerender(view(execution, [runNodes[0], { nodeId: 'gate', status: 'succeeded', startedAt: '2026-11-07T10:00:00Z' }]))
+    within(dialog).getByTestId('confirm-dialog-confirm').click()
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(execution.onApproveNode).not.toHaveBeenCalled()
   })
 })
