@@ -63,9 +63,9 @@ func internalError() httpkit.Result {
 	return httpkit.Error(http.StatusInternalServerError, "internal_error", "Internal error", nil)
 }
 
-// Holds reports whether the viewer's live grant includes permission, resolved
+// holds reports whether the viewer's live grant includes permission, resolved
 // the way the route gate resolves it.
-func Holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission string) bool {
+func holds(r *http.Request, pool *pgxpool.Pool, rc httpkit.Request, permission string) bool {
 	if rc.Auth == nil {
 		return false
 	}
@@ -83,7 +83,7 @@ func forbidden() httpkit.Result {
 }
 
 func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
-	if !Holds(r, s.pool, rc, "agents.read") {
+	if !holds(r, s.pool, rc, "agents.read") {
 		return forbidden()
 	}
 	limit := defaultPage
@@ -123,7 +123,7 @@ func (s *service) list(r *http.Request, rc httpkit.Request) httpkit.Result {
 }
 
 func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result {
-	if !Holds(r, s.pool, rc, "agents.read") {
+	if !holds(r, s.pool, rc, "agents.read") {
 		return forbidden()
 	}
 	q := store.New(s.pool)

@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/johnny4young/janusly/internal/auth"
-	"github.com/johnny4young/janusly/internal/httpapi/agentsessions"
 	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/publishgate"
 	"github.com/johnny4young/janusly/internal/store"
@@ -131,7 +130,7 @@ func (s *service) runMap(r *http.Request, rc httpkit.Request) httpkit.Result {
 	}
 	// Sessions name agent clients, so only viewers with agents.read see them.
 	var linked []store.ListAgentSessionsForRunRow
-	if agentsessions.Holds(r, s.pool, rc, "agents.read") {
+	if s.viewerHolds(r, rc, "agents.read") {
 		linked, err = q.ListAgentSessionsForRun(ctx, store.ListAgentSessionsForRunParams{OrgID: rc.OrgID, RunID: runID})
 		if err != nil {
 			return internalError()
@@ -310,6 +309,21 @@ func laneStep(event store.ListRunAgentEventsRow) map[string]any {
 		}
 	}
 	return step
+}
+
+// viewerHolds reports whether the viewer's live grant includes permission,
+// resolved the way the route gate resolves it.
+func (s *service) viewerHolds(r *http.Request, rc httpkit.Request, permission string) bool {
+	if rc.Auth == nil {
+		return false
+	}
+	q := store.New(s.pool)
+	role, err := auth.ResolveRoleFromMembership(r.Context(), q, rc.OrgID, rc.Auth.MembershipRole, rc.Auth.Mode)
+	if err != nil || role == nil {
+		return false
+	}
+	permissions, err := auth.EffectivePermissions(r.Context(), q, rc.OrgID, role)
+	return err == nil && permissions[permission]
 }
 
 // deciderPermissions is the viewer's grant when they can decide at all: a
