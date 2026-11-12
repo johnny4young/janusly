@@ -244,20 +244,26 @@ public listener, before `webdist`:
   also requires an `https` `JANUSLY_WEB_BASE_URL`.
 - **Authentication.** `Authorization: Bearer jly_agent_…` only. Browser
   sessions, Supabase tokens, the service token and development headers are
-  refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`
-  and one fixed message for every token failure.
-- **No tokens in URLs.** A request with `access_token`, `token`, `api_key` or
-  `key` in the query string is refused with 400 before authentication; the
-  parameter name is logged, never its value.
-- **Rebinding and cross-origin.** Requests whose `Host` is not loopback or the host of
-  `JANUSLY_WEB_BASE_URL` are refused. This allowlist replaces the SDK's
-  localhost check, which would refuse a reverse proxy on the same host.
-  A request with an `Origin` header is refused unless that origin is listed in
-  `JANUSLY_MCP_ALLOWED_ORIGINS` (empty by default; native clients send none),
-  and `http.CrossOriginProtection` wraps the handler.
-- **Bounds.** 256 KB request bodies (the SDK limit and the existing request
-  guard), the existing 256000-byte response gate, a per-IP limit on failed
-  authentications, and the per-client limit after authentication.
+  refused on `/mcp`. A 401 carries `WWW-Authenticate: Bearer realm="janusly"`;
+  a token store failure answers 500 with fixed text.
+- **No tokens in URLs.** A request with `access_token`, `token`, `api_key`,
+  `key`, `auth` or `authorization` in the query string, or `jly_agent_`
+  anywhere in it, is refused with 400 before authentication; the parameter
+  name is logged, never its value.
+- **Rebinding and cross-origin.** Requests whose `Host` is not loopback, the
+  host of `JANUSLY_WEB_BASE_URL` or one in `JANUSLY_MCP_ALLOWED_HOSTS` are
+  refused. This allowlist replaces the SDK's localhost check, which would
+  refuse a reverse proxy on the same host.
+  Browsers are not supported callers: a request with an `Origin` header is
+  refused (native clients send none), and `http.CrossOriginProtection` wraps
+  the handler. Authenticated JSON-RPC batches and `subscriptions/listen`
+  streams are refused.
+- **Bounds.** 256000-byte request bodies (set on the SDK handler, matching
+  the existing request guard), the existing 256000-byte response gate, and the
+  per-client limit after authentication. Failed authentications are not
+  limited per address: a malformed token never reaches the database, an
+  unknown one costs one index lookup, and behind a proxy a shared limit would
+  let one client lock out the rest.
 - **No token forwarding.** The general resolver rejects any `jly_agent_`
   bearer without sending it to Supabase, so a misdirected agent token never
   reaches a third party.

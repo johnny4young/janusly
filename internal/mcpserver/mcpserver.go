@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -57,6 +58,8 @@ type Deps struct {
 	ResolveActor ActorResolver
 	// Transport labels audit rows: "stdio" or "http".
 	Transport string
+	// Logger records internal tool failures; nil uses slog.Default().
+	Logger *slog.Logger
 
 	actor *callActor
 }

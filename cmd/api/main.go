@@ -29,6 +29,8 @@ import (
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/grammar"
 	"github.com/johnny4young/janusly/internal/httpapi"
+	"github.com/johnny4young/janusly/internal/mcpclient"
+	"github.com/johnny4young/janusly/internal/mcpserver"
 	"github.com/johnny4young/janusly/internal/migrate"
 	"github.com/johnny4young/janusly/internal/observability"
 	"github.com/johnny4young/janusly/internal/ratelimit"
@@ -291,7 +293,22 @@ func run() error {
 	})
 	defer runner.Shutdown()
 
+	var mcpHandler http.Handler
+	if cfg.MCPHTTP.Enabled {
+		mcpTracker := ratelimit.NewTracker(pool, auditWriter)
+		mcpLimiter := ratelimit.New(pool, ratelimit.Hooks{
+			OnError: mcpTracker.RecordError, OnSuccess: mcpTracker.RecordRecovery,
+		})
+		mcpHandler = mcpserver.NewHTTPHandler(mcpserver.Deps{
+			Audit: auditWriter, Engine: eng, Pool: pool, NewID: uuid.NewString,
+			CatalogSource: mcpclient.New(pool, mcpLimiter), Limiter: mcpLimiter,
+		}, mcpserver.HTTPOptions{
+			AllowedHosts: cfg.MCPHTTP.AllowedHosts, RefuseForwardedHTTP: cfg.MCPHTTP.RefuseForwardedHTTP, Logger: logger,
+		})
+		logger.Info("remote mcp enabled", "path", "/mcp", "allowedHosts", cfg.MCPHTTP.AllowedHosts)
+	}
 	publicAPI, shutdownPublicAPI, err := httpapi.NewV1HandlerWithOptions(eng, pool, httpapi.V1ServerOptions{
+		MCPHandler:                  mcpHandler,
 		AuthoringExperienceEnabled:  cfg.AuthoringExperienceEnabled,
 		AuthoringExperienceMode:     cfg.AuthoringExperienceMode,
 		Audit:                       auditWriter,

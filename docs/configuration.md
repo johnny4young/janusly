@@ -251,6 +251,9 @@ settings fail at boot and invalid new tenant/workflow writes are rejected.
 - `JANUSLY_MCP_PERMISSIONS`, a comma/space-separated explicit permission
   ceiling for `cmd/mcp`; omission is read-only and write consent never expands
   this set
+- `JANUSLY_MCP_HTTP_ENABLED=true` serves remote MCP at `/mcp` on the public
+  port for agent client tokens; `JANUSLY_MCP_ALLOWED_HOSTS` adds `Host` values
+  beyond loopback and the `JANUSLY_WEB_BASE_URL` host
 - `JANUSLY_AGENT_TOKEN`, an agent client token for `cmd/mcp`; when set, the
   client's organization, capabilities, scope and its creator's live permissions
   replace `JANUSLY_ORG` and `JANUSLY_MCP_PERMISSIONS`
