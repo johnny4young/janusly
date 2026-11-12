@@ -713,6 +713,10 @@ func (d Deps) publishStatus(ctx context.Context, requestID string) (*mcp.CallToo
 	if request.DecidedAt != nil {
 		view["decidedAt"] = request.DecidedAt.UTC().Format(time.RFC3339)
 	}
+	// The person's reason, so an agent can fix a rejected draft.
+	if request.DecisionReason.Valid {
+		view["reason"] = request.DecisionReason.String
+	}
 	return ok(view)
 }
 

@@ -65,18 +65,32 @@ RETURNING *;
 -- name: GetPublishRequest :one
 SELECT * FROM publish_requests WHERE org_id = $1 AND id = $2;
 
+-- Nothing sweeps expired requests, so a pending row past its expiry filters
+-- as expired, the way every reader renders it.
 -- name: ListPublishRequests :many
 SELECT * FROM publish_requests
 WHERE org_id = sqlc.arg(org_id)
-  AND (sqlc.narg(filter_status)::text IS NULL OR status = sqlc.narg(filter_status))
+  AND (sqlc.narg(filter_status)::text IS NULL
+       OR (sqlc.narg(filter_status)::text = 'pending' AND status = 'pending' AND expires_at > now())
+       OR (sqlc.narg(filter_status)::text = 'expired' AND (status = 'expired' OR (status = 'pending' AND expires_at <= now())))
+       OR (sqlc.narg(filter_status)::text NOT IN ('pending', 'expired') AND status = sqlc.narg(filter_status)::text))
 ORDER BY created_at DESC, id DESC
 LIMIT 100;
+
+-- name: ListDraftNames :many
+SELECT id, COALESCE(document->>'name', '')::text AS name
+FROM workflow_drafts
+WHERE org_id = sqlc.arg(org_id) AND id = ANY(sqlc.arg(ids)::text[]);
+
+-- name: ListAgentClientNames :many
+SELECT id, name, created_by FROM agent_clients
+WHERE org_id = sqlc.arg(org_id) AND id = ANY(sqlc.arg(ids)::text[]);
 
 -- The caller holds the workflow's publish lock and checked expiry under it.
 -- name: DecidePublishRequest :one
 UPDATE publish_requests
 SET status = sqlc.arg(status), decided_by = sqlc.arg(decided_by)::text, decided_at = now(),
-    published_version_id = sqlc.narg(published_version_id)
+    published_version_id = sqlc.narg(published_version_id), decision_reason = sqlc.narg(decision_reason)
 WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'pending'
 RETURNING *;
 

@@ -523,6 +523,7 @@ type PublishRequest struct {
 	DecidedBy          pgtype.Text
 	DecidedAt          *time.Time
 	PublishedVersionID pgtype.Text
+	DecisionReason     pgtype.Text
 	ExpiresAt          time.Time
 	CreatedAt          time.Time
 }

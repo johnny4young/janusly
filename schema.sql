@@ -870,10 +870,12 @@ CREATE TABLE public.publish_requests (
     decided_by text,
     decided_at timestamp with time zone,
     published_version_id text,
+    decision_reason text,
     expires_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT publish_requests_decision_check CHECK (((status = ANY (ARRAY['published'::text, 'rejected'::text])) = ((decided_by IS NOT NULL) AND (decided_at IS NOT NULL)))),
     CONSTRAINT publish_requests_published_check CHECK (((status = 'published'::text) = (published_version_id IS NOT NULL))),
+    CONSTRAINT publish_requests_reason_check CHECK (((decision_reason IS NULL) OR ((decided_by IS NOT NULL) AND ((char_length(decision_reason) >= 1) AND (char_length(decision_reason) <= 500))))),
     CONSTRAINT publish_requests_reasons_check CHECK (((cardinality(reasons) >= 1) AND (reasons <@ ARRAY['writes'::text, 'first_publish'::text, 'outbound'::text, 'callers'::text, 'triggers_changed'::text, 'steps_removed'::text, 'outputs_removed'::text]))),
     CONSTRAINT publish_requests_self_check CHECK (((decided_by IS NULL) OR (decided_by <> requested_by))),
     CONSTRAINT publish_requests_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'published'::text, 'rejected'::text, 'expired'::text, 'superseded'::text])))
