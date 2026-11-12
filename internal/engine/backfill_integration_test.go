@@ -147,3 +147,65 @@ func TestBackfillReleasesClaimWhenStartFails(t *testing.T) {
 		t.Fatalf("retry: %+v err=%v", retried, err)
 	}
 }
+
+// An event the workflow can never accept settles as failed instead of going
+// back to the buffer, where it would block newer events on every resume.
+func TestBackfillSettlesAnEventThatCanNeverStart(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	workflowID := "wf-backfill-" + org
+	doc := fmt.Sprintf(`{"id":"%s","name":"backfill","nodes":[
+		{"id":"inbox","type":"webhook_received","config":{"endpointKey":"hook"}}
+	],"edges":[],"inputs":{"type":"object","properties":{"event":{"type":"object","required":["amount"]}}}}`, workflowID)
+	saved, err := eng.SaveWorkflowVersion(ctx, SaveWorkflowVersionInput{OrgID: org, UserID: "user-1", Workflow: mustParse(t, doc)})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE workflows SET status = 'paused_manual' WHERE org_id = $1 AND id = $2`, org, workflowID); err != nil {
+		t.Fatal(err)
+	}
+	for i, payload := range []string{`{"event":{"note":"no amount"}}`, `{"event":{"amount":3}}`} {
+		if _, err := pool.Exec(ctx, `INSERT INTO trigger_events
+			(id, org_id, trigger_type, workflow_id, workflow_version_id, node_id, status, payload_json, created_at)
+			VALUES ($1, $2, 'webhook_received', $3, $4, 'inbox', 'buffered', $5, now() - make_interval(secs => $6))`,
+			fmt.Sprintf("te-%s-%d", org, i), org, workflowID, saved.VersionID, payload, 2-i); err != nil {
+			t.Fatalf("buffer event %d: %v", i, err)
+		}
+	}
+
+	outcome, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	if err != nil || outcome.Backfilled != 1 || outcome.Failed != 1 || outcome.Remaining != 0 {
+		t.Fatalf("resume: %+v err=%v", outcome, err)
+	}
+	var status, reason string
+	if err := pool.QueryRow(ctx, `SELECT status, coalesce(skipped_reason, '') FROM trigger_events WHERE id = $1`,
+		"te-"+org+"-0").Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" || reason != "input_invalid" {
+		t.Fatalf("invalid event: status=%s reason=%s, want failed/input_invalid", status, reason)
+	}
+}
+
+// A resume whose request is cancelled mid-page still returns its claims, so an
+// immediate retry drains the buffer.
+func TestBackfillReleasesClaimsWhenTheResumeIsCancelled(t *testing.T) {
+	ctx, pool, eng, org := newHarness(t)
+	workflowID := seedPausedWorkflowWithBuffer(t, ctx, pool, eng, org, 3)
+	request, cancel := context.WithCancel(ctx)
+	healthy := eng.wrapTx
+	eng.wrapTx = func(tx store.DBTX) store.DBTX {
+		return &statementHookTx{DBTX: tx, name: "InsertRun", before: cancel}
+	}
+	if _, _, err := eng.ResumeWorkflow(request, org, workflowID, "user-1"); err != nil {
+		t.Fatalf("cancelled resume: %v", err)
+	}
+	if _, claimed, _ := bufferedState(t, ctx, pool, org); claimed != 0 {
+		t.Fatalf("a cancelled resume left %d events claimed", claimed)
+	}
+
+	eng.wrapTx = healthy
+	retried, _, err := eng.ResumeWorkflow(ctx, org, workflowID, "user-1")
+	if err != nil || retried.Backfilled != 3 || retried.Remaining != 0 {
+		t.Fatalf("retry: %+v err=%v", retried, err)
+	}
+}

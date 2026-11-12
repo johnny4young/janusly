@@ -233,6 +233,12 @@ UPDATE trigger_events SET backfill_claim_token = NULL, backfill_claimed_at = NUL
 WHERE org_id = sqlc.arg(org_id) AND status = 'buffered'
   AND backfill_claim_token = sqlc.arg(claim_token) AND id = ANY(sqlc.arg(ids)::text[]);
 
+-- name: FailClaimedTriggerEvent :exec
+UPDATE trigger_events
+SET status = 'failed', skipped_reason = sqlc.arg(reason)::text, backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = sqlc.arg(org_id) AND id = sqlc.arg(id) AND status = 'buffered'
+  AND backfill_claim_token = sqlc.arg(claim_token);
+
 -- name: ClaimDueParentNotifications :many
 UPDATE runs SET parent_notification_after = sqlc.arg(lease_until)
 WHERE id IN (

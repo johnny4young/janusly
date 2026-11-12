@@ -384,6 +384,30 @@ func (q *Queries) DemoteQueuedRunNodes(ctx context.Context, runID string) (int64
 	return result.RowsAffected(), nil
 }
 
+const failClaimedTriggerEvent = `-- name: FailClaimedTriggerEvent :exec
+UPDATE trigger_events
+SET status = 'failed', skipped_reason = $1::text, backfill_claim_token = NULL, backfill_claimed_at = NULL
+WHERE org_id = $2 AND id = $3 AND status = 'buffered'
+  AND backfill_claim_token = $4
+`
+
+type FailClaimedTriggerEventParams struct {
+	Reason     string
+	OrgID      string
+	ID         string
+	ClaimToken pgtype.Text
+}
+
+func (q *Queries) FailClaimedTriggerEvent(ctx context.Context, arg FailClaimedTriggerEventParams) error {
+	_, err := q.db.Exec(ctx, failClaimedTriggerEvent,
+		arg.Reason,
+		arg.OrgID,
+		arg.ID,
+		arg.ClaimToken,
+	)
+	return err
+}
+
 const findScopedStalledRunningNodes = `-- name: FindScopedStalledRunningNodes :many
 SELECT rn.id, rn.run_id, rn.org_id, rn.node_id, COALESCE(rn.attempts, 1)::int AS attempt,
        rn.started_at

@@ -301,7 +301,8 @@ func (p backfillPage) release(ctx context.Context, events []store.ClaimBufferedT
 	for _, event := range events {
 		ids = append(ids, event.ID)
 	}
-	if err := p.q.ReleaseBufferedTriggerEventClaims(ctx, store.ReleaseBufferedTriggerEventClaimsParams{
+	// A cancelled resume request still returns its claims.
+	if err := p.q.ReleaseBufferedTriggerEventClaims(context.WithoutCancel(ctx), store.ReleaseBufferedTriggerEventClaimsParams{
 		OrgID: p.orgID, ClaimToken: p.claimToken, Ids: ids,
 	}); err != nil {
 		slog.Warn("[circuit-breaker] backfill claim release failed", "workflowId", p.workflowID, "error", err)
@@ -341,8 +342,18 @@ func (e *Engine) startBackfillPage(ctx context.Context, page backfillPage, userI
 				// Another actor consumed the event — not a failure.
 				continue
 			}
-			page.release(ctx, claimed[index:index+1])
 			outcome.Failed++
+			// An input the workflow rejects never starts; back in the buffer it
+			// would block newer events on every resume.
+			var invalid *InputValidationError
+			if errors.As(err, &invalid) {
+				if err := q.FailClaimedTriggerEvent(context.WithoutCancel(ctx), store.FailClaimedTriggerEventParams{
+					OrgID: orgID, ID: event.ID, ClaimToken: page.claimToken, Reason: "input_invalid",
+				}); err == nil {
+					continue
+				}
+			}
+			page.release(ctx, claimed[index:index+1])
 			continue
 		}
 		outcome.Backfilled++
