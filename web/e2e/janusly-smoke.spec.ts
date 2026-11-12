@@ -279,7 +279,7 @@ test('ai studio against Go: $0 fallback generate, save, run, approve', async ({ 
   await openWorkspaceSection(page, 'Activity', 'Activity')
   await page.getByTestId(`activity-row-run:${startedRunId}`).click()
   await expect(page.getByTestId('waiting-step-approval')).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('button', { name: /Approve/ }).first().click()
+  await page.getByTestId('waiting-step-approval').getByRole('button', { name: 'Approve and resume' }).click()
   await expect(page.getByTestId('waiting-steps')).toBeHidden({ timeout: 20_000 })
 
   // Backend truth: exactly one run for the org and it succeeded. The UI
