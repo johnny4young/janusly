@@ -50,15 +50,16 @@ func (q *Queries) CountRecentDraftQualifications(ctx context.Context, arg CountR
 const decidePublishRequest = `-- name: DecidePublishRequest :one
 UPDATE publish_requests
 SET status = $1, decided_by = $2::text, decided_at = now(),
-    published_version_id = $3
-WHERE org_id = $4 AND id = $5 AND status = 'pending'
-RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at
+    published_version_id = $3, decision_reason = $4
+WHERE org_id = $5 AND id = $6 AND status = 'pending'
+RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, decision_reason, expires_at, created_at
 `
 
 type DecidePublishRequestParams struct {
 	Status             string
 	DecidedBy          string
 	PublishedVersionID pgtype.Text
+	DecisionReason     pgtype.Text
 	OrgID              string
 	ID                 string
 }
@@ -69,6 +70,7 @@ func (q *Queries) DecidePublishRequest(ctx context.Context, arg DecidePublishReq
 		arg.Status,
 		arg.DecidedBy,
 		arg.PublishedVersionID,
+		arg.DecisionReason,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -88,6 +90,7 @@ func (q *Queries) DecidePublishRequest(ctx context.Context, arg DecidePublishReq
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.PublishedVersionID,
+		&i.DecisionReason,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 	)
@@ -154,7 +157,7 @@ func (q *Queries) GetDraftQualification(ctx context.Context, arg GetDraftQualifi
 }
 
 const getPublishRequest = `-- name: GetPublishRequest :one
-SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests WHERE org_id = $1 AND id = $2
+SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, decision_reason, expires_at, created_at FROM publish_requests WHERE org_id = $1 AND id = $2
 `
 
 type GetPublishRequestParams struct {
@@ -180,6 +183,7 @@ func (q *Queries) GetPublishRequest(ctx context.Context, arg GetPublishRequestPa
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.PublishedVersionID,
+		&i.DecisionReason,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 	)
@@ -334,7 +338,7 @@ INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_i
 VALUES ($1, $2, $3, $4, $5,
         $6::text[], $7, $8, $9,
         $10, $11)
-RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at
+RETURNING id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, decision_reason, expires_at, created_at
 `
 
 type InsertPublishRequestParams struct {
@@ -381,6 +385,7 @@ func (q *Queries) InsertPublishRequest(ctx context.Context, arg InsertPublishReq
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.PublishedVersionID,
+		&i.DecisionReason,
 		&i.ExpiresAt,
 		&i.CreatedAt,
 	)
@@ -435,10 +440,112 @@ func (q *Queries) InsertWorkflowDraft(ctx context.Context, arg InsertWorkflowDra
 	return i, err
 }
 
+const listAgentClientNames = `-- name: ListAgentClientNames :many
+SELECT id, name, created_by FROM agent_clients
+WHERE org_id = $1 AND id = ANY($2::text[])
+`
+
+type ListAgentClientNamesParams struct {
+	OrgID string
+	Ids   []string
+}
+
+type ListAgentClientNamesRow struct {
+	ID        string
+	Name      string
+	CreatedBy string
+}
+
+func (q *Queries) ListAgentClientNames(ctx context.Context, arg ListAgentClientNamesParams) ([]ListAgentClientNamesRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientNames, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientNamesRow
+	for rows.Next() {
+		var i ListAgentClientNamesRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedBy); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishRequestContext = `-- name: ListPublishRequestContext :many
+SELECT pr.id,
+       COALESCE(d.document->>'name', '')::text AS draft_name,
+       COALESCE((SELECT w.name FROM workflows w WHERE w.org_id = pr.org_id AND w.id = pr.workflow_id), '')::text AS live_name,
+       COALESCE(d.base_version_id, '')::text AS base_version_id,
+       COALESCE((SELECT wv.id FROM workflow_versions wv WHERE wv.org_id = pr.org_id AND wv.workflow_id = pr.workflow_id
+                 ORDER BY wv.version DESC LIMIT 1), '')::text AS latest_version_id,
+       COALESCE(q.status, '')::text AS receipt_status,
+       (q.id IS NOT NULL AND d.id IS NOT NULL AND q.draft_id = d.id AND q.digest = d.digest
+        AND q.created_at > $1::timestamptz)::bool AS receipt_current
+FROM publish_requests pr
+LEFT JOIN workflow_drafts d ON d.org_id = pr.org_id AND d.id = pr.draft_id
+LEFT JOIN draft_qualifications q ON q.org_id = pr.org_id AND q.id = pr.qualification_id
+WHERE pr.org_id = $2 AND pr.id = ANY($3::text[])
+`
+
+type ListPublishRequestContextParams struct {
+	ReceiptCutoff time.Time
+	OrgID         string
+	Ids           []string
+}
+
+type ListPublishRequestContextRow struct {
+	ID              string
+	DraftName       string
+	LiveName        string
+	BaseVersionID   string
+	LatestVersionID string
+	ReceiptStatus   string
+	ReceiptCurrent  bool
+}
+
+// What a reviewer needs beside each request: the live and drafted names,
+// whether the receipt still backs the draft and whether the live version
+// moved since the draft was based on it.
+func (q *Queries) ListPublishRequestContext(ctx context.Context, arg ListPublishRequestContextParams) ([]ListPublishRequestContextRow, error) {
+	rows, err := q.db.Query(ctx, listPublishRequestContext, arg.ReceiptCutoff, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublishRequestContextRow
+	for rows.Next() {
+		var i ListPublishRequestContextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DraftName,
+			&i.LiveName,
+			&i.BaseVersionID,
+			&i.LatestVersionID,
+			&i.ReceiptStatus,
+			&i.ReceiptCurrent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPublishRequests = `-- name: ListPublishRequests :many
-SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, expires_at, created_at FROM publish_requests
+SELECT id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, scope_tag, status, decided_by, decided_at, published_version_id, decision_reason, expires_at, created_at FROM publish_requests
 WHERE org_id = $1
-  AND ($2::text IS NULL OR status = $2)
+  AND ($2::text IS NULL
+       OR ($2::text = 'pending' AND status = 'pending' AND expires_at > now())
+       OR ($2::text = 'expired' AND (status = 'expired' OR (status = 'pending' AND expires_at <= now())))
+       OR ($2::text NOT IN ('pending', 'expired') AND status = $2::text))
 ORDER BY created_at DESC, id DESC
 LIMIT 100
 `
@@ -448,6 +555,8 @@ type ListPublishRequestsParams struct {
 	FilterStatus pgtype.Text
 }
 
+// Nothing sweeps expired requests, so a pending row past its expiry filters
+// as expired, the way every reader renders it.
 func (q *Queries) ListPublishRequests(ctx context.Context, arg ListPublishRequestsParams) ([]PublishRequest, error) {
 	rows, err := q.db.Query(ctx, listPublishRequests, arg.OrgID, arg.FilterStatus)
 	if err != nil {
@@ -472,6 +581,7 @@ func (q *Queries) ListPublishRequests(ctx context.Context, arg ListPublishReques
 			&i.DecidedBy,
 			&i.DecidedAt,
 			&i.PublishedVersionID,
+			&i.DecisionReason,
 			&i.ExpiresAt,
 			&i.CreatedAt,
 		); err != nil {

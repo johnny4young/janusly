@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Stands in for Claude Code in the harness self-test. It loads what the real
+CLI would from its flags, environment and home, reports that in a stream-json
+init event, and makes two fixed MCP calls. behavior.json beside it simulates
+configuration the harness cannot reach, such as managed settings."""
+
+import json, os, re, socket, sys, time, urllib.parse, urllib.request
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+VERSION = "2.1.322"
+BUILTIN_TOOLS = ["Agent", "Bash", "Edit", "Read", "Write", "WebFetch"]
+BUILTIN_AGENTS = ["claude", "Explore", "general-purpose", "Plan", "statusline-setup"]
+BUILTIN_PLUGINS = [{"name": "cc-plugin-privacy", "path": "builtin", "source": "cc-plugin-privacy@builtin"}]
+FLAGS = {"-p", "--print", "--bare", "--strict-mcp-config", "--disable-slash-commands", "--no-chrome",
+         "--no-session-persistence", "--verbose", "--version", "-v"}
+VALUED = {"--mcp-config", "--tools", "--allowedTools", "--allowed-tools", "--disallowedTools", "--model", "--settings",
+          "--setting-sources", "--permission-mode", "--permission-prompts", "--output-format", "--max-turns", "--max-budget-usd"}
+
+
+def read_json(path):
+    try:
+        with open(path) as source:
+            return json.load(source)
+    except (OSError, ValueError):
+        return {}
+
+
+def listdir(path):
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
+
+
+def parse(argv):
+    flags, values, prompt, index = set(), {}, None, 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg in FLAGS:
+            flags.add(arg)
+        elif arg in VALUED:
+            index += 1
+            values.setdefault(arg, []).append(argv[index])
+        elif arg.startswith("-"):
+            sys.exit(f"error: unknown option '{arg}'")
+        elif prompt is None:
+            prompt = arg
+        index += 1
+    return flags, values, prompt
+
+
+def emit(event):
+    print(json.dumps(event), flush=True)
+
+
+def rpc(server, body):
+    headers = {"content-type": "application/json", "accept": "application/json, text/event-stream"}
+    for key, value in (server.get("headers") or {}).items():
+        headers[key] = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), ""), value)
+    req = urllib.request.Request(server["url"], data=json.dumps({"jsonrpc": "2.0", **body}).encode(), headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as res:
+        raw = res.read()
+    return json.loads(raw) if raw else {}
+
+
+def connect(server):
+    try:
+        rpc(server, {"id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}}})
+        return rpc(server, {"id": 2, "method": "tools/list"})["result"]["tools"]
+    except Exception:
+        return None
+
+
+def offline():
+    """The harness's preflight points the model endpoint at a closed port."""
+    url = urllib.parse.urlparse(os.environ.get("ANTHROPIC_BASE_URL", ""))
+    if not url.hostname:
+        return False
+    try:
+        socket.create_connection((url.hostname, url.port or 80), timeout=1).close()
+        return False
+    except OSError:
+        return True
+
+
+def permitted(name, allowed):
+    return any(rule == name or (rule in ("mcp__janusly", "mcp__janusly__*") and name.startswith("mcp__janusly__"))
+               for rule in allowed)
+
+
+def main():
+    flags, values, prompt = parse(sys.argv[1:])
+    if flags & {"--version", "-v"}:
+        print(f"{VERSION} (Claude Code)")
+        return
+    behavior = read_json(os.path.join(HERE, "behavior.json"))
+    if behavior.get("silent"):
+        return
+    home = os.environ.get("HOME", "")
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+    user = os.path.join(config, ".claude.json") if os.environ.get("CLAUDE_CONFIG_DIR") else os.path.join(home, ".claude.json")
+    sources = (values.get("--setting-sources") or ["user,project,local"])[-1].split(",")
+    settings = read_json(os.path.join(config, "settings.json")) if "user" in sources else {}
+
+    servers = {}
+    for path in values.get("--mcp-config", []):
+        servers.update(read_json(path).get("mcpServers", {}))
+    if "--strict-mcp-config" not in flags:
+        servers.update(read_json(user).get("mcpServers", {}))
+    servers.update(behavior.get("managedMcpServers", {}))
+    is_offline = offline()
+    if not is_offline:
+        servers.update(behavior.get("driftOnRun", {}))
+
+    tools = [] if (values.get("--tools") or [None])[-1] == "" else list(BUILTIN_TOOLS)
+    statuses, catalogs = [], {}
+    for name, server in servers.items():
+        listed = connect(server)
+        statuses.append({"name": name, "status": "failed" if listed is None else "connected"})
+        catalogs[name] = listed or []
+        tools += [f"mcp__{name}__" + re.sub(r"[^A-Za-z0-9_-]", "_", tool["name"]) for tool in listed or []]
+    plugins = BUILTIN_PLUGINS + [{"name": name, "path": os.path.join(config, "plugins", name), "source": name + "@local"}
+                                 for name in listdir(os.path.join(config, "plugins"))
+                                 if os.path.exists(os.path.join(config, "plugins", name, ".claude-plugin", "plugin.json"))]
+    skills = [] if "--disable-slash-commands" in flags else listdir(os.path.join(config, "skills"))
+    agents = BUILTIN_AGENTS + [name[:-3] for name in listdir(os.path.join(config, "agents")) if name.endswith(".md")]
+    if os.environ.get("ANTHROPIC_API_KEY") and ("--bare" in flags or not os.path.exists(os.path.join(config, ".credentials.json"))):
+        source = "ANTHROPIC_API_KEY"
+    else:
+        source = "/login managed key" if os.path.exists(os.path.join(config, ".credentials.json")) else "none"
+    emit({"type": "fake", "pid": os.getpid(), "home": home, "config": config, "env": sorted(os.environ)})
+    emit({"type": "system", "subtype": "init", "cwd": os.getcwd(), "tools": tools, "mcp_servers": statuses,
+          "model": (values.get("--model") or ["claude-fake"])[-1], "permissionMode": "default",
+          "slash_commands": skills, "skills": skills, "agents": agents, "plugins": plugins, "apiKeySource": source,
+          "claude_code_version": VERSION, "output_style": settings.get("outputStyle", "default"), "additional_directories": []})
+    if is_offline:
+        time.sleep(30)  # the real CLI retries the model endpoint; the harness kills it first
+        sys.exit(1)
+    time.sleep(behavior.get("pauseAfterInit", 0))
+
+    allowed = [rule for value in values.get("--allowedTools", []) for rule in re.split(r"[ ,]+", value) if rule]
+    janusly = servers.get("janusly")
+    for index, tool in enumerate(("workflows.list", "runs.cancel")):
+        name = "mcp__janusly__" + tool.replace(".", "_")
+        emit({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": f"t{index}", "name": name, "input": {}}]}})
+        if janusly and permitted(name, allowed):
+            rpc(janusly, {"id": 10 + index, "method": "tools/call", "params": {"name": tool, "arguments": {}}})
+            block = {"type": "tool_result", "tool_use_id": f"t{index}", "content": "ok"}
+        else:
+            block = {"type": "tool_result", "tool_use_id": f"t{index}", "content": "permission denied", "is_error": True}
+        emit({"type": "user", "message": {"content": [block]}})
+    emit({"type": "result", "subtype": "success", "result": "fake answer", "usage": {"input_tokens": 10, "output_tokens": 5},
+          "total_cost_usd": 0})
+
+
+if __name__ == "__main__":
+    main()

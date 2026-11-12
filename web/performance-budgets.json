@@ -1,12 +1,12 @@
 {
   "version": 3,
-  "artifactGzipKiB": 660.3,
+  "artifactGzipKiB": 658.7,
   "singleLocale": {
     "assets": [
       "catalog-en.js",
       "catalog-es.js"
     ],
-    "maxGzipKiB": 611.8
+    "maxGzipKiB": 610.2
   },
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
@@ -37,7 +37,7 @@
       "assets": [
         "workflow-workspace.js"
       ],
-      "maxGzipKiB": 16.2
+      "maxGzipKiB": 16.3
     },
     "eagerCss": {
       "label": "Eager stylesheet",
@@ -133,6 +133,9 @@
     "PermissionGrantsPanel.js": 3.2,
     "PlaybookMatchCard.js": 0.95,
     "PlaybookPromotionCard.js": 1.25,
+    "PublishRequestDetail.js": 3.43,
+    "PublishRequestsPanel.css": 0.85,
+    "PublishRequestsPanel.js": 2.75,
     "react-vendor.js": 55.23,
     "ReasoningPanel.css": 1.64,
     "ReasoningPanel.js": 5.99,

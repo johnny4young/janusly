@@ -82,6 +82,7 @@ specs=(
   e2e/workflow-tags.spec.ts
   e2e/workflow-trash.spec.ts
   e2e/compressed-assets.spec.ts
+  e2e/publish-requests.spec.ts
 )
 
 usage() {

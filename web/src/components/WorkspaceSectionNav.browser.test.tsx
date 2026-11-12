@@ -35,6 +35,7 @@ describe('one page header (browser)', () => {
       'workspace-section-recover',
       'workspace-section-multiAgent',
       'workspace-section-reports',
+      'workspace-section-publishRequests',
     ])
     expect(within(nav).getByRole('button', { name: 'Agent activity' })).toHaveAttribute('aria-current', 'page')
     const recover = within(nav).getByRole('button', { name: 'Recover' })

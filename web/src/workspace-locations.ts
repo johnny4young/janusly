@@ -113,6 +113,11 @@ export const WORKSPACE_DESTINATION_DEFINITIONS: readonly WorkspaceDestinationDef
         labelKey: 'workspace.section.reports.label',
         helperKey: 'workspace.section.reports.helper',
       },
+      {
+        tab: 'publishRequests',
+        labelKey: 'workspace.section.publishRequests.label',
+        helperKey: 'workspace.section.publishRequests.helper',
+      },
     ],
   },
   {
@@ -166,6 +171,7 @@ const DESTINATION_BY_TAB: Record<ActiveTab, WorkspaceDestination> = {
   reasoning: 'activity',
   multiAgent: 'activity',
   reports: 'activity',
+  publishRequests: 'activity',
   recoveryCase: 'activity',
   operations: 'settings',
   credentials: 'settings',

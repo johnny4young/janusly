@@ -10,6 +10,7 @@
  *   #/runs/day/<YYYY-MM-DD>       the recovery queue filtered to one UTC day
  *   #/recover/day/<YYYY-MM-DD>    the same filter, opening the Recover tab
  *   #/operations/<section>        one Operations sub-section
+ *   #/publishRequests/<id>        one agent publish request
  *   #/multiAgent/sessions[/<id>]  observed agent sessions, or one of them
  *
  * Hash routing keeps the served bundle a single static document: no server
@@ -21,6 +22,7 @@ import type { ActiveTab } from '../types'
 export const ROUTE_TABS = [
   'home', 'recover', 'workflows', 'members', 'ai-studio', 'experiments', 'marketplace', 'templates',
   'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'reports', 'operations', 'recoveryCase',
+  'publishRequests',
 ] as const satisfies readonly ActiveTab[]
 
 // A tab added to ActiveTab without a spelling here fails to compile.
@@ -35,6 +37,7 @@ export type WorkspaceRoute = {
   deadLetterId?: string
   focusDay?: string
   opsSection?: string
+  publishRequestId?: string
   agentSessions?: boolean
   agentSessionId?: string
 }
@@ -95,6 +98,10 @@ export function parseRoute(hash: string): WorkspaceRoute | null {
     const section = segment(kind)
     return section ? { tab, opsSection: section } : null
   }
+  if (tab === 'publishRequests' && rest.length === 0) {
+    const id = segment(kind)
+    return id ? { tab, publishRequestId: id } : null
+  }
   return null
 }
 
@@ -107,6 +114,7 @@ export function formatRoute(route: WorkspaceRoute): string {
     return route.agentSessionId ? `#/multiAgent/sessions/${encodeURIComponent(route.agentSessionId)}` : '#/multiAgent/sessions'
   }
   if (route.tab === 'operations' && route.opsSection) return `#/operations/${encodeURIComponent(route.opsSection)}`
+  if (route.tab === 'publishRequests' && route.publishRequestId) return `#/publishRequests/${encodeURIComponent(route.publishRequestId)}`
   return `#/${route.tab}`
 }
 

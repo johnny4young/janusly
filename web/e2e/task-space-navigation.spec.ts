@@ -26,6 +26,7 @@ const LOCALES = [
     recover: 'Recover',
     agentActivity: 'Agent activity',
     reports: 'Reports',
+    publishRequests: 'Publish requests',
     allWorkflows: 'All workflows',
     emptyWorkflows: 'No flows saved yet',
     runs: 'Runs',
@@ -50,6 +51,7 @@ const LOCALES = [
     recover: 'Recuperar',
     agentActivity: 'Actividad de agentes',
     reports: 'Reportes',
+    publishRequests: 'Solicitudes de publicación',
     allWorkflows: 'Todos los flujos',
     emptyWorkflows: 'Aún no hay flujos guardados',
     runs: 'Ejecuciones',
@@ -277,7 +279,7 @@ for (const locale of LOCALES) {
     const sectionNav = page.getByTestId('workspace-section-nav')
     await expect(sectionNav).toHaveAttribute('data-destination', 'activity')
     await expect(sectionNav.getByRole('button')).toHaveText([
-      locale.runs, locale.recover, locale.agentActivity, locale.reports,
+      locale.runs, locale.recover, locale.agentActivity, locale.reports, locale.publishRequests,
     ])
     await expect(sectionNav.getByTestId('workspace-section-runs')).toHaveAttribute('aria-current', 'page')
     await expect(sectionNav.getByTestId('workspace-section-context')).toHaveCount(0)

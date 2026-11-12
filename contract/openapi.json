@@ -9729,6 +9729,1058 @@
         "summary": "Bounded deterministic Operator Brief shared by UI and MCP"
       }
     },
+    "/publish-requests": {
+      "get": {
+        "operationId": "get_v1_publish-requests",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "requests": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "decidedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "decidedBy": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "decisionReason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "draftId": {
+                                    "type": "string"
+                                  },
+                                  "draftedBy": {
+                                    "type": "string"
+                                  },
+                                  "drafterName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "expiresAt": {
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "onBehalfOf": {
+                                    "type": "string"
+                                  },
+                                  "proposedName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "publishedVersionId": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "qualificationId": {
+                                    "type": "string"
+                                  },
+                                  "reasons": {
+                                    "items": {
+                                      "enum": [
+                                        "writes",
+                                        "first_publish",
+                                        "outbound",
+                                        "callers",
+                                        "triggers_changed",
+                                        "steps_removed",
+                                        "outputs_removed"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "requestedBy": {
+                                    "type": "string"
+                                  },
+                                  "requesterName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "published",
+                                      "rejected",
+                                      "expired",
+                                      "superseded"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "viewer": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "canDecide": {
+                                        "type": "boolean"
+                                      },
+                                      "refusal": {
+                                        "enum": [
+                                          "settled",
+                                          "permission",
+                                          "requester",
+                                          "second_person",
+                                          "creator_unknown",
+                                          "policy_unavailable",
+                                          "stale",
+                                          "stale_base",
+                                          null
+                                        ],
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "canDecide",
+                                      "refusal"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "workflowId": {
+                                    "type": "string"
+                                  },
+                                  "workflowName": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "workflowId",
+                                  "workflowName",
+                                  "proposedName",
+                                  "draftId",
+                                  "qualificationId",
+                                  "reasons",
+                                  "requestedBy",
+                                  "requesterName",
+                                  "onBehalfOf",
+                                  "draftedBy",
+                                  "drafterName",
+                                  "status",
+                                  "createdAt",
+                                  "expiresAt",
+                                  "decidedBy",
+                                  "decidedAt",
+                                  "decisionReason",
+                                  "publishedVersionId",
+                                  "viewer"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "requests"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "The organization's latest agent publish requests, each with whether the caller may decide it"
+      }
+    },
+    "/publish-requests/{id}": {
+      "get": {
+        "operationId": "get_v1_publish-requests_id",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "changes": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "outputsRemoved": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "stepsRemoved": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "triggersChanged": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "triggersChanged",
+                                    "stepsRemoved",
+                                    "outputsRemoved"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "current": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "document": {
+                                  "$ref": "#/components/schemas/WorkflowDoc"
+                                },
+                                "version": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "versionId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "versionId",
+                                "version",
+                                "document"
+                              ],
+                              "type": "object"
+                            },
+                            "effects": {
+                              "anyOf": [
+                                {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "credentials": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "kind": {
+                                        "enum": [
+                                          "step",
+                                          "outputs"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "nodeId": {
+                                        "type": "string"
+                                      },
+                                      "target": {
+                                        "type": "string"
+                                      },
+                                      "tool": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "writes": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "nodeId",
+                                      "type",
+                                      "tool",
+                                      "target",
+                                      "writes",
+                                      "credentials"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "proposed": {
+                              "$ref": "#/components/schemas/WorkflowDoc"
+                            },
+                            "qualification": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "checks": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "code": {
+                                        "type": "string"
+                                      },
+                                      "fix": {
+                                        "type": "string"
+                                      },
+                                      "message": {
+                                        "type": "string"
+                                      },
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "enum": [
+                                          "passed",
+                                          "failed"
+                                        ],
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "code",
+                                      "status",
+                                      "message"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "fixtureRuns": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "detail": {
+                                        "type": "string"
+                                      },
+                                      "fixture": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "enum": [
+                                          "running",
+                                          "passed",
+                                          "failed"
+                                        ],
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "fixture",
+                                      "status"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "running",
+                                    "passed",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "checks",
+                                "fixtureRuns"
+                              ],
+                              "type": "object"
+                            },
+                            "request": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "decidedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decidedBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decisionReason": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "draftId": {
+                                  "type": "string"
+                                },
+                                "draftedBy": {
+                                  "type": "string"
+                                },
+                                "drafterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "onBehalfOf": {
+                                  "type": "string"
+                                },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "publishedVersionId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "qualificationId": {
+                                  "type": "string"
+                                },
+                                "reasons": {
+                                  "items": {
+                                    "enum": [
+                                      "writes",
+                                      "first_publish",
+                                      "outbound",
+                                      "callers",
+                                      "triggers_changed",
+                                      "steps_removed",
+                                      "outputs_removed"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "requestedBy": {
+                                  "type": "string"
+                                },
+                                "requesterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "published",
+                                    "rejected",
+                                    "expired",
+                                    "superseded"
+                                  ],
+                                  "type": "string"
+                                },
+                                "viewer": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "canDecide": {
+                                      "type": "boolean"
+                                    },
+                                    "refusal": {
+                                      "enum": [
+                                        "settled",
+                                        "permission",
+                                        "requester",
+                                        "second_person",
+                                        "creator_unknown",
+                                        "policy_unavailable",
+                                        "stale",
+                                        "stale_base",
+                                        null
+                                      ],
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "canDecide",
+                                    "refusal"
+                                  ],
+                                  "type": "object"
+                                },
+                                "workflowId": {
+                                  "type": "string"
+                                },
+                                "workflowName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "workflowId",
+                                "workflowName",
+                                "proposedName",
+                                "draftId",
+                                "qualificationId",
+                                "reasons",
+                                "requestedBy",
+                                "requesterName",
+                                "onBehalfOf",
+                                "draftedBy",
+                                "drafterName",
+                                "status",
+                                "createdAt",
+                                "expiresAt",
+                                "decidedBy",
+                                "decidedAt",
+                                "decisionReason",
+                                "publishedVersionId",
+                                "viewer"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "request",
+                            "proposed",
+                            "effects",
+                            "changes",
+                            "qualification"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "One publish request in decision order: effects, reasons, changes, documents and qualification"
+      }
+    },
+    "/publish-requests/{id}/approve": {
+      "post": {
+        "operationId": "post_v1_publish-requests_id_approve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "request": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "decidedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decidedBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decisionReason": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "draftId": {
+                                  "type": "string"
+                                },
+                                "draftedBy": {
+                                  "type": "string"
+                                },
+                                "drafterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "onBehalfOf": {
+                                  "type": "string"
+                                },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "publishedVersionId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "qualificationId": {
+                                  "type": "string"
+                                },
+                                "reasons": {
+                                  "items": {
+                                    "enum": [
+                                      "writes",
+                                      "first_publish",
+                                      "outbound",
+                                      "callers",
+                                      "triggers_changed",
+                                      "steps_removed",
+                                      "outputs_removed"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "requestedBy": {
+                                  "type": "string"
+                                },
+                                "requesterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "published",
+                                    "rejected",
+                                    "expired",
+                                    "superseded"
+                                  ],
+                                  "type": "string"
+                                },
+                                "viewer": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "canDecide": {
+                                      "type": "boolean"
+                                    },
+                                    "refusal": {
+                                      "enum": [
+                                        "settled",
+                                        "permission",
+                                        "requester",
+                                        "second_person",
+                                        "creator_unknown",
+                                        "policy_unavailable",
+                                        "stale",
+                                        "stale_base",
+                                        null
+                                      ],
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "canDecide",
+                                    "refusal"
+                                  ],
+                                  "type": "object"
+                                },
+                                "workflowId": {
+                                  "type": "string"
+                                },
+                                "workflowName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "workflowId",
+                                "workflowName",
+                                "proposedName",
+                                "draftId",
+                                "qualificationId",
+                                "reasons",
+                                "requestedBy",
+                                "requesterName",
+                                "onBehalfOf",
+                                "draftedBy",
+                                "drafterName",
+                                "status",
+                                "createdAt",
+                                "expiresAt",
+                                "decidedBy",
+                                "decidedAt",
+                                "decisionReason",
+                                "publishedVersionId",
+                                "viewer"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "request"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Approve and publish an agent's draft"
+      }
+    },
+    "/publish-requests/{id}/reject": {
+      "post": {
+        "operationId": "post_v1_publish-requests_id_reject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "request": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "decidedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decidedBy": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "decisionReason": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "draftId": {
+                                  "type": "string"
+                                },
+                                "draftedBy": {
+                                  "type": "string"
+                                },
+                                "drafterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "onBehalfOf": {
+                                  "type": "string"
+                                },
+                                "proposedName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "publishedVersionId": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "qualificationId": {
+                                  "type": "string"
+                                },
+                                "reasons": {
+                                  "items": {
+                                    "enum": [
+                                      "writes",
+                                      "first_publish",
+                                      "outbound",
+                                      "callers",
+                                      "triggers_changed",
+                                      "steps_removed",
+                                      "outputs_removed"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "requestedBy": {
+                                  "type": "string"
+                                },
+                                "requesterName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "published",
+                                    "rejected",
+                                    "expired",
+                                    "superseded"
+                                  ],
+                                  "type": "string"
+                                },
+                                "viewer": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "canDecide": {
+                                      "type": "boolean"
+                                    },
+                                    "refusal": {
+                                      "enum": [
+                                        "settled",
+                                        "permission",
+                                        "requester",
+                                        "second_person",
+                                        "creator_unknown",
+                                        "policy_unavailable",
+                                        "stale",
+                                        "stale_base",
+                                        null
+                                      ],
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "canDecide",
+                                    "refusal"
+                                  ],
+                                  "type": "object"
+                                },
+                                "workflowId": {
+                                  "type": "string"
+                                },
+                                "workflowName": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "workflowId",
+                                "workflowName",
+                                "proposedName",
+                                "draftId",
+                                "qualificationId",
+                                "reasons",
+                                "requestedBy",
+                                "requesterName",
+                                "onBehalfOf",
+                                "draftedBy",
+                                "drafterName",
+                                "status",
+                                "createdAt",
+                                "expiresAt",
+                                "decidedBy",
+                                "decidedAt",
+                                "decisionReason",
+                                "publishedVersionId",
+                                "viewer"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "request"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Reject an agent's publish request; the agent reads the reason in publish.status"
+      }
+    },
     "/recovery/cases": {
       "get": {
         "operationId": "get_v1_recovery_cases",

@@ -453,6 +453,26 @@ described in `mcp-server.md`):
    a rollout. Audit records the agent as requester and the person as
    approver.
 
+   People decide in Activity > Publish requests (`#/publishRequests/<id>`),
+   filtered by state or by "Waiting for you", the requests the person may
+   decide now. The pending list refreshes every ten seconds while visible.
+   A request reads in the order of the decision: the steps that keep it from
+   publishing alone, with the host each calls and the credentials it names
+   (names only), the reasons, what it removes from production (`changes`)
+   with a diff against the live version (an empty workflow on a first
+   publish), and the receipt's checks and fixture runs. Each request carries
+   `viewer.canDecide` and the refusal the decide route would give
+   (`permission`, `requester`, `second_person`, `creator_unknown`,
+   `policy_unavailable`, `stale` for a receipt that no longer backs the
+   draft, `stale_base` when the live version moved, `settled`), so the
+   screen offers only what the API allows and still shows a refusal it
+   returns. The title is the live workflow's name; a draft that renames it
+   shows the proposed name apart, so an agent cannot relabel what a person
+   approves. Approve and reject take a reason of at most 500 characters of
+   text, checked before any work, stored on the request and returned by
+   `publish.status`; the screen asks for one before a rejection. A pending request past its expiry reads and filters as
+   expired.
+
 A passing gate proves the contracts and fixtures held, not that production
 will behave. Product copy says "qualified", never "verified"; verification
 remains the job of outcome qualification, rollout guardrails and semantic
@@ -751,6 +771,20 @@ measures its goal; this document is updated with what shipped.
 Identity comes first because every later stage records and limits by client.
 The gate comes before the map because the map's "save as workflow" ends in
 the gate.
+
+### Cycle harness
+
+Each task runs in a throwaway home with only the `janusly` MCP server and a
+dedicated model key from the environment; a preflight reads what the client
+loaded and refuses the cycle when anything else appears. The official figure
+runs in a container, three repetitions per task and mode, and reports the
+median. `docs/development.md` (Agent cycle) has the rules and the commands.
+
+| Client | Mode | Passed | Notes |
+|---|---|---|---|
+| Codex 0.167 | strict | 7/10 | One run per task, before throwaway homes |
+| Codex 0.167 | approved | 9/10 | Same run; task 7 failed on a product gap since closed |
+| Claude Code 2.1.322 | strict, approved | not measured | Needs a dedicated key with a spend cap |
 
 ## Threats
 

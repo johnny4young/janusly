@@ -497,6 +497,7 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	registered := rec.record("POST /v1/authoring/experiences/register", experienceHarness.call("POST", "/v1/authoring/experiences/register", experienceRequest, ""), http.StatusOK)
 	rec.record("GET /v1/authoring/experiences", experienceHarness.call("GET", "/v1/authoring/experiences?workflowId="+experienceRequest["workflowId"].(string), nil, ""), http.StatusOK)
 	rec.record("POST /v1/authoring/experiences/revoke", experienceHarness.call("POST", "/v1/authoring/experiences/revoke", map[string]any{"id": registered["id"]}, ""), http.StatusOK)
+	conformancePublishRequests(t, h, rec)
 	rows := manifestConformanceRows()
 	for key, row := range rows {
 		if !row.integration {
