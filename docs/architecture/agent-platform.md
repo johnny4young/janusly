@@ -720,7 +720,8 @@ measures its goal; this document is updated with what shipped.
 3. Publish gate: drafts, test, qualify, publish, publish requests.
 4. Run map and agents view, then the hooks bridge.
 5. The cycle harness: ten tasks in English and Spanish, each from a blank
-   Claude Code or Codex session against `/mcp`, scored on the 30-step cycle.
+   Claude Code, Codex or Cursor session against `/mcp`, scored on the 30-step
+   cycle.
    The goal is 8 of 10 completed with no person except to enter a secret and
    approve.
 
@@ -741,6 +742,7 @@ median. `docs/development.md` (Agent cycle) has the rules and the commands.
 | Codex 0.167 | strict | 7/10 | One run per task, before throwaway homes |
 | Codex 0.167 | approved | 9/10 | Same run; task 7 failed on a product gap since closed |
 | Claude Code 2.1.322 | strict, approved | not measured | Needs a dedicated key with a spend cap |
+| Cursor 2026.11.11 | strict, approved | not measured | Container only, dedicated account and key with a spend cap |
 
 ## Threats
 
