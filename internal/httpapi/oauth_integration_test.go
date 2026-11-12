@@ -384,6 +384,7 @@ func TestOAuthRefusesBadRequestsWithoutLeakingOrRedirecting(t *testing.T) {
 		t.Fatalf("exchange: %d %s", first.status, first.text)
 	}
 	// A retried exchange is refused without ending the grant; a later replay ends it.
+	// (A retry that cannot prove it is the same client is covered below.)
 	if retry := h.tokenCall(t, good); retry.status != 400 || retry.body["error"] != "invalid_grant" {
 		t.Fatalf("code retry: %d %s", retry.status, retry.text)
 	}
@@ -399,7 +400,43 @@ func TestOAuthRefusesBadRequestsWithoutLeakingOrRedirecting(t *testing.T) {
 	if _, err := (agentclient.Resolver{Pool: testPool(t)}).Resolve(t.Context(), access); err == nil {
 		t.Fatal("the grant survived a replayed code")
 	}
+	// Inside the grace window, a replay without the right verifier is still a leak.
+	requestID = h.authorize(t, clientID, redirect, challenge, "", "s-leak")
+	decided = h.callWithHeaders("POST", "/oauth/requests/"+requestID+"/decision", map[string]any{"approve": true}, "", as)
+	back, _ = url.Parse(decided.body["redirectTo"].(string))
+	leaked := h.tokenCall(t, mutate("code", back.Query().Get("code")))
+	leakedAccess, _ := leaked.body["access_token"].(string)
+	stolen := mutate("code", back.Query().Get("code"))
+	stolen.Set("code_verifier", otherVerifier)
+	if res := h.tokenCall(t, stolen); leaked.status != 200 || res.status != 400 {
+		t.Fatalf("stolen code replay: %d %d", leaked.status, res.status)
+	}
+	if _, err := (agentclient.Resolver{Pool: testPool(t)}).Resolve(t.Context(), leakedAccess); err == nil {
+		t.Fatal("a code replayed without its verifier did not end the grant")
+	}
+	// One client cannot pile up unanswered requests.
+	if _, err := testPool(t).Exec(t.Context(), `DELETE FROM rate_limit_windows WHERE name LIKE 'oauth.%'`); err != nil {
+		t.Fatal(err)
+	}
+	capped := false
+	for range 21 {
+		if res := h.raw(t, "GET", with("state", "pile"), "", ""); res.location != nil && res.location.Query().Get("error") == "temporarily_unavailable" {
+			capped = true
+			break
+		}
+	}
+	if !capped {
+		t.Fatal("one client piled up more than 20 unanswered requests")
+	}
+	otherClient := h.register(t, "Unaffected", redirect)
+	if h.authorize(t, otherClient, redirect, challenge, "", "ok") == "" {
+		t.Fatal("another client was crowded out")
+	}
+
 	// An expired code is refused.
+	if _, err := testPool(t).Exec(t.Context(), `DELETE FROM oauth_authorization_requests WHERE oauth_client_id = $1 AND status = 'pending'`, clientID); err != nil {
+		t.Fatal(err)
+	}
 	requestID = h.authorize(t, clientID, redirect, challenge, "", "s3")
 	decided = h.callWithHeaders("POST", "/oauth/requests/"+requestID+"/decision", map[string]any{"approve": true}, "", as)
 	back, _ = url.Parse(decided.body["redirectTo"].(string))
@@ -524,6 +561,17 @@ func TestOAuthRegistrationIsBounded(t *testing.T) {
 	if oldest != 0 || total != 1000 || fresh == "" {
 		t.Fatalf("eviction at the cap: oldest kept %d, total %d", oldest, total)
 	}
+	// Registrations still in their first minutes are a flow in progress: none is evicted.
+	if _, err := pool.Exec(t.Context(), `UPDATE oauth_clients SET created_at = now() WHERE last_used_at IS NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.raw(t, "POST", "/oauth/register", "application/json", body); res.status != http.StatusServiceUnavailable {
+		t.Fatalf("registration at the cap with nothing evictable: %d %s", res.status, res.text)
+	}
+	var kept int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM oauth_clients WHERE id = $1`, fresh).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("a fresh registration was evicted: %d %v", kept, err)
+	}
 	used := h.register2(t, pool)
 	if _, err := pool.Exec(t.Context(), `UPDATE oauth_clients SET created_at = now() - interval '25 hours'`); err != nil {
 		t.Fatal(err)
@@ -531,7 +579,6 @@ func TestOAuthRegistrationIsBounded(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), `DELETE FROM oauth_clients WHERE last_used_at IS NULL AND created_at < now() - interval '24 hours'`); err != nil {
 		t.Fatal(err)
 	}
-	var kept int
 	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM oauth_clients WHERE id = $1`, used).Scan(&kept); err != nil || kept != 1 {
 		t.Fatalf("a used registration was swept: %d %v", kept, err)
 	}

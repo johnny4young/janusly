@@ -66,7 +66,7 @@ VALUES (sqlc.arg(digest), sqlc.arg(agent_client_id), sqlc.arg(rotated_at))
 ON CONFLICT (digest) DO NOTHING;
 
 -- name: GetOAuthRefreshHistory :one
-SELECT h.agent_client_id, h.rotated_at, c.org_id
+SELECT h.agent_client_id, h.rotated_at, c.org_id, coalesce(c.oauth_client_id, '')::text AS oauth_client_id
 FROM oauth_refresh_history h
 JOIN agent_clients c ON c.id = h.agent_client_id
 WHERE h.digest = $1;
@@ -82,12 +82,20 @@ WHERE oauth_client_id IS NOT NULL AND access_expires_at IS NULL AND revoked_at I
   AND created_at < sqlc.arg(cutoff)::timestamptz;
 
 -- name: CountPendingOAuthRequests :one
-SELECT count(*)::int FROM oauth_authorization_requests WHERE status = 'pending' AND expires_at > sqlc.arg(now)::timestamptz;
+SELECT count(*)::int FROM oauth_authorization_requests
+WHERE oauth_client_id = sqlc.arg(oauth_client_id) AND status = 'pending' AND expires_at > sqlc.arg(now)::timestamptz;
 
 -- Makes room for a new registration by dropping the oldest one nobody used.
--- name: EvictOldestUnusedOAuthClient :exec
+-- One still inside its first minutes, or with a request waiting for consent,
+-- is a flow in progress and is never evicted.
+-- name: EvictOldestUnusedOAuthClient :execrows
 DELETE FROM oauth_clients WHERE id = (
-  SELECT id FROM oauth_clients WHERE last_used_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+  SELECT c.id FROM oauth_clients c
+  WHERE c.last_used_at IS NULL AND c.created_at < sqlc.arg(settled_before)::timestamptz
+    AND NOT EXISTS (
+      SELECT 1 FROM oauth_authorization_requests r
+      WHERE r.oauth_client_id = c.id AND r.status = 'pending' AND r.expires_at > sqlc.arg(now)::timestamptz)
+  ORDER BY c.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
 );
 
 -- A replayed code or refresh token ends the grant.

@@ -36,9 +36,11 @@ const (
 	UnusedClientTTL = 24 * time.Hour
 	// maxUnusedClients bounds what unauthenticated registration can store.
 	maxUnusedClients = 1000
-	// maxPendingRequests bounds what unauthenticated authorize calls can store.
-	maxPendingRequests = 5000
-	maxFormBytes       = 8 << 10
+	// maxPendingPerClient bounds the unanswered requests one registration holds.
+	maxPendingPerClient = 20
+	// evictionMinAge keeps a registration from being evicted mid-flow.
+	evictionMinAge = 10 * time.Minute
+	maxFormBytes   = 8 << 10
 	// retryGrace is how long a just-used code or refresh token may be presented
 	// again without it reading as a leak: a client retrying a lost response.
 	retryGrace = 30 * time.Second

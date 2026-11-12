@@ -346,8 +346,9 @@ token.
 - **Replay ends the grant.** A code presented again, or any refresh token
   the grant ever rotated away (every one is kept as a digest), revokes the
   client and is audited (`oauth.code_reused`, `oauth.refresh_reused`). The
-  exception is 30 seconds after use: a client retrying a lost response gets
-  `invalid_grant` and keeps its grant.
+  exception is 30 seconds after use, and only for a retry that proves it is
+  the same client (same client id, and for a code the same redirect and PKCE
+  verifier): it gets `invalid_grant` and keeps its grant.
 - **Redirects.** Exact match; `http` only on a loopback address, where the
   port may differ (RFC 8252); `https` otherwise; no private schemes, wildcards,
   fragments or credentials. Hosts are lowercase ASCII, so an internationalized
@@ -359,9 +360,11 @@ token.
   when they consent; nothing in an OAuth request names one.
 - **Registration is unauthenticated,** so it is bounded: 10 per hour per
   address (an IPv6 caller counts by its /64), 1000 unused registrations in
-  total, where a new one evicts the oldest instead of being refused, and one
-  nobody used within 24 hours is swept. Authorize and token are limited per
-  address too, and at most 5000 requests wait for consent.
+  total, where a new one evicts the oldest (never one younger than 10
+  minutes or with a request waiting for consent), and one nobody used within
+  24 hours is swept. Authorize and token are limited per address too, and a
+  client holds at most 20 requests waiting for consent, so one caller cannot
+  crowd out another.
 - **Loose ends are closed.** A consent whose code is never exchanged is
   revoked within minutes by the retention sweep.
 - **Not in this cut:** client metadata documents by URL (CIMD), private

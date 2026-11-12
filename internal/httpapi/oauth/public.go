@@ -101,8 +101,12 @@ func (s *service) register(w http.ResponseWriter, r *http.Request) {
 	// At the cap the oldest registration nobody used makes room, so filling
 	// the table cannot lock new clients out.
 	if unused >= maxUnusedClients {
-		if err := q.EvictOldestUnusedOAuthClient(r.Context()); err != nil {
-			oauthError(w, http.StatusInternalServerError, "server_error", "registration failed")
+		now := s.now().UTC()
+		evicted, err := q.EvictOldestUnusedOAuthClient(r.Context(), store.EvictOldestUnusedOAuthClientParams{
+			SettledBefore: now.Add(-evictionMinAge), Now: now,
+		})
+		if err != nil || evicted == 0 {
+			oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many new registrations; retry in a few minutes")
 			return
 		}
 	}
@@ -162,8 +166,11 @@ func (s *service) authorize(w http.ResponseWriter, r *http.Request) {
 	case !scopesOK:
 		fail("invalid_scope", "unknown scope")
 	default:
-		if pending, err := q.CountPendingOAuthRequests(r.Context(), s.now().UTC()); err != nil || pending >= maxPendingRequests {
-			fail("temporarily_unavailable", "too many pending requests; retry later")
+		// Bounded per client, so one caller's requests never crowd out another's.
+		if pending, err := q.CountPendingOAuthRequests(r.Context(), store.CountPendingOAuthRequestsParams{
+			OauthClientID: client.ID, Now: s.now().UTC(),
+		}); err != nil || pending >= maxPendingPerClient {
+			fail("temporarily_unavailable", "too many pending requests for this client; retry later")
 			return
 		}
 		request, err := q.InsertOAuthRequest(r.Context(), store.InsertOAuthRequestParams{
@@ -261,10 +268,13 @@ func (s *service) exchangeCode(r *http.Request, form url.Values) (tokenReply, er
 	if err != nil {
 		return tokenReply{}, err
 	}
-	// A code presented again means it leaked and the grant it made ends,
-	// unless it is the same client retrying within the grace window.
+	// A code presented again means it leaked and the grant it made ends. The
+	// one exception is a retry that proves it is the same client: within the
+	// grace window, with the same client, redirect and PKCE verifier.
 	if request.CodeUsedAt != nil {
-		if now.Sub(*request.CodeUsedAt) <= retryGrace {
+		sameCaller := form.Get("client_id") == request.OauthClientID && form.Get("redirect_uri") == request.RedirectUri &&
+			pkceMatches(form.Get("code_verifier"), request.CodeChallenge)
+		if sameCaller && now.Sub(*request.CodeUsedAt) <= retryGrace {
 			return tokenReply{}, errInvalidGrant
 		}
 		if err := s.endGrant(r, q, request.OrgID.String, request.AgentClientID.String, codeReuseAction); err != nil {
@@ -310,7 +320,11 @@ func (s *service) refresh(r *http.Request, form url.Values) (tokenReply, error) 
 		// A refresh token rotated away, however long ago, means it leaked and
 		// the grant ends, unless it is the same client retrying right after.
 		rotated, historyErr := q.GetOAuthRefreshHistory(ctx, presentedDigest)
-		if historyErr != nil || now.Sub(rotated.RotatedAt) <= retryGrace {
+		if historyErr != nil {
+			return tokenReply{}, errInvalidGrant
+		}
+		// A retry right after the rotation, naming the client the token was issued to.
+		if form.Get("client_id") == rotated.OauthClientID && now.Sub(rotated.RotatedAt) <= retryGrace {
 			return tokenReply{}, errInvalidGrant
 		}
 		if err := s.endGrant(r, q, rotated.OrgID, rotated.AgentClientID, refreshReuseAction); err != nil {

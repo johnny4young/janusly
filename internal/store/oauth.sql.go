@@ -63,11 +63,17 @@ func (q *Queries) ApproveOAuthRequest(ctx context.Context, arg ApproveOAuthReque
 }
 
 const countPendingOAuthRequests = `-- name: CountPendingOAuthRequests :one
-SELECT count(*)::int FROM oauth_authorization_requests WHERE status = 'pending' AND expires_at > $1::timestamptz
+SELECT count(*)::int FROM oauth_authorization_requests
+WHERE oauth_client_id = $1 AND status = 'pending' AND expires_at > $2::timestamptz
 `
 
-func (q *Queries) CountPendingOAuthRequests(ctx context.Context, now time.Time) (int32, error) {
-	row := q.db.QueryRow(ctx, countPendingOAuthRequests, now)
+type CountPendingOAuthRequestsParams struct {
+	OauthClientID string
+	Now           time.Time
+}
+
+func (q *Queries) CountPendingOAuthRequests(ctx context.Context, arg CountPendingOAuthRequestsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingOAuthRequests, arg.OauthClientID, arg.Now)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -157,16 +163,31 @@ func (q *Queries) DenyOAuthRequest(ctx context.Context, arg DenyOAuthRequestPara
 	return i, err
 }
 
-const evictOldestUnusedOAuthClient = `-- name: EvictOldestUnusedOAuthClient :exec
+const evictOldestUnusedOAuthClient = `-- name: EvictOldestUnusedOAuthClient :execrows
 DELETE FROM oauth_clients WHERE id = (
-  SELECT id FROM oauth_clients WHERE last_used_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
+  SELECT c.id FROM oauth_clients c
+  WHERE c.last_used_at IS NULL AND c.created_at < $1::timestamptz
+    AND NOT EXISTS (
+      SELECT 1 FROM oauth_authorization_requests r
+      WHERE r.oauth_client_id = c.id AND r.status = 'pending' AND r.expires_at > $2::timestamptz)
+  ORDER BY c.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
 )
 `
 
+type EvictOldestUnusedOAuthClientParams struct {
+	SettledBefore time.Time
+	Now           time.Time
+}
+
 // Makes room for a new registration by dropping the oldest one nobody used.
-func (q *Queries) EvictOldestUnusedOAuthClient(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, evictOldestUnusedOAuthClient)
-	return err
+// One still inside its first minutes, or with a request waiting for consent,
+// is a flow in progress and is never evicted.
+func (q *Queries) EvictOldestUnusedOAuthClient(ctx context.Context, arg EvictOldestUnusedOAuthClientParams) (int64, error) {
+	result, err := q.db.Exec(ctx, evictOldestUnusedOAuthClient, arg.SettledBefore, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getOAuthClient = `-- name: GetOAuthClient :one
@@ -188,7 +209,7 @@ func (q *Queries) GetOAuthClient(ctx context.Context, id string) (OauthClient, e
 }
 
 const getOAuthRefreshHistory = `-- name: GetOAuthRefreshHistory :one
-SELECT h.agent_client_id, h.rotated_at, c.org_id
+SELECT h.agent_client_id, h.rotated_at, c.org_id, coalesce(c.oauth_client_id, '')::text AS oauth_client_id
 FROM oauth_refresh_history h
 JOIN agent_clients c ON c.id = h.agent_client_id
 WHERE h.digest = $1
@@ -198,12 +219,18 @@ type GetOAuthRefreshHistoryRow struct {
 	AgentClientID string
 	RotatedAt     time.Time
 	OrgID         string
+	OauthClientID string
 }
 
 func (q *Queries) GetOAuthRefreshHistory(ctx context.Context, digest []byte) (GetOAuthRefreshHistoryRow, error) {
 	row := q.db.QueryRow(ctx, getOAuthRefreshHistory, digest)
 	var i GetOAuthRefreshHistoryRow
-	err := row.Scan(&i.AgentClientID, &i.RotatedAt, &i.OrgID)
+	err := row.Scan(
+		&i.AgentClientID,
+		&i.RotatedAt,
+		&i.OrgID,
+		&i.OauthClientID,
+	)
 	return i, err
 }
 
