@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/johnny4young/janusly/internal/agentclient"
+	"github.com/johnny4young/janusly/internal/ratelimit"
 )
 
 // HTTPOptions configures the remote MCP endpoint.
@@ -54,25 +55,23 @@ func NewHTTPHandler(deps Deps, opts HTTPOptions) http.Handler {
 		}
 		return principal, nil
 	}
+	if deps.Limiter == nil && deps.Pool != nil {
+		deps.Limiter = ratelimit.New(deps.Pool, ratelimit.Hooks{})
+	}
 	streamable := newStreamableHandler(deps, opts.Logger)
-	verify := func(ctx context.Context, token string, _ *http.Request) (*sdkauth.TokenInfo, error) {
-		principal, err := resolver.Resolve(ctx, token)
-		if errors.Is(err, agentclient.ErrInvalidToken) {
+	// authGate already resolved the token; this only hands it to the SDK.
+	verify := func(ctx context.Context, _ string, _ *http.Request) (*sdkauth.TokenInfo, error) {
+		principal, _ := ctx.Value(verifiedPrincipalKey{}).(*agentclient.Principal)
+		if principal == nil {
 			return nil, sdkauth.ErrInvalidToken
-		}
-		if err != nil {
-			// The SDK echoes this text; never let a store error reach the wire.
-			if opts.Logger != nil {
-				opts.Logger.Error("mcp token verification failed", "error", err)
-			}
-			return nil, errVerificationUnavailable
 		}
 		return &sdkauth.TokenInfo{
 			UserID: principal.ActorID(), Expiration: principal.ExpiresAt,
 			Extra: map[string]any{principalExtraKey: principal},
 		}, nil
 	}
-	authenticated := challenge(sdkauth.RequireBearerToken(verify, nil)(refuseBatches(streamable)))
+	authenticated := challenge(authGate(deps, resolver, opts.Logger,
+		sdkauth.RequireBearerToken(verify, nil)(refuseBatches(streamable))))
 	protected := http.NewCrossOriginProtection().Handler(authenticated)
 	return guardHTTP(protected, opts)
 }

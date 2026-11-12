@@ -199,3 +199,67 @@ func TestRemoteMCPServesAgentClientsOverStreamableHTTP(t *testing.T) {
 		t.Fatalf("revoked token still answered: %d", status)
 	}
 }
+
+func TestRemoteMCPAuditsAndLimitsRejectedTokens(t *testing.T) {
+	pool, eng := agentTestPool(t)
+	tenant := seedAgentTenant(t, pool, eng, "rejected")
+	revoked := issueAgentClient(t, pool, tenant, agentclient.IssueInput{})
+	if _, err := store.New(pool).RevokeAgentClient(t.Context(), store.RevokeAgentClientParams{
+		OrgID: tenant.org, ID: revoked.Client.ID, RevokedBy: tenant.creator,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	live := issueAgentClient(t, pool, tenant, agentclient.IssueInput{})
+	unissued, _, _, err := agentclient.NewToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncBuffer{}
+	server := httptest.NewServer(NewHTTPHandler(Deps{Engine: eng, Pool: pool, NewID: uuid.NewString},
+		HTTPOptions{Logger: slog.New(slog.NewTextHandler(logs, nil))}))
+	t.Cleanup(server.Close)
+	endpoint := server.URL + "/mcp"
+	t.Setenv("JANUSLY_TRUSTED_PROXY", "true")
+	address := "2001:db8::" + strings.ReplaceAll(uuid.NewString()[:9], "-", ":")
+	from := func(token string) map[string]string {
+		return map[string]string{"Authorization": "Bearer " + token, "X-Forwarded-For": address}
+	}
+
+	if status, _, _ := rawPost(t, endpoint, from(revoked.Token), initializeBody); status != http.StatusUnauthorized {
+		t.Fatalf("revoked token: %d", status)
+	}
+	var reason, metadata string
+	if err := pool.QueryRow(t.Context(), `SELECT metadata->>'reason', metadata::text FROM audit_logs
+		WHERE org_id = $1 AND action = 'mcp.auth.rejected' AND target_id = $2`, tenant.org, revoked.Client.ID).Scan(&reason, &metadata); err != nil || reason != "revoked" {
+		t.Fatalf("revoked token audit in its organization: %q %v", reason, err)
+	}
+	if status, _, _ := rawPost(t, endpoint, from(unissued), initializeBody); status != http.StatusUnauthorized {
+		t.Fatalf("unknown token: %d", status)
+	}
+	var unknown string
+	if err := pool.QueryRow(t.Context(), `SELECT metadata::text FROM audit_logs WHERE org_id = 'system'
+		AND action = 'mcp.auth.rejected' AND metadata->>'clientAddress' = $1 AND metadata->>'reason' = 'unknown'`, address).Scan(&unknown); err != nil {
+		t.Fatalf("unknown token audit: %v", err)
+	}
+	for _, text := range []string{metadata, unknown, logs.String()} {
+		for _, token := range []string{revoked.Token, unissued, revoked.Token[len(agentclient.TokenPrefix):]} {
+			if strings.Contains(text, token) {
+				t.Fatalf("a token reached audit or logs: %s", text)
+			}
+		}
+	}
+
+	status, body, header := 0, "", http.Header{}
+	for range failedAuthLimit.Max {
+		if status, body, header = rawPost(t, endpoint, from(unissued), initializeBody); status != http.StatusUnauthorized {
+			break
+		}
+	}
+	if status != http.StatusTooManyRequests || header.Get("Retry-After") == "" ||
+		!strings.Contains(body, `"code":"rate_limited"`) || !strings.Contains(header.Get("Content-Type"), "application/json") {
+		t.Fatalf("failed attempts past the limit: %d %q %v", status, body, header)
+	}
+	if status, _, _ := rawPost(t, endpoint, map[string]string{"Authorization": "Bearer " + live.Token}, initializeBody); status != http.StatusOK {
+		t.Fatalf("another address was limited: %d", status)
+	}
+}

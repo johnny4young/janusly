@@ -363,6 +363,15 @@ func TestAgentClientCredentialLifecycleAppliesOnTheNextCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectInvalid(operatorSession, "creator removed")
+
+	for clientID, want := range map[string]string{revoked.Client.ID: "revoked", expired.Client.ID: "expired", operator.Client.ID: "creator_removed"} {
+		var reason, transport string
+		if err := pool.QueryRow(ctx, `SELECT metadata->>'reason', metadata->>'transport' FROM audit_logs
+			WHERE org_id = $1 AND action = 'mcp.auth.rejected' AND target_id = $2 LIMIT 1`, tenant.org, clientID).Scan(&reason, &transport); err != nil ||
+			reason != want || transport != "stdio" {
+			t.Fatalf("rejection audit for %s: %q %q %v", want, reason, transport, err)
+		}
+	}
 }
 
 func TestAgentClientScopeAuditAndRateLimit(t *testing.T) {

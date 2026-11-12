@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnny4young/janusly/internal/httpkit"
 	"github.com/johnny4young/janusly/internal/ratelimit"
 
 	"github.com/jackc/pgx/v5"
@@ -225,7 +226,7 @@ func (s *V1Server) servePublicStatusPage(w http.ResponseWriter, r *http.Request)
 		http.NotFound(w, r)
 		return
 	}
-	if err := s.limiter.Enforce(r.Context(), "ip:"+clientAddress(r), publicStatusPageLimit); err != nil {
+	if err := s.limiter.Enforce(r.Context(), "ip:"+httpkit.ClientAddress(r), publicStatusPageLimit); err != nil {
 		var limited *ratelimit.LimitError
 		if errors.As(err, &limited) {
 			w.Header().Set("Retry-After", strconv.Itoa(limited.RetryAfterSec))
