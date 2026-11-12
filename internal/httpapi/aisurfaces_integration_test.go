@@ -183,7 +183,7 @@ func TestExplainWorkflowAiReceivesOperatorQuestion(t *testing.T) {
 }
 
 func TestAiSurfaceLocalFailuresDoNotConsumeProviderAdmission(t *testing.T) {
-	h := newAPIHarness(t)
+	h := frozenClockHarness(t, true)
 	pool := testPool(t)
 
 	var providerCalls atomic.Int32
