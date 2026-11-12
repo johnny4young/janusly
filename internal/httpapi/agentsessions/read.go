@@ -17,6 +17,7 @@ import (
 	"github.com/johnny4young/janusly/internal/audit"
 	"github.com/johnny4young/janusly/internal/auth"
 	"github.com/johnny4young/janusly/internal/httpkit"
+	"github.com/johnny4young/janusly/internal/sessiondraft"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -56,6 +57,13 @@ func Mount(mux *http.ServeMux, deps Deps) {
 	})
 	deps.Routes.Route(mux, "GET /agent-sessions/{sessionId}/map", read, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
 		httpkit.WriteUnversioned(w, s.sessionMap(r, rc))
+	})
+	convert := httpkit.Gate{Role: auth.RoleEditor, Permission: "workflows.write"}
+	deps.Routes.Route(mux, "POST /agent-sessions/{sessionId}/draft", convert, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteUnversioned(w, s.toDraft(r, rc))
+	})
+	deps.Routes.Route(mux, "POST /v1/agent-sessions/{sessionId}/draft", convert, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
+		httpkit.WriteVersioned(w, rc.ID, s.toDraft(r, rc))
 	})
 	decide := httpkit.Gate{Role: auth.RoleEditor, Permission: "agents.write"}
 	deps.Routes.Route(mux, "POST /agent-sessions/gates/{gateId}/decide", decide, func(w http.ResponseWriter, r *http.Request, rc httpkit.Request) {
@@ -179,6 +187,9 @@ func (s *service) sessionMap(r *http.Request, rc httpkit.Request) httpkit.Result
 	return httpkit.OK(map[string]any{
 		"session": sessionView(row, s.now()), "lanes": graph.Lanes, "totals": graph.Totals,
 		"liveSubagents": graph.LiveSubagents, "refs": graph.Refs, "gates": gates,
+		"conversion": sessiondraft.Convertibility(events),
+		// Whether this viewer may convert, so the screen offers only what the route accepts.
+		"canConvert": rc.Auth != nil && auth.IsPersonMode(rc.Auth.Mode) && holds(r, s.pool, rc, "workflows.write", auth.RoleEditor),
 	})
 }
 
@@ -229,4 +240,35 @@ func decodeCursor(raw string) (time.Time, string, bool) {
 		return time.Time{}, "", false
 	}
 	return parsed, id, true
+}
+
+// toDraft converts a session into a draft of a new workflow for a person.
+// The draft enters the publish gate like any other.
+func (s *service) toDraft(r *http.Request, rc httpkit.Request) httpkit.Result {
+	if rc.Auth == nil || !auth.IsPersonMode(rc.Auth.Mode) {
+		return httpkit.Error(http.StatusForbidden, "person_required", "agents convert their own sessions with sessions.to_draft", nil)
+	}
+	if !holds(r, s.pool, rc, "agents.read", auth.RoleViewer) || !holds(r, s.pool, rc, "runs.read", auth.RoleViewer) {
+		return forbidden()
+	}
+	id := r.PathValue("sessionId")
+	if uuid.Validate(id) != nil {
+		return httpkit.Error(http.StatusNotFound, "agent_session_not_found", "agent session not found", nil)
+	}
+	saved, err := sessiondraft.SaveDraft(r.Context(), s.pool, sessiondraft.SaveInput{
+		OrgID: rc.OrgID, SessionID: id, CreatedBy: rc.UserID, NewID: uuid.NewString,
+	})
+	switch {
+	case errors.Is(err, sessiondraft.ErrSessionNotFound):
+		return httpkit.Error(http.StatusNotFound, "agent_session_not_found", "agent session not found", nil)
+	case errors.Is(err, sessiondraft.ErrNotConvertible), errors.Is(err, sessiondraft.ErrTooManyAgents):
+		return httpkit.Error(http.StatusUnprocessableEntity, "agent_session_not_convertible", err.Error(), nil)
+	case err != nil:
+		return internalError()
+	}
+	s.audit.Write(r.Context(), s.pool, rc.Auth, sessiondraft.ConvertedAction, audit.Options{
+		TargetType: "agent_session", TargetID: id,
+		Metadata: map[string]any{"draftId": saved.Draft.ID, "workflowId": saved.Draft.WorkflowID},
+	})
+	return httpkit.Result{Status: http.StatusCreated, Data: sessiondraft.View(saved, "")}
 }

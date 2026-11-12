@@ -3,15 +3,17 @@
  * under their parent agent. A running session refreshes on a short poll.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Bot, CircleDot, CircleStop, Clock, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Bot, CircleDot, CircleStop, Clock, RefreshCw, Workflow } from 'lucide-react'
 
 import { useAliveRef } from '../hooks/useAliveRef'
 import { getResolvedLocale, useT } from '../i18n'
 import {
   decideAgentGate,
   getAgentSessionMap,
+  saveAgentSessionAsDraft,
   listAgentSessions,
   runtimeLabel,
+  type AgentSessionDraft,
   type AgentSessionGate,
   type AgentSessionMap,
   type AgentSessionSummary,
@@ -212,6 +214,7 @@ function SessionDetail({ id, onBack, onOpenRun }: { id: string; onBack: () => vo
         </div>
       )}
       {map.gates.length > 0 && <SessionGates gates={map.gates} onDecided={() => void load()} />}
+      <SaveAsWorkflow sessionId={session.id} conversion={map.conversion} allowed={map.canConvert} />
       {session.truncated && <p className="helper-text" role="note">{t('agentSessions.truncated')}</p>}
       <AgentLanes lanes={lanes} testId="agent-session-lanes" />
     </section>
@@ -259,6 +262,56 @@ function SessionGates({ gates, onDecided }: { gates: readonly AgentSessionGate[]
           </li>
         ))}
       </ul>
+    </section>
+  )
+}
+
+/**
+ * Says how much of the session a workflow can hold before converting: only MCP
+ * tool calls become steps. The result is a draft with open placeholders.
+ */
+function SaveAsWorkflow({ sessionId, conversion, allowed }: {
+  sessionId: string
+  conversion: AgentSessionMap['conversion']
+  allowed: boolean
+}) {
+  const { t } = useT()
+  const alive = useAliveRef()
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState<AgentSessionDraft | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  const save = async () => {
+    setSaving(true)
+    setFailed(false)
+    try {
+      const draft = await saveAgentSessionAsDraft(sessionId)
+      if (alive.current) setSaved(draft)
+    } catch {
+      if (alive.current) setFailed(true)
+    } finally {
+      if (alive.current) setSaving(false)
+    }
+  }
+
+  return (
+    <section className="we-card agent-sessions__convert" data-testid="agent-session-convert">
+      <p>
+        {conversion.convertible
+          ? t('agentSessions.convert.summary', { convertible: conversion.convertibleSteps, total: conversion.totalSteps })
+          : t('agentSessions.convert.none')}
+      </p>
+      {saved ? (
+        <p role="status" data-testid="agent-session-draft">
+          {t('agentSessions.convert.saved', { count: saved.placeholders.length })} <code>{saved.draftId}</code>
+        </p>
+      ) : allowed && conversion.convertible && (
+        <Button size="sm" leadingIcon={<Workflow size={14} aria-hidden="true" />} loading={saving} loadingLabel={t('common.working')}
+          onClick={() => void save()}>
+          {t('agentSessions.convert.action')}
+        </Button>
+      )}
+      {failed && <p role="alert" className="helper-text">{t('agentSessions.convert.failed')}</p>}
     </section>
   )
 }

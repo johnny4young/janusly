@@ -1,7 +1,7 @@
 -- name: InsertWorkflowDraft :one
-INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by)
+INSERT INTO workflow_drafts (id, org_id, workflow_id, base_version_id, document, fixtures, digest, created_by, origin)
 VALUES (sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(workflow_id), sqlc.narg(base_version_id),
-        sqlc.arg(document), sqlc.arg(fixtures), sqlc.arg(digest), sqlc.arg(created_by))
+        sqlc.arg(document), sqlc.arg(fixtures), sqlc.arg(digest), sqlc.arg(created_by), sqlc.narg(origin))
 ON CONFLICT (org_id, workflow_id, created_by, digest) DO NOTHING
 RETURNING *;
 

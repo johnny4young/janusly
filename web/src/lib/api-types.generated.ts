@@ -27,6 +27,14 @@ export type AgentSession = {
 }
 
 export type AgentSessionMap = {
+  "canConvert": boolean
+  "conversion": {
+    "agents": number
+    "convertible": boolean
+    "convertibleSteps": number
+    "mcpServers": string[]
+    "totalSteps": number
+  }
   "gates": ({
     "agentId": string | null
     "contentCaptured": boolean
@@ -1694,6 +1702,8 @@ export interface ApiRequests {
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": undefined
   /** Approve or deny a tool call an agent's hook is holding */
   "POST /agent-sessions/gates/{gateId}/decide": {
     "decision": "approve" | "deny"
@@ -2085,6 +2095,28 @@ export interface ApiResponses {
   "GET /workflows/versions": WorkflowVersion[]
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": WorkflowVersionSnapshot
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": {
+    "agents": {
+      "agentType"?: string
+      "nodeId": string
+      "suggestedTimeoutMs"?: number
+      "tools": string[]
+    }[]
+    "conversion": {
+      "agents": number
+      "convertible": boolean
+      "convertibleSteps": number
+      "mcpServers": string[]
+      "totalSteps": number
+    }
+    "digest": string
+    "draftId": string
+    "mcpServers": string[]
+    "next": string
+    "placeholders": string[]
+    "workflowId": string
+  }
   /** Approve or deny a tool call an agent's hook is holding */
   "POST /agent-sessions/gates/{gateId}/decide": {
     "gate": {
@@ -2296,6 +2328,8 @@ export interface ApiSuccessStatuses {
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200
+  /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
+  "POST /agent-sessions/{sessionId}/draft": 200
   /** Approve or deny a tool call an agent's hook is holding */
   "POST /agent-sessions/gates/{gateId}/decide": 200
   /** Suggest a validated fix for one dead letter without applying it */

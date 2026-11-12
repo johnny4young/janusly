@@ -17,6 +17,7 @@ import (
 	"github.com/johnny4young/janusly/internal/domain"
 	"github.com/johnny4young/janusly/internal/engine"
 	"github.com/johnny4young/janusly/internal/publishgate"
+	"github.com/johnny4young/janusly/internal/sessiondraft"
 	"github.com/johnny4young/janusly/internal/store"
 )
 
@@ -55,6 +56,10 @@ type draftSaveArgs struct {
 	WorkflowID string                `json:"workflowId,omitempty" jsonschema:"an existing workflow to change; omit to propose a new workflow, whose id the server assigns"`
 	Workflow   map[string]any        `json:"workflow" jsonschema:"the full workflow document"`
 	Fixtures   []publishgate.Fixture `json:"fixtures,omitempty" jsonschema:"behaviour fixtures, each run with writes suppressed; at most 20"`
+}
+
+type sessionToDraftArgs struct {
+	SessionID string `json:"sessionId" jsonschema:"an observed agent session id reported by this agent client's hooks"`
 }
 
 type draftRefArgs struct {
@@ -96,6 +101,11 @@ func registerGateTools(server *mcp.Server, deps Deps) {
 		"Store a draft of a new or existing workflow with its behaviour fixtures. A draft never runs in production; workflows.qualify then workflows.publish.", false,
 	), func(ctx context.Context, _ *mcp.CallToolRequest, args draftSaveArgs) (*mcp.CallToolResult, any, error) {
 		return deps.at(ctx).saveDraft(ctx, args)
+	})
+	mcp.AddTool(server, writeTool("sessions.to_draft", "Draft from session",
+		"Turn an agent session this client reported through hooks into a draft of a new workflow. Only MCP tool calls convert; each agent's goal and the outputs are left as observed_placeholder values that workflows.qualify refuses until replaced. A starting point, not a replay.", false,
+	), func(ctx context.Context, _ *mcp.CallToolRequest, args sessionToDraftArgs) (*mcp.CallToolResult, any, error) {
+		return deps.at(ctx).sessionToDraft(ctx, args)
 	})
 	mcp.AddTool(server, readTool("drafts.get", "Get draft",
 		"Read one draft: its document, fixtures, digest and the version it was drafted from.",
@@ -292,6 +302,38 @@ func (d Deps) saveDraft(ctx context.Context, args draftSaveArgs) (*mcp.CallToolR
 		"newWorkflow": newWorkflow, "fixtures": len(fixtures), "validation": d.validationReport(ctx, validated),
 		"next": "workflows.test to try a case, workflows.qualify to run the gate",
 	})
+}
+
+func (d Deps) sessionToDraft(ctx context.Context, args sessionToDraftArgs) (*mcp.CallToolResult, any, error) {
+	if allowed, message := d.guardTool(ctx, "sessions.to_draft", "workflows.write", false); !allowed {
+		return expected(message)
+	}
+	if !validMCPIdentifier(args.SessionID) || uuid.Validate(args.SessionID) != nil {
+		return gateError("not_found", "agent session not found", "/sessionId", "Pass the session id of a session this client reported.")
+	}
+	in := sessiondraft.SaveInput{OrgID: d.OrgID, SessionID: args.SessionID, CreatedBy: d.UserID, NewID: uuid.NewString, Catalog: d.CatalogSource}
+	if principal := d.agent(); principal != nil {
+		if principal.Scoped() && len(principal.ScopeTags) == 0 {
+			return gateError("permission_denied", "a client scoped to listed workflows cannot create one", "/sessionId",
+				"Ask for a client scoped by tag.")
+		}
+		// An agent converts only what its own client reported.
+		in.OnlyClientID = principal.ClientID
+	}
+	saved, err := sessiondraft.SaveDraft(ctx, d.Pool, in)
+	switch {
+	case errors.Is(err, sessiondraft.ErrSessionNotFound):
+		return gateError("not_found", "agent session not found", "/sessionId", "Pass the session id of a session this client reported.")
+	case errors.Is(err, sessiondraft.ErrNotConvertible), errors.Is(err, sessiondraft.ErrTooManyAgents):
+		return gateError("not_convertible", err.Error(), "/sessionId", "Only sessions that called MCP tools convert; shell and file tools have no workflow equivalent.")
+	case err != nil:
+		return nil, nil, err
+	}
+	d.Audit.Write(ctx, d.Pool, d.auditContext(), sessiondraft.ConvertedAction, audit.Options{
+		TargetType: "agent_session", TargetID: args.SessionID,
+		Metadata: map[string]any{"draftId": saved.Draft.ID, "workflowId": saved.Draft.WorkflowID},
+	})
+	return ok(sessiondraft.View(saved, "replace every observed_placeholder with drafts.save (same workflowId), add fixtures, then workflows.qualify"))
 }
 
 func gateChecksError(message string, checks []publishgate.Check) (*mcp.CallToolResult, any, error) {

@@ -15,6 +15,11 @@
   calls until a person approves or denies them from the session map; with no
   answer the agent's own permission prompt decides, never an automatic allow.
   `captureContent` lets the decider see the held call's arguments.
+- An observed session can be saved as a workflow draft, from the session map
+  or with the MCP tool `sessions.to_draft`. Only its MCP tool calls convert,
+  and the screen says how many before converting. Each agent's goal and the
+  outputs are left as placeholders that `workflows.qualify` refuses until
+  they are filled in.
 - An agent can no longer disarm a published workflow on its own. A
   `workflows.publish` that removes, adds or changes a trigger, or removes a
   step, swaps it for another type or tool, or removes a declared output of the

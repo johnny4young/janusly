@@ -7,6 +7,14 @@ import { isAgentSession } from "./AgentSession"
 
 export function isAgentSessionMap(value: unknown): value is Api.AgentSessionMap {
   return isShape(value, {
+    canConvert: isBoolean,
+    conversion: shape({
+      agents: isInteger,
+      convertible: isBoolean,
+      convertibleSteps: isInteger,
+      mcpServers: arrayOf(isString),
+      totalSteps: isInteger,
+    }),
     gates: arrayOf(shape({
       agentId: nullable(isString),
       contentCaptured: isBoolean,

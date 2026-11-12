@@ -206,12 +206,12 @@ claude mcp add --transport http janusly https://janusly.example.com/mcp --header
 
 ## Catalog
 
-The stable catalog contains 35 tools:
+The stable catalog contains 36 tools:
 
 - agent: `agent.info`;
 - publish gate: `drafts.save`, `drafts.get`, `drafts.list`, `workflows.test`,
   `workflows.qualify`, `qualifications.get`, `workflows.publish`,
-  `publish.status`, `credentials.request`;
+  `publish.status`, `credentials.request`, `sessions.to_draft`;
 - authoring: `catalog.describe`, `workflows.validate`;
 - workflow: `workflows.list`, `workflows.get`, `workflows.assure`,
   `workflows.propose`, `workflows.save`, `workflows.rollback`,

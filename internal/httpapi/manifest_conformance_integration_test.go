@@ -189,6 +189,7 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 		t.Fatalf("run map must link the observed session: %+v", linked["sessions"])
 	}
 	rec.record("GET /v1/agent-sessions", h.call("GET", "/v1/agent-sessions", nil, ""), http.StatusOK)
+	rec.record("POST /v1/agent-sessions/{sessionId}/draft", h.call("POST", "/v1/agent-sessions/"+observed.id+"/draft", nil, ""), http.StatusCreated)
 	heldGate := seedGate(t, h.org, observed, true)
 	withGate := rec.record("GET /v1/agent-sessions/{sessionId}/map", h.call("GET", "/v1/agent-sessions/"+observed.id+"/map", nil, ""), http.StatusOK)
 	if gates, _ := withGate["gates"].([]any); len(gates) != 1 {

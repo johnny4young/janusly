@@ -102,6 +102,12 @@ var agentSessionLane = closedObj(map[string]any{
 	"truncated": boolT(),
 }, "nodeId", "kind", "parentId", "agentType", "live", "steps", "truncated")
 
+// What a draft made from the session would keep: only MCP tool calls convert.
+var agentSessionConversion = closedObj(map[string]any{
+	"totalSteps": countT(), "convertibleSteps": countT(), "agents": countT(),
+	"mcpServers": arr(str()), "convertible": boolT(),
+}, "totalSteps", "convertibleSteps", "agents", "mcpServers", "convertible")
+
 // input is the captured tool input, present only when the client captures
 // content for gated tools.
 var agentSessionGate = closedObj(map[string]any{
@@ -119,8 +125,19 @@ var agentSessionMap = closedObj(map[string]any{
 	"refs": closedObj(map[string]any{
 		"workflowIds": arr(str()), "draftIds": arr(str()), "runIds": arr(str()),
 	}, "workflowIds", "draftIds", "runIds"),
-	"gates": arr(agentSessionGate),
-}, "session", "lanes", "totals", "liveSubagents", "refs", "gates")
+	"gates":      arr(agentSessionGate),
+	"conversion": agentSessionConversion,
+	"canConvert": boolT(),
+}, "session", "lanes", "totals", "liveSubagents", "refs", "gates", "conversion", "canConvert")
+
+var agentSessionDraft = closedObj(map[string]any{
+	"draftId": str(), "workflowId": str(), "digest": str(),
+	"conversion": agentSessionConversion,
+	"agents": arr(closedObj(map[string]any{
+		"nodeId": str(), "agentType": str(), "tools": arr(str()), "suggestedTimeoutMs": countT(),
+	}, "nodeId", "tools")),
+	"mcpServers": arr(str()), "placeholders": arr(str()), "next": str(),
+}, "draftId", "workflowId", "digest", "conversion", "agents", "mcpServers", "placeholders", "next")
 
 var agentGateDecision = closedObj(map[string]any{
 	"gate": closedObj(map[string]any{"id": str(), "status": strEnum([]string{"approved", "denied"})}, "id", "status"),

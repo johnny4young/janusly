@@ -318,3 +318,54 @@ func TestAgentGateDecisionIsForPeopleWithinTheOrganization(t *testing.T) {
 		t.Fatalf("expired gate approved: %d %v", res.status, res.body)
 	}
 }
+
+func TestAgentSessionConvertsIntoADraftThatTheGateRefusesUntilFilledIn(t *testing.T) {
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	s := seedAgentSession(t, h.org, "")
+	other := "other-org-" + uuid.NewString()[:8]
+	foreign := seedAgentSession(t, other, "")
+	seedMemberRow(t, pool, h.org, "draft-viewer", "draft-viewer@example.test", "viewer")
+
+	mapped := h.call("GET", "/agent-sessions/"+s.id+"/map", nil, "")
+	conversion := mapped.body["conversion"].(map[string]any)
+	// Three tool calls: one MCP call converts; the Bash call and the Janusly call do not.
+	if conversion["totalSteps"] != float64(3) || conversion["convertibleSteps"] != float64(1) || conversion["convertible"] != true {
+		t.Fatalf("conversion preview: %v", conversion)
+	}
+	if res := h.callWithHeaders("POST", "/agent-sessions/"+s.id+"/draft", nil, "", map[string]string{"x-user-id": "draft-viewer"}); res.status != 403 {
+		t.Fatalf("viewer converted: %d %v", res.status, res.body)
+	}
+	if res := h.call("POST", "/agent-sessions/"+foreign.id+"/draft", nil, ""); res.status != 404 {
+		t.Fatalf("another organization's session converted: %d %v", res.status, res.body)
+	}
+
+	created := h.call("POST", "/agent-sessions/"+s.id+"/draft", nil, "")
+	draftID, _ := created.body["draftId"].(string)
+	workflowID, _ := created.body["workflowId"].(string)
+	if created.status != 201 || !strings.HasPrefix(draftID, "draft_") || !strings.HasPrefix(workflowID, "wf_") ||
+		fmt.Sprint(created.body["placeholders"]) != "[/nodes/agent_1/config/goal /outputs/result]" {
+		t.Fatalf("convert: %d %v", created.status, created.body)
+	}
+	var document, origin, createdBy string
+	var versions, audited int
+	if err := pool.QueryRow(t.Context(), `SELECT d.document::text, d.origin::text, d.created_by,
+		(SELECT count(*) FROM workflow_versions v WHERE v.org_id = d.org_id AND v.workflow_id = d.workflow_id),
+		(SELECT count(*) FROM audit_logs a WHERE a.org_id = d.org_id AND a.action = 'agent_session.converted' AND a.target_id = $2)
+		FROM workflow_drafts d WHERE d.org_id = $1 AND d.id = $3`, h.org, s.id, draftID).Scan(&document, &origin, &createdBy, &versions, &audited); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(origin, s.id) || !strings.Contains(origin, "observed_session") || versions != 0 || audited != 1 ||
+		!strings.Contains(document, "observed_placeholder:") || !strings.Contains(document, "mcp__notion__search") ||
+		strings.Contains(document, "Bash") || strings.Contains(document, "janusly__") {
+		t.Fatalf("stored draft: origin %s versions %d audited %d document %s", origin, versions, audited, document)
+	}
+
+	// A session with no MCP tool calls says so instead of producing an empty workflow.
+	if _, err := pool.Exec(t.Context(), `UPDATE agent_session_events SET tool_kind = 'builtin', mcp_server = NULL WHERE session_id = $1`, s.id); err != nil {
+		t.Fatal(err)
+	}
+	if res := h.call("POST", "/agent-sessions/"+s.id+"/draft", nil, ""); res.status != 422 || res.body["code"] != "agent_session_not_convertible" {
+		t.Fatalf("coding session: %d %v", res.status, res.body)
+	}
+}

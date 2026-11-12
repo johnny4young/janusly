@@ -3679,6 +3679,7 @@ CREATE TABLE public.workflow_drafts (
     digest text NOT NULL,
     created_by text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    origin jsonb,
     CONSTRAINT workflow_drafts_digest_check CHECK (char_length(digest) = 64)
 );
 CREATE UNIQUE INDEX workflow_drafts_digest_idx ON public.workflow_drafts (org_id, workflow_id, created_by, digest);
