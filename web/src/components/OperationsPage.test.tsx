@@ -63,6 +63,11 @@ vi.mock('./McpConnectionsPanel', () => ({
 vi.mock('./SlackInteractionsPanel', () => ({
   SlackInteractionsPanel: () => <section data-testid="stub-SlackInteractionsPanel">SlackInteractions</section>,
 }))
+vi.mock('./AgentClientsPanel', () => ({
+  AgentClientsPanel: ({ canWrite }: { canWrite: boolean }) => (
+    <section data-testid="stub-AgentClientsPanel" data-can-write={String(canWrite)}>AgentClients</section>
+  ),
+}))
 
 const initialState = useWorkflowStore.getState()
 const STORAGE_KEY = 'janusly:operations:section'
@@ -605,6 +610,7 @@ describe('<OperationsPage />', () => {
     expect(await screen.findByTestId('stub-AuthPolicySettingsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-ScimDirectorySettingsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-PermissionGrantsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-AgentClientsPanel')).toBeInTheDocument()
     expect(screen.queryByTestId('stub-MemoryGovernancePanel')).toBeNull()
     expect(screen.queryByTestId('stub-AuditLogPanel')).toBeNull()
 
@@ -626,6 +632,19 @@ describe('<OperationsPage />', () => {
     expect(await screen.findByTestId('settings-index-integrations')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('settings-index-integrations'))
     expect(await screen.findByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
+  })
+
+  it('opens Access for agent readers and gates agent writes', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage permissions={['recovery.read', 'agents.read']} />)
+
+    fireEvent.click(await screen.findByTestId('settings-index-access'))
+    expect(await screen.findByTestId('stub-AgentClientsPanel')).toHaveAttribute('data-can-write', 'false')
+    expect(screen.queryByTestId('stub-PermissionGrantsPanel')).toBeNull()
   })
 
   it('does not request recovery metrics for a settings-only permission scope', async () => {

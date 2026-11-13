@@ -7224,6 +7224,1243 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/agent-clients": {
+      "get": {
+        "operationId": "get_v1_agent-clients",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "capabilities": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "grantable": {
+                                    "type": "boolean"
+                                  },
+                                  "missingPermissions": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "name": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "grantable",
+                                  "missingPermissions"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "clients": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "capabilities": {
+                                    "items": {
+                                      "enum": [
+                                        "read",
+                                        "propose",
+                                        "test",
+                                        "publish",
+                                        "operate",
+                                        "report"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "captureContent": {
+                                    "type": "boolean"
+                                  },
+                                  "createdAt": {
+                                    "type": "string"
+                                  },
+                                  "createdBy": {
+                                    "type": "string"
+                                  },
+                                  "creatorAccess": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "missingPermissions": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "state": {
+                                        "enum": [
+                                          "member",
+                                          "reduced",
+                                          "removed",
+                                          "unknown"
+                                        ],
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "state",
+                                      "missingPermissions"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "expiresAt": {
+                                    "type": "string"
+                                  },
+                                  "gateTools": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "lastUsedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "origin": {
+                                    "enum": [
+                                      "static",
+                                      "oauth"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "rateLimitPerMinute": {
+                                    "minimum": 1,
+                                    "type": "integer"
+                                  },
+                                  "revokedAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "scope": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "tags": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "workflowIds": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      }
+                                    },
+                                    "required": [
+                                      "workflowIds",
+                                      "tags"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "active",
+                                      "revoked",
+                                      "expired"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "tokenIssuedAt": {
+                                    "type": "string"
+                                  },
+                                  "tokenLast4": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "status",
+                                  "capabilities",
+                                  "scope",
+                                  "rateLimitPerMinute",
+                                  "tokenLast4",
+                                  "createdBy",
+                                  "createdAt",
+                                  "tokenIssuedAt",
+                                  "expiresAt",
+                                  "revokedAt",
+                                  "lastUsedAt",
+                                  "gateTools",
+                                  "captureContent",
+                                  "origin",
+                                  "creatorAccess"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "limits": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "defaultExpiryDays": {
+                                  "type": "integer"
+                                },
+                                "defaultRateLimitPerMinute": {
+                                  "type": "integer"
+                                },
+                                "maxExpiryDays": {
+                                  "type": "integer"
+                                },
+                                "maxRateLimitPerMinute": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "defaultExpiryDays",
+                                "maxExpiryDays",
+                                "defaultRateLimitPerMinute",
+                                "maxRateLimitPerMinute"
+                              ],
+                              "type": "object"
+                            },
+                            "nextCursor": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "clients",
+                            "nextCursor",
+                            "capabilities",
+                            "limits"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Agent clients of the organization, what the caller may grant and the issuing limits"
+      },
+      "post": {
+        "operationId": "post_v1_agent-clients",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "capabilities": {
+                    "items": {
+                      "enum": [
+                        "read",
+                        "propose",
+                        "test",
+                        "publish",
+                        "operate",
+                        "report"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "captureContent": {
+                    "type": "boolean"
+                  },
+                  "expiresInDays": {
+                    "type": "integer"
+                  },
+                  "gateTools": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "rateLimitPerMinute": {
+                    "type": "integer"
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "tags": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "workflowIds": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "client": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "capabilities": {
+                                  "items": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "captureContent": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": "string"
+                                },
+                                "creatorAccess": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "missingPermissions": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "member",
+                                        "reduced",
+                                        "removed",
+                                        "unknown"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "state",
+                                    "missingPermissions"
+                                  ],
+                                  "type": "object"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "gateTools": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "lastUsedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "origin": {
+                                  "enum": [
+                                    "static",
+                                    "oauth"
+                                  ],
+                                  "type": "string"
+                                },
+                                "rateLimitPerMinute": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "revokedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "scope": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "tags": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "workflowIds": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "workflowIds",
+                                    "tags"
+                                  ],
+                                  "type": "object"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "active",
+                                    "revoked",
+                                    "expired"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tokenIssuedAt": {
+                                  "type": "string"
+                                },
+                                "tokenLast4": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "status",
+                                "capabilities",
+                                "scope",
+                                "rateLimitPerMinute",
+                                "tokenLast4",
+                                "createdBy",
+                                "createdAt",
+                                "tokenIssuedAt",
+                                "expiresAt",
+                                "revokedAt",
+                                "lastUsedAt",
+                                "gateTools",
+                                "captureContent",
+                                "origin",
+                                "creatorAccess"
+                              ],
+                              "type": "object"
+                            },
+                            "token": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "client",
+                            "token"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Create an agent client; the response carries its token once"
+      }
+    },
+    "/agent-clients/{id}": {
+      "get": {
+        "operationId": "get_v1_agent-clients_id",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "capabilities": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "missingPermissions": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "name": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "tools": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "tools",
+                                  "missingPermissions"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "client": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "capabilities": {
+                                  "items": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "captureContent": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": "string"
+                                },
+                                "creatorAccess": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "missingPermissions": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "member",
+                                        "reduced",
+                                        "removed",
+                                        "unknown"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "state",
+                                    "missingPermissions"
+                                  ],
+                                  "type": "object"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "gateTools": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "lastUsedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "origin": {
+                                  "enum": [
+                                    "static",
+                                    "oauth"
+                                  ],
+                                  "type": "string"
+                                },
+                                "rateLimitPerMinute": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "revokedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "scope": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "tags": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "workflowIds": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "workflowIds",
+                                    "tags"
+                                  ],
+                                  "type": "object"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "active",
+                                    "revoked",
+                                    "expired"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tokenIssuedAt": {
+                                  "type": "string"
+                                },
+                                "tokenLast4": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "status",
+                                "capabilities",
+                                "scope",
+                                "rateLimitPerMinute",
+                                "tokenLast4",
+                                "createdBy",
+                                "createdAt",
+                                "tokenIssuedAt",
+                                "expiresAt",
+                                "revokedAt",
+                                "lastUsedAt",
+                                "gateTools",
+                                "captureContent",
+                                "origin",
+                                "creatorAccess"
+                              ],
+                              "type": "object"
+                            },
+                            "openRequests": {
+                              "anyOf": [
+                                {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "expiresAt": {
+                                        "type": "string"
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "reasons": {
+                                        "items": {
+                                          "type": "string"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "workflowId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "workflowId",
+                                      "reasons",
+                                      "createdAt",
+                                      "expiresAt"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "recentCalls": {
+                              "anyOf": [
+                                {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "allowed": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tool": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "tool",
+                                      "allowed",
+                                      "at"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "client",
+                            "capabilities",
+                            "recentCalls",
+                            "openRequests"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "One agent client with its tools, latest calls and open publish requests"
+      }
+    },
+    "/agent-clients/{id}/revoke": {
+      "post": {
+        "operationId": "post_v1_agent-clients_id_revoke",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "client": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "capabilities": {
+                                  "items": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "captureContent": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": "string"
+                                },
+                                "creatorAccess": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "missingPermissions": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "member",
+                                        "reduced",
+                                        "removed",
+                                        "unknown"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "state",
+                                    "missingPermissions"
+                                  ],
+                                  "type": "object"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "gateTools": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "lastUsedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "origin": {
+                                  "enum": [
+                                    "static",
+                                    "oauth"
+                                  ],
+                                  "type": "string"
+                                },
+                                "rateLimitPerMinute": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "revokedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "scope": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "tags": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "workflowIds": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "workflowIds",
+                                    "tags"
+                                  ],
+                                  "type": "object"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "active",
+                                    "revoked",
+                                    "expired"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tokenIssuedAt": {
+                                  "type": "string"
+                                },
+                                "tokenLast4": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "status",
+                                "capabilities",
+                                "scope",
+                                "rateLimitPerMinute",
+                                "tokenLast4",
+                                "createdBy",
+                                "createdAt",
+                                "tokenIssuedAt",
+                                "expiresAt",
+                                "revokedAt",
+                                "lastUsedAt",
+                                "gateTools",
+                                "captureContent",
+                                "origin",
+                                "creatorAccess"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "required": [
+                            "client"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Revoke an agent client"
+      }
+    },
+    "/agent-clients/{id}/rotate": {
+      "post": {
+        "operationId": "post_v1_agent-clients_id_rotate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expiresInDays": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/V1Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "client": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "capabilities": {
+                                  "items": {
+                                    "enum": [
+                                      "read",
+                                      "propose",
+                                      "test",
+                                      "publish",
+                                      "operate",
+                                      "report"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "captureContent": {
+                                  "type": "boolean"
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                },
+                                "createdBy": {
+                                  "type": "string"
+                                },
+                                "creatorAccess": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "missingPermissions": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "state": {
+                                      "enum": [
+                                        "member",
+                                        "reduced",
+                                        "removed",
+                                        "unknown"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "state",
+                                    "missingPermissions"
+                                  ],
+                                  "type": "object"
+                                },
+                                "expiresAt": {
+                                  "type": "string"
+                                },
+                                "gateTools": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "lastUsedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "origin": {
+                                  "enum": [
+                                    "static",
+                                    "oauth"
+                                  ],
+                                  "type": "string"
+                                },
+                                "rateLimitPerMinute": {
+                                  "minimum": 1,
+                                  "type": "integer"
+                                },
+                                "revokedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "scope": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "tags": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "workflowIds": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "required": [
+                                    "workflowIds",
+                                    "tags"
+                                  ],
+                                  "type": "object"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "active",
+                                    "revoked",
+                                    "expired"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tokenIssuedAt": {
+                                  "type": "string"
+                                },
+                                "tokenLast4": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "status",
+                                "capabilities",
+                                "scope",
+                                "rateLimitPerMinute",
+                                "tokenLast4",
+                                "createdBy",
+                                "createdAt",
+                                "tokenIssuedAt",
+                                "expiresAt",
+                                "revokedAt",
+                                "lastUsedAt",
+                                "gateTools",
+                                "captureContent",
+                                "origin",
+                                "creatorAccess"
+                              ],
+                              "type": "object"
+                            },
+                            "token": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "client",
+                            "token"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Success — the data payload inside the v1 envelope"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error — the v1 error envelope"
+          }
+        },
+        "summary": "Replace an agent client's token; the response carries the new token once"
+      }
+    },
     "/agent-sessions": {
       "get": {
         "operationId": "get_v1_agent-sessions",

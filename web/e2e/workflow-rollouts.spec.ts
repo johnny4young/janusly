@@ -169,6 +169,9 @@ async function captureForeground(surface: Locator, name: string): Promise<void> 
 
 async function expectAccessible(page: Page, context: string, selector = '[data-testid="workflow-rollout-panel"]'): Promise<void> {
   await expect(page.locator(selector)).toBeVisible()
+  // Dialogs fade in; axe must not read colors mid-fade.
+  await page.waitForFunction(() => document.getAnimations()
+    .every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity))
   const results = await new AxeBuilder({ page })
     .include(selector)
     .withTags(WCAG_TAGS)

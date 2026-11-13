@@ -439,6 +439,7 @@ func TestManifestConformanceAgainstLiveRoutes(t *testing.T) {
 	rec.record("POST /v1/ai/workflow-proposals", h.call("POST", "/v1/ai/workflow-proposals", map[string]any{
 		"prompt": prompt, "brief": compiled["brief"], "catalogVersion": "stale",
 	}, ""), http.StatusOK)
+	conformanceAgentClients(t, h, rec)
 
 	// Provider-backed patch suggestions through the local simulator.
 	patchReply := `{"suggestions":[{"patchedConfig":{"url":"https://api.example.com/v2","timeoutMs":300},

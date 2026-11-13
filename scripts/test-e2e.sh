@@ -30,6 +30,7 @@ specs=(
   e2e/responsive.spec.ts
   e2e/usability-study-readiness.spec.ts
   e2e/credential-revoke.spec.ts
+  e2e/agent-clients.spec.ts
   e2e/activity-workspace.spec.ts
   e2e/run-observability.spec.ts
   e2e/accessibility.spec.ts

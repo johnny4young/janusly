@@ -2962,6 +2962,13 @@ CREATE INDEX audit_logs_org_target_created_id_idx ON public.audit_logs USING btr
 
 
 --
+-- Name: audit_logs_org_tool_caller_created_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_logs_org_tool_caller_created_id_idx ON public.audit_logs USING btree (org_id, user_id, created_at DESC, id DESC) WHERE (action = 'mcp.tool.invoked'::text);
+
+
+--
 -- Name: auth_sessions_user_expiry_idx; Type: INDEX; Schema: public; Owner: -
 --
 

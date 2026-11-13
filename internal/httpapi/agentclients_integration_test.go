@@ -49,7 +49,8 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 	if !strings.HasPrefix(token, "jly_agent_") || client == nil || !strings.HasSuffix(token, client["tokenLast4"].(string)) {
 		t.Fatalf("create response: %v", created.body)
 	}
-	if fmt.Sprint(client["capabilities"]) != "[read operate]" || client["status"] != "active" || client["createdBy"] != users["editor"] {
+	if fmt.Sprint(client["capabilities"]) != "[read operate]" || client["status"] != "active" || client["createdBy"] != users["editor"] ||
+		fmt.Sprint(client["creatorAccess"]) != "map[missingPermissions:[] state:member]" {
 		t.Fatalf("created client view: %v", client)
 	}
 	clientID := client["id"].(string)
@@ -181,5 +182,118 @@ func TestAgentClientListPagesByCursor(t *testing.T) {
 		if res := h.callWithHeaders("GET", "/agent-clients"+bad, nil, "", as); res.status != 400 {
 			t.Fatalf("list %s: %d %v", bad, res.status, res.body)
 		}
+	}
+}
+
+// The list says what the caller could grant and whether each creator still
+// stands behind their client; the detail stays inside the organization and
+// shows only this client's calls and requests.
+func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-agent-detail-token")
+	h := newAPIHarnessWithoutWorkers(t)
+	pool := testPool(t)
+	editor := seedAgentClientCreator(t, h, "editor")
+	viewer := seedAgentClientCreator(t, h, "viewer")
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create := func(name string, capabilities ...string) string {
+		t.Helper()
+		res := h.callWithHeaders("POST", "/v1/agent-clients", map[string]any{"name": name, "capabilities": capabilities}, "", editor)
+		if res.status != 201 {
+			t.Fatalf("create %s: %d %v", name, res.status, res.body)
+		}
+		return res.body["data"].(map[string]any)["client"].(map[string]any)["id"].(string)
+	}
+	kept, demoted, removed := create("kept", "read"), create("demoted", "propose"), create("removed", "read")
+	other := create("other", "read")
+	exec(`UPDATE agent_clients SET created_by = $3 WHERE org_id = $1 AND id = $2`, h.org, demoted, viewer["x-user-id"])
+	exec(`UPDATE agent_clients SET created_by = 'left-the-org' WHERE org_id = $1 AND id = $2`, h.org, removed)
+
+	listed := h.callWithHeaders("GET", "/v1/agent-clients", nil, "", viewer)
+	if listed.status != 200 {
+		t.Fatalf("viewer list: %d %v", listed.status, listed.body)
+	}
+	data := listed.body["data"].(map[string]any)
+	for _, raw := range data["capabilities"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["name"] == "propose" && (entry["grantable"] != false || fmt.Sprint(entry["missingPermissions"]) != "[workflows.write]") {
+			t.Fatalf("a viewer must see why propose is not grantable: %v", entry)
+		}
+		if entry["name"] == "read" && entry["grantable"] != true {
+			t.Fatalf("a viewer holds every read permission: %v", entry)
+		}
+	}
+	states := map[string]string{}
+	for _, raw := range data["clients"].([]any) {
+		client := raw.(map[string]any)
+		access := client["creatorAccess"].(map[string]any)
+		states[client["id"].(string)] = fmt.Sprint(access["state"], " ", access["missingPermissions"])
+	}
+	if states[kept] != "member []" || states[demoted] != "reduced [workflows.write]" || states[removed] != "removed []" {
+		t.Fatalf("creator states: %v", states)
+	}
+
+	agent := "agent:" + kept
+	for _, client := range []string{kept, other} {
+		meta, _ := json.Marshal(map[string]any{"allowed": client == kept,
+			"denial": "MCP writes are disabled at the process level", "agentClient": map[string]any{"id": client}})
+		exec(`INSERT INTO audit_logs (id, org_id, user_id, action, target_type, target_id, metadata)
+			VALUES (gen_random_uuid()::text, $1, $2, 'mcp.tool.invoked', 'mcp_tool', 'runs.list', $3)`, h.org, "agent:"+client, meta)
+	}
+	document, _ := json.Marshal(makeLinearWorkflow("agent-detail-" + h.org))
+	exec(`INSERT INTO workflow_drafts (id, org_id, workflow_id, document, digest, created_by)
+		VALUES ($1, $2, $3, $4, repeat('d', 64), $5)`, "draft-detail-"+h.org, h.org, "agent-detail-"+h.org, document, agent)
+	exec(`INSERT INTO draft_qualifications (id, org_id, draft_id, digest, status, checks, fixture_runs, created_by, completed_at)
+		VALUES ($1, $2, $3, repeat('d', 64), 'passed', '[]', '[]', $4, now())`, "qual-detail-"+h.org, h.org, "draft-detail-"+h.org, agent)
+	exec(`INSERT INTO publish_requests (id, org_id, workflow_id, draft_id, qualification_id, reasons, requested_by, on_behalf_of, drafted_by, expires_at)
+		VALUES ($1, $2, $3, $4, $5, '{writes}', $6, $7, $6, now() + interval '1 day')`,
+		"pub-detail-"+h.org, h.org, "agent-detail-"+h.org, "draft-detail-"+h.org, "qual-detail-"+h.org, agent, editor["x-user-id"])
+
+	viewed := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", viewer)
+	if viewed.status != 200 || viewed.body["data"].(map[string]any)["recentCalls"] != nil {
+		t.Fatalf("a viewer who did not create the client must not read its audit-derived calls: %d %v", viewed.status, viewed.body)
+	}
+	if requests, _ := viewed.body["data"].(map[string]any)["openRequests"].([]any); len(requests) != 1 {
+		t.Fatalf("a viewer with workflows.read sees the open requests: %v", viewed.body)
+	}
+	detail := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", editor)
+	if detail.status != 200 {
+		t.Fatalf("creator detail: %d %v", detail.status, detail.body)
+	}
+	body := detail.body["data"].(map[string]any)
+	calls := body["recentCalls"].([]any)
+	if len(calls) != 1 || calls[0].(map[string]any)["allowed"] != true || strings.Contains(fmt.Sprint(body), "process level") {
+		t.Fatalf("detail must show only this client's calls: %v", calls)
+	}
+	if requests := body["openRequests"].([]any); len(requests) != 1 || requests[0].(map[string]any)["id"] != "pub-detail-"+h.org {
+		t.Fatalf("detail must show this agent's open request: %v", requests)
+	}
+	if caps := body["capabilities"].([]any); len(caps) != 1 || !strings.Contains(fmt.Sprint(caps[0]), "workflows.list") {
+		t.Fatalf("detail capabilities: %v", caps)
+	}
+	service := map[string]string{"x-user-id": editor["x-user-id"], "Authorization": "Bearer svc-agent-detail-token"}
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", service); res.status != 200 || res.body["data"].(map[string]any)["recentCalls"] != nil {
+		t.Fatalf("a service token naming the creator must not read audit-derived calls: %d %v", res.status, res.body)
+	}
+	admin := seedAgentClientCreator(t, h, "admin")
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", admin); len(fmt.Sprint(res.body["data"].(map[string]any)["recentCalls"])) < 3 {
+		t.Fatalf("an admin reads the calls of someone else's client: %v", res.body)
+	}
+	demotedDetail := h.callWithHeaders("GET", "/v1/agent-clients/"+demoted, nil, "", viewer).body["data"].(map[string]any)
+	for _, raw := range demotedDetail["capabilities"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["name"] == "propose" && fmt.Sprint(entry["missingPermissions"]) != "[workflows.write]" {
+			t.Fatalf("a reduced capability must name what the creator lost: %v", entry)
+		}
+	}
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "other-org-"+h.org, nil); res.status != 404 {
+		t.Fatalf("another organization read the client: %d %v", res.status, res.body)
+	}
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/missing", nil, "", viewer); res.status != 404 {
+		t.Fatalf("unknown client: %d %v", res.status, res.body)
 	}
 }

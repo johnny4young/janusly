@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Agent clients have a screen. Settings > Access lists them with a state in
+  text and an icon (active, expires soon, expired, revoked, no owner, reduced
+  permissions) and opens each one's tools, latest calls and open publish
+  requests. Creating one shows which capabilities you may grant and the
+  permissions you lack for the others. The token is shown once, next to
+  ready-to-paste MCP setup for Claude Code and Codex, and closing asks first.
+  Choosing Report asks which tools to hold for a person and whether the
+  decider sees their input. Only the creator can rotate a static client, and
+  no one rotates an OAuth connection; the creator or an admin can revoke
+  either. The routes are now in the v1 contract, with
+  `GET /v1/agent-clients/{id}`.
 - Remote MCP accepts OAuth when `JANUSLY_WEB_BASE_URL` is set: an MCP client
   registers itself, a signed-in person approves the connection and its
   capabilities in Settings → Access, and the client gets a 15-minute access

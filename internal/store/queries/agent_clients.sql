@@ -108,3 +108,21 @@ WHERE dl.org_id = $1 AND dl.id = $2;
 
 -- name: GetRecoveryCaseWorkflowForOrg :one
 SELECT coalesce(workflow_id, '')::text FROM recovery_cases WHERE org_id = $1 AND id = $2;
+
+-- Served by the partial tool-call index on (org_id, user_id).
+-- name: ListAgentClientToolCalls :many
+SELECT target_id, metadata, created_at FROM audit_logs
+WHERE org_id = sqlc.arg(org_id) AND user_id = sqlc.arg(actor)::text AND action = 'mcp.tool.invoked'
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+
+-- name: ListMemberRoles :many
+SELECT user_id, role FROM org_members
+WHERE org_id = sqlc.arg(org_id) AND user_id = ANY(sqlc.arg(user_ids)::text[]);
+
+-- name: ListAgentClientOpenRequests :many
+SELECT id, workflow_id, reasons, created_at, expires_at FROM publish_requests
+WHERE org_id = sqlc.arg(org_id) AND requested_by = sqlc.arg(actor)::text
+  AND status = 'pending' AND expires_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT 20;

@@ -1634,6 +1634,10 @@ export type WorkflowVersionSnapshot = {
 
 /** JSON request bodies by operation; bodyless operations resolve to undefined. */
 export interface ApiRequests {
+  /** Agent clients of the organization, what the caller may grant and the issuing limits */
+  "GET /agent-clients": undefined
+  /** One agent client with its tools, latest calls and open publish requests */
+  "GET /agent-clients/{id}": undefined
   /** External agent sessions observed through the hooks bridge, newest first */
   "GET /agent-sessions": undefined
   /** Agent lanes, totals and Janusly references of one observed session */
@@ -1706,6 +1710,25 @@ export interface ApiRequests {
   "GET /workflows/versions": undefined
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": undefined
+  /** Create an agent client; the response carries its token once */
+  "POST /agent-clients": {
+    "capabilities"?: ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+    "captureContent"?: boolean
+    "expiresInDays"?: number
+    "gateTools"?: string[]
+    "name": string
+    "rateLimitPerMinute"?: number
+    "scope"?: {
+      "tags"?: string[]
+      "workflowIds"?: string[]
+    }
+  }
+  /** Revoke an agent client */
+  "POST /agent-clients/{id}/revoke": undefined
+  /** Replace an agent client's token; the response carries the new token once */
+  "POST /agent-clients/{id}/rotate": {
+    "expiresInDays"?: number
+  }
   /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
   "POST /agent-sessions/{sessionId}/draft": undefined
   /** Approve or deny a tool call an agent's hook is holding */
@@ -1897,6 +1920,91 @@ export interface ApiRequests {
 
 /** Parsed payloads by operation, after any v1 envelope is unwrapped. */
 export interface ApiResponses {
+  /** Agent clients of the organization, what the caller may grant and the issuing limits */
+  "GET /agent-clients": {
+    "capabilities": ({
+      "grantable": boolean
+      "missingPermissions": string[]
+      "name": "read" | "propose" | "test" | "publish" | "operate" | "report"
+    })[]
+    "clients": ({
+      "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
+      "createdAt": string
+      "createdBy": string
+      "creatorAccess": {
+        "missingPermissions": string[]
+        "state": "member" | "reduced" | "removed" | "unknown"
+      }
+      "expiresAt": string
+      "gateTools": string[]
+      "id": string
+      "lastUsedAt": string | null
+      "name": string
+      "origin": "static" | "oauth"
+      "rateLimitPerMinute": number
+      "revokedAt": string | null
+      "scope": {
+        "tags": string[]
+        "workflowIds": string[]
+      }
+      "status": "active" | "revoked" | "expired"
+      "tokenIssuedAt": string
+      "tokenLast4": string
+    })[]
+    "limits": {
+      "defaultExpiryDays": number
+      "defaultRateLimitPerMinute": number
+      "maxExpiryDays": number
+      "maxRateLimitPerMinute": number
+    }
+    "nextCursor": string | null
+  }
+  /** One agent client with its tools, latest calls and open publish requests */
+  "GET /agent-clients/{id}": {
+    "capabilities": ({
+      "missingPermissions": string[]
+      "name": "read" | "propose" | "test" | "publish" | "operate" | "report"
+      "tools": string[]
+    })[]
+    "client": {
+      "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
+      "createdAt": string
+      "createdBy": string
+      "creatorAccess": {
+        "missingPermissions": string[]
+        "state": "member" | "reduced" | "removed" | "unknown"
+      }
+      "expiresAt": string
+      "gateTools": string[]
+      "id": string
+      "lastUsedAt": string | null
+      "name": string
+      "origin": "static" | "oauth"
+      "rateLimitPerMinute": number
+      "revokedAt": string | null
+      "scope": {
+        "tags": string[]
+        "workflowIds": string[]
+      }
+      "status": "active" | "revoked" | "expired"
+      "tokenIssuedAt": string
+      "tokenLast4": string
+    }
+    "openRequests": {
+      "createdAt": string
+      "expiresAt": string
+      "id": string
+      "reasons": string[]
+      "workflowId": string
+    }[] | null
+    "recentCalls": ({
+      "allowed": boolean
+      "at": string | null
+      "tool": string
+    })[] | null
+  }
   /** External agent sessions observed through the hooks bridge, newest first */
   "GET /agent-sessions": {
     "nextCursor": string | null
@@ -2199,6 +2307,92 @@ export interface ApiResponses {
   "GET /workflows/versions": WorkflowVersion[]
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": WorkflowVersionSnapshot
+  /** Create an agent client; the response carries its token once */
+  "POST /agent-clients": {
+    "client": {
+      "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
+      "createdAt": string
+      "createdBy": string
+      "creatorAccess": {
+        "missingPermissions": string[]
+        "state": "member" | "reduced" | "removed" | "unknown"
+      }
+      "expiresAt": string
+      "gateTools": string[]
+      "id": string
+      "lastUsedAt": string | null
+      "name": string
+      "origin": "static" | "oauth"
+      "rateLimitPerMinute": number
+      "revokedAt": string | null
+      "scope": {
+        "tags": string[]
+        "workflowIds": string[]
+      }
+      "status": "active" | "revoked" | "expired"
+      "tokenIssuedAt": string
+      "tokenLast4": string
+    }
+    "token": string
+  }
+  /** Revoke an agent client */
+  "POST /agent-clients/{id}/revoke": {
+    "client": {
+      "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
+      "createdAt": string
+      "createdBy": string
+      "creatorAccess": {
+        "missingPermissions": string[]
+        "state": "member" | "reduced" | "removed" | "unknown"
+      }
+      "expiresAt": string
+      "gateTools": string[]
+      "id": string
+      "lastUsedAt": string | null
+      "name": string
+      "origin": "static" | "oauth"
+      "rateLimitPerMinute": number
+      "revokedAt": string | null
+      "scope": {
+        "tags": string[]
+        "workflowIds": string[]
+      }
+      "status": "active" | "revoked" | "expired"
+      "tokenIssuedAt": string
+      "tokenLast4": string
+    }
+  }
+  /** Replace an agent client's token; the response carries the new token once */
+  "POST /agent-clients/{id}/rotate": {
+    "client": {
+      "capabilities": ("read" | "propose" | "test" | "publish" | "operate" | "report")[]
+      "captureContent": boolean
+      "createdAt": string
+      "createdBy": string
+      "creatorAccess": {
+        "missingPermissions": string[]
+        "state": "member" | "reduced" | "removed" | "unknown"
+      }
+      "expiresAt": string
+      "gateTools": string[]
+      "id": string
+      "lastUsedAt": string | null
+      "name": string
+      "origin": "static" | "oauth"
+      "rateLimitPerMinute": number
+      "revokedAt": string | null
+      "scope": {
+        "tags": string[]
+        "workflowIds": string[]
+      }
+      "status": "active" | "revoked" | "expired"
+      "tokenIssuedAt": string
+      "tokenLast4": string
+    }
+    "token": string
+  }
   /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
   "POST /agent-sessions/{sessionId}/draft": {
     "agents": {
@@ -2420,6 +2614,10 @@ export interface ApiResponses {
 
 /** Successful HTTP status codes declared for each operation. */
 export interface ApiSuccessStatuses {
+  /** Agent clients of the organization, what the caller may grant and the issuing limits */
+  "GET /agent-clients": 200
+  /** One agent client with its tools, latest calls and open publish requests */
+  "GET /agent-clients/{id}": 200
   /** External agent sessions observed through the hooks bridge, newest first */
   "GET /agent-sessions": 200
   /** Agent lanes, totals and Janusly references of one observed session */
@@ -2492,6 +2690,12 @@ export interface ApiSuccessStatuses {
   "GET /workflows/versions": 200
   /** One exact immutable workflow version */
   "GET /workflows/versions/{versionId}": 200
+  /** Create an agent client; the response carries its token once */
+  "POST /agent-clients": 200
+  /** Revoke an agent client */
+  "POST /agent-clients/{id}/revoke": 200
+  /** Replace an agent client's token; the response carries the new token once */
+  "POST /agent-clients/{id}/rotate": 200
   /** Draft a new workflow from an observed session's MCP tool calls, with placeholders the publish gate refuses */
   "POST /agent-sessions/{sessionId}/draft": 200
   /** Approve or deny a tool call an agent's hook is holding */

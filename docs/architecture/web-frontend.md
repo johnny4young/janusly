@@ -387,7 +387,7 @@ Settings keeps one workspace destination and a permission-aware focused-area
 rail. The configuration-first order is Organization, Access, Connections and
 AI configuration, followed by Reliability, Usage and Infrastructure. Organization
 owns workspace-wide data governance and audit history; Access owns membership,
-roles, authentication, SSO and SCIM. Its permission matrix holds unsaved grants
+roles, authentication, SSO, SCIM and agent clients. Its permission matrix holds unsaved grants
 per role apart from server state and drops a draft once it matches that state,
 so a refetch keeps edits and untouched roles follow the server. Drafts belong
 to one organization. Save posts only edited roles, one request per role with
@@ -399,7 +399,12 @@ authority. Connections is the stable
 user-facing name for credentials and external services, while the existing `integrations` route
 identifier remains compatible with saved deep links. The canonical Connections
 inventory stays list-first with a separate add dialog; Settings links to it
-rather than duplicating the secret form. Focused areas expose their own heading,
+rather than duplicating the secret form. Access mounts `AgentClientsPanel`
+behind `agents.read`, lazy from `OperationsPage`; its create, token and detail
+views live in a second chunk that loads when one opens. An issued token stays
+in the panel's state while its dialog is open and is copied only through the
+Clipboard API; the issuing requests carry a private abort signal so request
+dedup never holds their response. Focused areas expose their own heading,
 remain horizontally reachable on narrow screens and mount only their active
 cards. The hash owns the open area: `OperationsPage` follows
 `#/operations/<section>` while mounted, opening an area pushes a history entry,

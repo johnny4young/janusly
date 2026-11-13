@@ -20,7 +20,7 @@ const SETTINGS_SECTION_PERMISSIONS: Record<OpsSection, readonly string[]> = {
     'mcp.connections.read',
     'external-runtimes.read',
   ],
-  access: ['members.read', 'org.config.write', 'org.permissions.write'],
+  access: ['members.read', 'org.config.write', 'org.permissions.write', 'agents.read'],
   ai: ['recovery.read', 'org.config.write'],
   usage: ['recovery.read'],
   infrastructure: ['recovery.read'],

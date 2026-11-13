@@ -51,6 +51,30 @@ it is refused with `agent_client_expired`, and the person creates a new
 client. Only the creator rotates: the new token acts with
 the creator's authority, so nobody else may hold it.
 
+Settings > Access lists the clients with their capabilities, scope, expiry,
+creator and one state, in text and an icon: active, expires soon (seven days
+or less), expired, revoked, no owner (the creator left, so the token is
+refused) or reduced permissions (the creator lost a permission a capability
+relies on, so the server narrows it). The list route reports, for the caller,
+which capabilities they may grant and the permissions they lack for the rest,
+plus the issuing limits; the form copies no policy. A row opens the client's
+detail (`GET /v1/agent-clients/{id}`): the tools each capability reaches and
+what its creator lost, its latest tool calls and its open publish requests.
+Calls come from the audit log, so only the client's creator and admins who
+read the audit trail see them, and only the tool and its outcome travel;
+requests show to people with `workflows.read`. A partial index on audit rows
+of `mcp.tool.invoked` by caller keeps that read bounded.
+The token is shown once with paste-ready remote MCP setup for Claude Code and
+Codex; closing asks first and drops the only copy the page held, which never
+reaches the store, browser storage, the request cache or a clipboard
+fallback element. Choosing `report` reveals the tools to hold for a person
+(`gateTools`) and whether the decider sees their input (`captureContent`).
+Rotate appears only to the creator of an active static client, never for an
+OAuth connection, which refreshes its own token; revoke appears to the
+creator or an admin, with a confirmation that names the token or the OAuth
+connection and the capabilities that stop working. Every route also has a
+`/v1` form in the contract.
+
 Managing clients needs two new catalog permissions: `agents.read` (viewer and
 up) and `agents.write`. A person can only grant capabilities whose
 permissions they hold, and can only edit or revoke their own clients unless

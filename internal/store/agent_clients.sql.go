@@ -252,6 +252,92 @@ func (q *Queries) ListAgentClientCreators(ctx context.Context, arg ListAgentClie
 	return items, nil
 }
 
+const listAgentClientOpenRequests = `-- name: ListAgentClientOpenRequests :many
+SELECT id, workflow_id, reasons, created_at, expires_at FROM publish_requests
+WHERE org_id = $1 AND requested_by = $2::text
+  AND status = 'pending' AND expires_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT 20
+`
+
+type ListAgentClientOpenRequestsParams struct {
+	OrgID string
+	Actor string
+}
+
+type ListAgentClientOpenRequestsRow struct {
+	ID         string
+	WorkflowID string
+	Reasons    []string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+}
+
+func (q *Queries) ListAgentClientOpenRequests(ctx context.Context, arg ListAgentClientOpenRequestsParams) ([]ListAgentClientOpenRequestsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientOpenRequests, arg.OrgID, arg.Actor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientOpenRequestsRow
+	for rows.Next() {
+		var i ListAgentClientOpenRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkflowID,
+			&i.Reasons,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentClientToolCalls = `-- name: ListAgentClientToolCalls :many
+SELECT target_id, metadata, created_at FROM audit_logs
+WHERE org_id = $1 AND user_id = $2::text AND action = 'mcp.tool.invoked'
+ORDER BY created_at DESC, id DESC
+LIMIT 20
+`
+
+type ListAgentClientToolCallsParams struct {
+	OrgID string
+	Actor string
+}
+
+type ListAgentClientToolCallsRow struct {
+	TargetID  pgtype.Text
+	Metadata  json.RawMessage
+	CreatedAt *time.Time
+}
+
+// Served by the partial tool-call index on (org_id, user_id).
+func (q *Queries) ListAgentClientToolCalls(ctx context.Context, arg ListAgentClientToolCallsParams) ([]ListAgentClientToolCallsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentClientToolCalls, arg.OrgID, arg.Actor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentClientToolCallsRow
+	for rows.Next() {
+		var i ListAgentClientToolCallsRow
+		if err := rows.Scan(&i.TargetID, &i.Metadata, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentClients = `-- name: ListAgentClients :many
 SELECT id, org_id, name, capabilities, scope_workflow_ids, scope_tags, token_digest, token_last4, rate_limit_per_minute, created_by, created_at, token_issued_at, expires_at, revoked_at, revoked_by, last_used_at, gate_tools, capture_content, oauth_client_id, access_expires_at, refresh_digest FROM agent_clients
 WHERE org_id = $1
@@ -499,6 +585,41 @@ func (q *Queries) ListAgentScopedWorkflows(ctx context.Context, arg ListAgentSco
 			&i.RunCount,
 			&i.LastRunStatus,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMemberRoles = `-- name: ListMemberRoles :many
+SELECT user_id, role FROM org_members
+WHERE org_id = $1 AND user_id = ANY($2::text[])
+`
+
+type ListMemberRolesParams struct {
+	OrgID   string
+	UserIds []string
+}
+
+type ListMemberRolesRow struct {
+	UserID string
+	Role   string
+}
+
+func (q *Queries) ListMemberRoles(ctx context.Context, arg ListMemberRolesParams) ([]ListMemberRolesRow, error) {
+	rows, err := q.db.Query(ctx, listMemberRoles, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMemberRolesRow
+	for rows.Next() {
+		var i ListMemberRolesRow
+		if err := rows.Scan(&i.UserID, &i.Role); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

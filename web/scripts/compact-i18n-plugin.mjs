@@ -24,6 +24,7 @@ const CORE_PREFIXES = [
 
 const WORKSPACE_PREFIXES = [
   'activity.',
+  'agentClients.',
   'agentSessions.',
   'aiStudio.',
   'aiGuidance.',
