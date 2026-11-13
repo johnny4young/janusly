@@ -196,7 +196,8 @@ func (s *service) detail(r *http.Request, rc httpkit.Request) httpkit.Result {
 	// A denial's wording can describe server configuration, so only the
 	// outcome travels.
 	var recent, open any
-	if row.CreatedBy == rc.UserID || (admin && caller["org.config.write"]) {
+	person := rc.Auth != nil && auth.IsPersonMode(rc.Auth.Mode)
+	if (person && row.CreatedBy == rc.UserID) || (admin && caller["org.config.write"]) {
 		calls, err := q.ListAgentClientToolCalls(r.Context(), store.ListAgentClientToolCallsParams{OrgID: rc.OrgID, Actor: "agent:" + row.ID})
 		if err != nil {
 			return internalError()
@@ -387,7 +388,8 @@ func (s *service) create(r *http.Request, rc httpkit.Request) httpkit.Result {
 		},
 	})
 	return httpkit.Result{Status: http.StatusCreated, Data: map[string]any{
-		"client": s.rendered(r, issued.Client, now), "token": issued.Token,
+		"client": withAccess(view(issued.Client, now), creatorGrants{held: map[string]map[string]bool{rc.UserID: held}}.access(issued.Client)),
+		"token":  issued.Token,
 	}}
 }
 

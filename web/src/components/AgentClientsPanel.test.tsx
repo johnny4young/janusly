@@ -289,6 +289,50 @@ describe('<AgentClientsPanel />', () => {
     expect(within(detail).getByRole('img', { name: 'Denied' })).toBeInTheDocument()
     expect(detail).toHaveTextContent('wf-invoices')
   })
+  it('refreshes an open detail after a change to the clients', async () => {
+    let calls = [{ tool: 'workflows.get', allowed: true, at: '2026-11-07T10:00:00Z' }]
+    routeApi({
+      'GET /v1/agent-clients': () => listPayload([client()]),
+      'GET /v1/agent-clients/c-own': () => ({
+        client: client(), capabilities: [{ name: 'read', tools: ['runs.list'], missingPermissions: [] }],
+        recentCalls: calls, openRequests: [],
+      }),
+    })
+    renderPanel()
+    const toggle = await screen.findByTestId('agent-client-open-c-own')
+    expect(toggle).not.toHaveAttribute('aria-controls')
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId('agent-client-detail-c-own')).toHaveTextContent('workflows.get')
+    expect(toggle).toHaveAttribute('aria-controls', 'agent-client-detail-c-own')
+
+    calls = [{ tool: 'drafts.save', allowed: true, at: '2026-11-07T11:00:00Z' }]
+    act(() => useWorkflowStore.getState().bumpPlatformVersion(['agent-clients']))
+    await waitFor(() => expect(screen.getByTestId('agent-client-detail-c-own')).toHaveTextContent('drafts.save'))
+  })
+
+  it('drops a page that arrives after a refresh replaced the list', async () => {
+    let lists = 0
+    let releasePage: (value: unknown) => void = () => {}
+    routeApi({
+      'GET /v1/agent-clients': (path) => {
+        if (path.includes('cursor=')) return new Promise((resolve) => { releasePage = resolve })
+        lists += 1
+        return lists === 1
+          ? { ...listPayload([client()]), nextCursor: 'page-2' }
+          : { ...listPayload([client({ status: 'revoked', revokedAt: '2026-11-07T10:00:00Z' })]), nextCursor: 'page-2b' }
+      },
+    })
+    renderPanel()
+    await screen.findByTestId('agent-client-c-own')
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+    act(() => useWorkflowStore.getState().bumpPlatformVersion(['agent-clients']))
+    await waitFor(() => expect(screen.getByTestId('agent-client-c-own')).toHaveAttribute('data-dimmed', 'true'))
+
+    await act(async () => releasePage({ ...listPayload([client({ id: 'c-stale', name: 'Stale page' })]), nextCursor: null }))
+    expect(screen.getByTestId('agent-client-c-own')).toHaveAttribute('data-dimmed', 'true')
+    expect(screen.queryByTestId('agent-client-c-stale')).not.toBeInTheDocument()
+  })
+
   it('hides the calls and requests the viewer could not read elsewhere', async () => {
     routeApi({
       'GET /v1/agent-clients': () => listPayload([client({ createdBy: 'peer' })]),

@@ -8,6 +8,7 @@ import type { ApiResponse } from '../lib/api-types.generated'
 import { isGetAgentClientsIdResponse } from '../lib/api-guards/operations/GetAgentClientsId'
 import { isPostAgentClientsResponse } from '../lib/api-guards/operations/PostAgentClients'
 import { readSavedWorkflowPage } from '../lib/list-contract'
+import { useInvalidationNonce } from '../lib/query-cache'
 import type { SavedWorkflow } from '../types'
 import { formatWhen } from './agent-actors'
 import { LoadingSkeleton } from './LoadingSkeleton'
@@ -18,6 +19,8 @@ type AgentClientList = ApiResponse<'GET /agent-clients'>
 type AgentCapability = AgentClientList['clients'][number]['capabilities'][number]
 type IssuedAgentClient = ApiResponse<'POST /agent-clients'>
 type Detail = ApiResponse<'GET /agent-clients/{id}'>
+
+const AGENT_CLIENT_DETAIL_TAGS = ['agent-clients'] as const
 
 function parseTags(value: string): string[] {
   return [...new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean))]
@@ -434,6 +437,7 @@ export function AgentTokenDialog({
 export function AgentClientDetail({ clientId }: { clientId: string }) {
   const { t } = useT()
   const [load, setLoad] = useState<{ kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; detail: Detail }>({ kind: 'loading' })
+  const nonce = useInvalidationNonce(AGENT_CLIENT_DETAIL_TAGS)
 
   useEffect(() => {
     let cancelled = false
@@ -441,7 +445,7 @@ export function AgentClientDetail({ clientId }: { clientId: string }) {
       .then((detail) => { if (!cancelled) setLoad({ kind: 'ready', detail }) })
       .catch((error: unknown) => { if (!cancelled) setLoad({ kind: 'error', message: tApiError(error) || t('agentClients.error.detail') }) })
     return () => { cancelled = true }
-  }, [clientId, t])
+  }, [clientId, nonce, t])
 
   if (load.kind === 'loading') return <LoadingSkeleton rows={2} label={t('common.loading')} />
   if (load.kind === 'error') return <p className="we-agent-dialog__error" role="alert">{load.message}</p>

@@ -49,7 +49,8 @@ func TestAgentClientRoutesArePeopleOnlyAndShowTheTokenOnce(t *testing.T) {
 	if !strings.HasPrefix(token, "jly_agent_") || client == nil || !strings.HasSuffix(token, client["tokenLast4"].(string)) {
 		t.Fatalf("create response: %v", created.body)
 	}
-	if fmt.Sprint(client["capabilities"]) != "[read operate]" || client["status"] != "active" || client["createdBy"] != users["editor"] {
+	if fmt.Sprint(client["capabilities"]) != "[read operate]" || client["status"] != "active" || client["createdBy"] != users["editor"] ||
+		fmt.Sprint(client["creatorAccess"]) != "map[missingPermissions:[] state:member]" {
 		t.Fatalf("created client view: %v", client)
 	}
 	clientID := client["id"].(string)
@@ -188,6 +189,7 @@ func TestAgentClientListPagesByCursor(t *testing.T) {
 // stands behind their client; the detail stays inside the organization and
 // shows only this client's calls and requests.
 func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
+	t.Setenv("JANUSLY_API_SERVICE_TOKEN", "svc-agent-detail-token")
 	h := newAPIHarnessWithoutWorkers(t)
 	pool := testPool(t)
 	editor := seedAgentClientCreator(t, h, "editor")
@@ -272,6 +274,10 @@ func TestAgentClientListAndDetailFollowTheCreator(t *testing.T) {
 	}
 	if caps := body["capabilities"].([]any); len(caps) != 1 || !strings.Contains(fmt.Sprint(caps[0]), "workflows.list") {
 		t.Fatalf("detail capabilities: %v", caps)
+	}
+	service := map[string]string{"x-user-id": editor["x-user-id"], "Authorization": "Bearer svc-agent-detail-token"}
+	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", service); res.status != 200 || res.body["data"].(map[string]any)["recentCalls"] != nil {
+		t.Fatalf("a service token naming the creator must not read audit-derived calls: %d %v", res.status, res.body)
 	}
 	admin := seedAgentClientCreator(t, h, "admin")
 	if res := h.callWithHeaders("GET", "/v1/agent-clients/"+kept, nil, "", admin); len(fmt.Sprint(res.body["data"].(map[string]any)["recentCalls"])) < 3 {

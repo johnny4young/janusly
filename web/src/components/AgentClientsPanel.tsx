@@ -100,12 +100,16 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
   const refresh = useCallback(() => bumpPlatformVersion(AGENT_CLIENT_MUTATION_TAGS), [bumpPlatformVersion])
 
   const loadMore = async () => {
-    if (load.kind !== 'ready' || !load.data.nextCursor) return
+    const cursor = load.kind === 'ready' ? load.data.nextCursor : null
+    if (!cursor) return
     setLoadingMore(true)
     try {
-      const next = await contractApi('GET /agent-clients', `/v1/agent-clients?cursor=${encodeURIComponent(load.data.nextCursor)}`,
+      const next = await contractApi('GET /agent-clients', `/v1/agent-clients?cursor=${encodeURIComponent(cursor)}`,
         undefined, { guard: isGetAgentClientsResponse })
-      setLoad({ kind: 'ready', data: { ...next, clients: [...load.data.clients, ...next.clients] } })
+      // A refresh that landed meanwhile owns the list; this page no longer follows it.
+      setLoad((current) => current.kind === 'ready' && current.data.nextCursor === cursor
+        ? { kind: 'ready', data: { ...next, clients: [...current.data.clients, ...next.clients] } }
+        : current)
     } catch (error) {
       addToast(tApiError(error) || t('agentClients.error.load'), 'error')
     } finally {
@@ -251,7 +255,7 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
                         type="button"
                         className="we-agent-clients__toggle"
                         aria-expanded={open}
-                        aria-controls={`agent-client-detail-${client.id}`}
+                        aria-controls={open ? `agent-client-detail-${client.id}` : undefined}
                         onClick={() => setOpenId(open ? null : client.id)}
                         data-testid={`agent-client-open-${client.id}`}
                       >
