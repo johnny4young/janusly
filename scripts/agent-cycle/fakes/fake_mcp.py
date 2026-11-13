@@ -14,12 +14,14 @@ TOOLS = [
 class Handler(http.server.BaseHTTPRequestHandler):
     token = "fake-token"
     calls = []
+    methods = []
 
     def do_POST(self):
         if self.headers.get("authorization") != "Bearer " + Handler.token:
             return self.reply(401, {"error": "unauthorized"})
         message = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
         method, rid = message.get("method"), message.get("id")
+        Handler.methods.append(method)
         if rid is None:
             self.send_response(202)
             self.end_headers()
@@ -55,7 +57,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def serve(token="fake-token", port=0):
-    Handler.token, Handler.calls = token, []
+    Handler.token, Handler.calls, Handler.methods = token, [], []
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

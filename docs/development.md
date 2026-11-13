@@ -250,8 +250,8 @@ Reference numbers (p95 / p99 ms, 20-minute measured phases):
 `scripts/agent-cycle/cycle.py` measures how far a real agent gets alone: ten
 English and Spanish tasks (create, gate, publish and run; diagnose; a missing
 credential; change a published workflow; schedule; pause and resume; cancel;
-redrive; CSV), each from a blank Claude Code or Codex session connected only
-to `/mcp`. The script creates one organization and agent client per task,
+redrive; CSV), each from a blank Claude Code, Codex or Cursor session
+connected only to `/mcp`. The script creates one organization and agent client per task,
 seeds what the task needs, and scores each task from the database and the
 agent's final answer. It plays the only person: it approves publish requests
 whose draft uses only pure steps and a schedule (anything that reaches out is
@@ -263,12 +263,14 @@ person about, and to no other server's. In `strict` mode nobody answers them.
 
 Each client process, the preflight's and the run's, gets:
 
-- a new empty `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, XDG directories,
+- a new empty `HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CURSOR_CONFIG_DIR`,
+  `CURSOR_DATA_DIR`, XDG directories,
   `TMPDIR` and working directory under the system temp directory (`CYCLE_TMP`
   moves it), deleted when the process ends;
 - only `PATH`, `LANG`, `TERM`, those directories, its agent token and the
   variables named in `CYCLE_PASS_ENV`. The model key comes from there:
-  `ANTHROPIC_API_KEY` for Claude Code, `CODEX_API_KEY` for Codex, a dedicated
+  `ANTHROPIC_API_KEY` for Claude Code, `CODEX_API_KEY` for Codex,
+  `CURSOR_API_KEY` for Cursor, a dedicated
   key with a spend cap. The script refuses to start without one and refuses
   `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN`, which are a person's
   session;
@@ -301,13 +303,38 @@ throwaway `CODEX_HOME` and refuses unless `janusly` is the only server and
 those features are off. A command, file change, web search or another
 server's tool during the run stops the cycle.
 
+Cursor runs `cursor-agent --disable-auto-update -p --output-format
+stream-json --trust --approve-mcps --sandbox enabled` without `--force`, with
+`CURSOR_FORCED_SHELL_EGRESS=1`, which also turns off its web search and fetch.
+Its only configuration is `janusly` in the session's user MCP file and a permission allowlist holding
+`Mcp(janusly:<tool>)` for each tool the mode allows (the non-destructive ones
+in `strict`). The CLI reads that directory from `CURSOR_CONFIG_DIR`, then
+`$XDG_CONFIG_HOME/cursor`, then `~/.cursor`, so the harness sets it. The
+preflight runs `cursor-agent --version`, `mcp list` and `mcp list-tools
+janusly` and refuses unless `janusly: ready` is the only server, its tools are
+exactly the catalog the token sees, and the workspace stays empty. During the
+run the `init` event must report the key from the environment, the
+session's workspace and the default permission mode; an event the harness
+cannot read or does not know (such as an `interaction_query`), any tool call
+other than a Janusly MCP call or listing, or a strict-mode call that runs a
+tool off the allowlist stops the cycle. Each client gets only its own model key.
+
+Two things a temporary home cannot isolate: on macOS the CLI reads the login
+keychain, and account rules, memories and team MCP servers live on Cursor's
+servers, where `mcp list` does not see them. So Cursor runs only in the
+container, and only with `CYCLE_CURSOR_ACCOUNT=dedicated`, the operator's
+statement that the key's account has none of them. That state is attested,
+not detected; a team server is caught only when the run calls it.
+
 A refusal stops the cycle with a non-zero exit: better not to measure than to
 measure a session that is not blank. CI runs the self-test,
-`python3 -m unittest discover -s scripts/agent-cycle`: fake `claude` and
-`codex` executables (`scripts/agent-cycle/fakes/`) load configuration the way
+`python3 -m unittest discover -s scripts/agent-cycle`: fake `claude`,
+`codex` and `cursor-agent` executables (`scripts/agent-cycle/fakes/`) load
+configuration the way
 the real ones do and make fixed calls against a fake MCP server. It fails when
 a session sees the operator's home, an injected MCP server, a home that
-carries configuration, a feature left on, or a client that reports nothing.
+carries configuration, a feature left on, a catalog that drifts, a local tool
+call, or a client that reports nothing.
 
 ### Running it
 
@@ -327,6 +354,7 @@ ports, keeps the key away from the server, and ignores `.env`:
 
 ```bash
 export CYCLE_ANTHROPIC_API_KEY=...   # dedicated key with a spend cap
+# Cursor: CYCLE_CLIENT=cursor CYCLE_CURSOR_API_KEY=... CYCLE_CURSOR_ACCOUNT=dedicated CYCLE_CLIENT_VERSION=2026.11.11-b912975
 export CYCLE_CLIENT=claude CYCLE_MODEL=claude-sonnet-5-5 CYCLE_CLIENT_VERSION=2.1.322 CYCLE_REPEAT=3
 cycle() { docker compose --env-file /dev/null -p janusly-cycle -f docker-compose.yml -f scripts/agent-cycle/compose.yml "$@"; }
 cycle build janusly cycle && cycle run --rm janusly migrate && cycle up -d --wait janusly
@@ -336,7 +364,8 @@ cycle down -v
 
 `CYCLE_REPEAT` repeats every task (3 for the official figure),
 `CYCLE_CLIENT_VERSION` refuses any other client version, `CYCLE_MODEL` pins
-the model, and `CYCLE_MAX_BUDGET_USD` caps each Claude Code task.
+the model, and `CYCLE_MAX_BUDGET_USD` caps each Claude Code task. Codex and
+Cursor have no per-task cap: set the spend cap on the key.
 `CYCLE_TASK_SECONDS`, `CYCLE_BASE_URL`, `CYCLE_SIM_PORT`, `CYCLE_OUT` and
 `CYCLE_CODEX_ARGS` adjust the rest. `results-<client>-<mode>-<stamp>.json`
 records each task's client version, model, calls, tool errors, tokens, cost,

@@ -362,7 +362,7 @@ def guard(path):
 
 XDG = ("config", "data", "cache", "state")
 BLANK_DIRS = ("home", "work", "claude", "codex")
-MARKERS = ("CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".cursor", ".mcp.json")
+MARKERS = ("CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".cursor", ".cursorrules", ".mcp.json")
 
 
 class Session:
@@ -403,7 +403,8 @@ def assert_blank(session):
             raise Refused(f"{parent} holds {found}; set CYCLE_TMP to a clean directory")
 
 
-ISOLATION_KEYS = {"HOME", "PATH", "TMPDIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "JANUSLY_AGENT_TOKEN"}
+ISOLATION_KEYS = {"HOME", "PATH", "TMPDIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR",
+                  "CURSOR_FORCED_SHELL_EGRESS", "JANUSLY_AGENT_TOKEN", "NO_OPEN_BROWSER"}
 OPERATOR_CREDENTIALS = {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"}
 
 
@@ -418,17 +419,24 @@ def passed_env():
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
+CLIENT_KEYS = {"claude": ("ANTHROPIC_API_KEY",), "codex": ("CODEX_API_KEY", "OPENAI_API_KEY"), "cursor": ("CURSOR_API_KEY",)}
+
+
 def agent_env(session, token):
     """Only what the client needs: no operator home, secrets or settings."""
     env = {key: os.environ[key] for key in ("PATH", "LANG", "TERM") if key in os.environ}
-    env.update(passed_env())
+    others = {key for client, keys in CLIENT_KEYS.items() if client != CLIENT for key in keys}
+    env.update({key: value for key, value in passed_env().items() if key not in others})
     env.update({"HOME": session.home, "CLAUDE_CONFIG_DIR": session.claude, "CODEX_HOME": session.codex,
-                "TMPDIR": session.tmp, "JANUSLY_AGENT_TOKEN": token,
+                "TMPDIR": session.tmp, "JANUSLY_AGENT_TOKEN": token, "NO_OPEN_BROWSER": "1",
                 # No traffic besides the model and Janusly.
                 "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1",
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
     env.update({f"XDG_{name.upper()}_HOME": path for name, path in session.xdg.items()})
-    for key in ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "TMPDIR"):
+    # Cursor prefers these, then XDG_CONFIG_HOME, over HOME/.cursor.
+    env.update(CURSOR_CONFIG_DIR=os.path.join(session.home, ".cursor"), CURSOR_DATA_DIR=os.path.join(session.home, ".cursor"),
+               CURSOR_FORCED_SHELL_EGRESS="1")  # also turns off Cursor's web search and fetch
+    for key in ("HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR", "TMPDIR"):
         real = os.path.realpath(env[key])
         if real in operator_homes() or not real.startswith(session.root + os.sep):
             raise Refused(f"{key} must be inside the session, not {env[key]}")
@@ -498,7 +506,10 @@ def stream(command, env, cwd, log, watch, timeout):
                     event = json.loads(line)
                 except ValueError:
                     continue
-                verdict = watch(event) if isinstance(event, dict) else None
+                try:
+                    verdict = watch(event) if isinstance(event, dict) else None
+                except Exception as err:  # an event the watcher cannot read fails closed
+                    verdict = f"unreadable event {err!r}"
                 if verdict:
                     break
     finally:
@@ -516,6 +527,8 @@ def stream(command, env, cwd, log, watch, timeout):
 def run_agent(prompt, token, log):
     if CLIENT == "claude":
         return claude(prompt, token, log)
+    if CLIENT == "cursor":
+        return cursor(prompt, token, log)
     return codex(prompt, token, log)
 
 
@@ -615,7 +628,7 @@ def claude_preflight(prompt, token, allowed, expected):
 
 
 def claude(prompt, token, log):
-    require_key(("ANTHROPIC_API_KEY",))
+    require_key(CLIENT_KEYS["claude"])
     tools = janusly_tools(token)
     expected = {claude_name(tool) for tool in tools}
     allowed = claude_allowed(tools)
@@ -686,11 +699,14 @@ def codex_overrides(session):
     return args + shlex.split(os.environ.get("CYCLE_CODEX_ARGS", ""))
 
 
-def codex_output(args, session, token):
-    out = subprocess.run(["codex", *args], cwd=session.work, env=agent_env(session, token), capture_output=True, text=True, timeout=60)
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def client_output(base, args, session, token):
+    out = subprocess.run([*base, *args], cwd=session.work, env=agent_env(session, token), capture_output=True, text=True, timeout=60)
     if out.returncode:
-        raise Refused(f"codex {args[0]} failed: {out.stderr.strip()[:300]}")
-    return out.stdout
+        raise Refused(f"{base[0]} {args[0]} failed: {ANSI.sub('', out.stderr or out.stdout).strip()[:300]}")
+    return ANSI.sub("", out.stdout)
 
 
 def codex_preflight(token):
@@ -698,16 +714,16 @@ def codex_preflight(token):
     every feature that reaches beyond it as off."""
     with Session() as session:
         assert_blank(session)
-        version = codex_output(["--version"], session, token).split()[-1:] or [""]
+        version = client_output(("codex",), ["--version"], session, token).split()[-1:] or [""]
         overrides = codex_overrides(session)
         try:
-            servers = json.loads(codex_output(["mcp", "list", "--json", *overrides], session, token))
+            servers = json.loads(client_output(("codex",), ["mcp", "list", "--json", *overrides], session, token))
             names = [server["name"] for server in servers]
         except (ValueError, KeyError, TypeError):
             raise Refused("cannot read Codex's MCP servers")
         if names != ["janusly"] or not servers[0].get("enabled"):
             raise Refused(f"Codex MCP servers {names}")
-        listed = (line.split() for line in codex_output(["features", "list", *overrides], session, token).splitlines())
+        listed = (line.split() for line in client_output(("codex",), ["features", "list", *overrides], session, token).splitlines())
         on = sorted(parts[0] for parts in listed if len(parts) >= 2 and parts[0] in CODEX_OFF and parts[-1] == "true")
         if on:
             raise Refused(f"Codex features still on: {on}")
@@ -717,7 +733,7 @@ def codex_preflight(token):
 
 
 def codex(prompt, token, log):
-    require_key(("CODEX_API_KEY", "OPENAI_API_KEY"))
+    require_key(CLIENT_KEYS["codex"])
     version = codex_preflight(token)
     state = {"answer": "", "calls": [], "errors": 0, "tokens": 0}
 
@@ -751,6 +767,154 @@ def codex(prompt, token, log):
             "clientVersion": version, "model": MODEL or None, **({"error": "timeout"} if verdict == "timeout" else {})}
 
 
+# --- Cursor -----------------------------------------------------------------
+# Account rules, memories and team MCP servers live on Cursor's servers, and on
+# macOS the CLI reads the login keychain: a temporary HOME isolates neither.
+CURSOR_CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
+CURSOR_EVENTS = {"system", "user", "assistant", "thinking", "tool_call", "result"}
+CURSOR_CLI = ("cursor-agent", "--disable-auto-update")
+
+
+def in_container():
+    return any(os.path.exists(marker) for marker in CURSOR_CONTAINER_MARKERS)
+
+
+def cursor_allowed(tools):
+    names = [tool["name"] for tool in tools if MODE == "approved" or not destructive(tool)]
+    return sorted(f"Mcp(janusly:{name})" for name in names)
+
+
+def cursor_configure(session, allowed):
+    """Writes the session's only Cursor configuration: janusly in the user
+    MCP file (no project file, so no approval prompt) and a permission
+    allowlist holding nothing but the Janusly tools the mode allows."""
+    config = os.path.join(session.home, ".cursor")
+    os.makedirs(config)
+    with open(os.path.join(config, "mcp.json"), "w") as out:
+        json.dump({"mcpServers": {"janusly": {"url": BASE + "/mcp",
+                                              "headers": {"Authorization": "Bearer ${env:JANUSLY_AGENT_TOKEN}"}}}}, out)
+    with open(os.path.join(config, "cli-config.json"), "w") as out:
+        json.dump({"version": 1, "permissions": {"allow": allowed, "deny": ["Shell(*)", "Read(**)", "Write(**)", "WebFetch(*)"]},
+                   "approvalMode": "allowlist", "autoAcceptWebSearch": False, "sandbox": {"mode": "enabled"},
+                   "attribution": {"attributeCommitsToAgent": False, "attributePRsToAgent": False}}, out)
+
+
+def cursor_preflight(token, allowed, expected):
+    """In the throwaway HOME, Cursor must list only janusly, ready, with
+    exactly the catalog the harness read, and use the dedicated key."""
+    if not in_container():
+        raise Refused("Cursor runs only in the harness container: a temporary HOME does not hide the macOS keychain")
+    if os.environ.get("CYCLE_CURSOR_ACCOUNT") != "dedicated":
+        raise Refused("set CYCLE_CURSOR_ACCOUNT=dedicated once the key's account has no rules, memories or team MCP servers")
+    with Session() as session:
+        assert_blank(session)
+        cursor_configure(session, allowed)
+        version = client_output(CURSOR_CLI, ["--version"], session, token).strip()
+        if PINNED_VERSION and version != PINNED_VERSION:
+            raise Refused(f"Cursor {version}, pinned {PINNED_VERSION}")
+        servers = [line.strip() for line in client_output(CURSOR_CLI, ["mcp", "list"], session, token).splitlines() if line.strip()]
+        if servers != ["janusly: ready"]:
+            raise Refused(f"Cursor MCP servers {servers}")
+        lines = client_output(CURSOR_CLI, ["mcp", "list-tools", "janusly"], session, token).splitlines()
+        listed = {line[2:].split(" (")[0].strip() for line in lines if line.startswith("- ")}
+        if listed != expected:
+            raise Refused(f"Cursor lists janusly tools {sorted(listed ^ expected)} that the agent token does not")
+        if sorted(os.listdir(session.work)):
+            raise Refused(f"Cursor wrote {sorted(os.listdir(session.work))} into the workspace")
+    return version
+
+
+def cursor_command(prompt, session):
+    # No --force: anything outside the allowlist needs a person, and print
+    # mode has none. --approve-mcps covers janusly, the only server.
+    command = [*CURSOR_CLI, "-p", prompt, "--output-format", "stream-json", "--workspace",
+               session.work, "--trust", "--approve-mcps", "--sandbox", "enabled"]
+    if MODEL:
+        command += ["--model", MODEL]
+    return command
+
+
+def cursor_oneof(field):
+    """A protobuf oneof, as {"case", "value"} or as {"<case>": value}."""
+    if not isinstance(field, dict):
+        return None, {}
+    if "case" in field:
+        case, value = field.get("case"), field.get("value")
+    else:
+        cases = [key for key in field if not key.startswith("$")]
+        case, value = (cases[0], field[cases[0]]) if len(cases) == 1 else (str(cases), {})
+    return case, value if isinstance(value, dict) else {}
+
+
+def cursor_call(event):
+    call = event.get("tool_call") or {}
+    return cursor_oneof(call["tool"] if isinstance(call.get("tool"), dict) else call)
+
+
+def cursor_failed(call):
+    case, value = cursor_oneof(call.get("result"))
+    return case != "success" or bool(value.get("isError"))
+
+
+def cursor(prompt, token, log):
+    require_key(CLIENT_KEYS["cursor"])
+    tools = janusly_tools(token)
+    expected = {tool["name"] for tool in tools}
+    allowed = cursor_allowed(tools)
+    version = cursor_preflight(token, allowed, expected)
+    state = {"init": None, "answer": "", "calls": [], "errors": 0, "tokens": 0}
+
+    def watch(event):
+        if is_init(event):
+            if event.get("apiKeySource") != "env":
+                return f"model credential from {event.get('apiKeySource')}"
+            if os.path.realpath(event.get("cwd") or "") != os.path.realpath(session.work):
+                return f"working directory {event.get('cwd')}"
+            if event.get("permissionMode") != "default":
+                return f"permission mode {event.get('permissionMode')}"
+            state["init"] = event
+            return None
+        if event.get("type") not in CURSOR_EVENTS:
+            return f"emitted {event.get('type')} {event.get('query_type') or ''}".strip()
+        if event.get("type") in ("assistant", "tool_call", "result") and state["init"] is None:
+            return "the client acted before its init event"
+        if event.get("type") == "tool_call":
+            kind, call = cursor_call(event)
+            args = call.get("args") or {}
+            if kind == "getMcpToolsToolCall" and args.get("server") == "janusly":
+                return None
+            name = args.get("toolName") or args.get("name")
+            if kind != "mcpToolCall":
+                return f"used {kind}"
+            if args.get("providerIdentifier") != "janusly" or name not in expected:
+                return f"called {args.get('providerIdentifier')}:{name}"
+            if event.get("subtype") == "completed":
+                if f"Mcp(janusly:{name})" not in allowed and not cursor_failed(call):
+                    return f"ran {name} outside the allowlist"
+                state["calls"].append(name)
+                state["errors"] += cursor_failed(call)
+        if event.get("type") == "result":
+            state["answer"] = event.get("result", "")
+            usage = event.get("usage") or {}
+            state["tokens"] = sum(int(usage.get(camel, usage.get(snake)) or 0)
+                                  for camel, snake in (("inputTokens", "input_tokens"), ("outputTokens", "output_tokens")))
+        return None
+
+    started = time.time()
+    with Session() as session:
+        assert_blank(session)
+        cursor_configure(session, allowed)
+        code, verdict = stream(cursor_command(prompt, session), agent_env(session, token), session.work, log, watch, TASK_SECONDS)
+    if verdict and verdict != "timeout":
+        raise Refused("Cursor session stopped: " + verdict)
+    if state["init"] is None and verdict != "timeout":
+        raise Refused("Cursor reported no init event")
+    return {"exit": code, "answer": state["answer"], "calls": state["calls"], "toolErrors": state["errors"],
+            "tokens": state["tokens"], "costUsd": None, "seconds": round(time.time() - started),
+            "clientVersion": version, "model": (state["init"] or {}).get("model") or MODEL or None,
+            **({"error": "timeout"} if verdict == "timeout" else {})}
+
+
 def summary(results):
     """Passed tasks per repetition and their median, the figure the cycle
     reports for a client and mode."""
@@ -761,8 +925,8 @@ def summary(results):
 
 
 def main():
-    if CLIENT not in ("claude", "codex") or MODE not in ("strict", "approved") or REPEAT < 1:
-        raise SystemExit("CYCLE_CLIENT is claude or codex, CYCLE_MODE strict or approved, CYCLE_REPEAT at least 1")
+    if CLIENT not in ("claude", "codex", "cursor") or MODE not in ("strict", "approved") or REPEAT < 1:
+        raise SystemExit("CYCLE_CLIENT is claude, codex or cursor, CYCLE_MODE strict or approved, CYCLE_REPEAT at least 1")
     try:
         guard(HERE)
     except Refused as err:

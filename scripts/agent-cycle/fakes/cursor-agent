@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Stands in for the Cursor CLI in the harness self-test: `--version`,
+`mcp list`, `mcp list-tools` and `-p` read MCP servers and the permission
+allowlist from the directory the real CLI picks (CURSOR_CONFIG_DIR, then
+XDG_CONFIG_HOME/cursor, then HOME/.cursor) and the workspace's .cursor, and
+make two fixed MCP calls. behavior.json beside it simulates what lives on
+Cursor's servers."""
+
+import json, os, re, sys, time, urllib.request
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+VERSION = "2026.11.11-b912975"
+RUN_FLAGS = {"--trust", "--approve-mcps"}
+PROTOBUF = False
+VALUE_FLAGS = {"--output-format", "--workspace", "--sandbox", "--model"}
+
+
+def read_json(path):
+    try:
+        with open(path) as source:
+            return json.load(source)
+    except (OSError, ValueError):
+        return {}
+
+
+def expand(value):
+    return re.sub(r"\$\{env:([A-Za-z0-9_]+)\}", lambda match: os.environ.get(match.group(1), ""), value)
+
+
+def resolve(workspace):
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    home = os.environ.get("CURSOR_CONFIG_DIR") or (os.path.join(xdg, "cursor") if xdg else os.path.join(os.environ.get("HOME", ""), ".cursor"))
+    behavior = read_json(os.path.join(HERE, "behavior.json"))
+    servers = dict(read_json(os.path.join(home, "mcp.json")).get("mcpServers") or {})
+    servers.update(read_json(os.path.join(workspace, ".cursor", "mcp.json")).get("mcpServers") or {})
+    servers.update(behavior.get("listedMcpServers", {}))  # a config source the harness does not know
+    if behavior.get("writeWorkspace"):
+        os.makedirs(os.path.join(workspace, ".cursor"), exist_ok=True)
+    return servers, read_json(os.path.join(home, "cli-config.json")), behavior
+
+
+def rpc(server, body):
+    headers = {"content-type": "application/json", **{key: expand(value) for key, value in (server.get("headers") or {}).items()}}
+    req = urllib.request.Request(server["url"], data=json.dumps({"jsonrpc": "2.0", **body}).encode(), method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as res:
+        raw = res.read()
+    return json.loads(raw) if raw else {}
+
+
+def catalog(server):
+    return rpc(server, {"id": 2, "method": "tools/list"})["result"]["tools"]
+
+
+def emit(event):
+    print(json.dumps(event), flush=True)
+
+
+def oneof(case, value):
+    """The real CLI writes protobuf-es objects; behavior protobuf selects that shape."""
+    return {"case": case, "value": value} if PROTOBUF else {case: value}
+
+
+def call_event(subtype, provider, tool, result=None):
+    value = {"args": {"providerIdentifier": provider, "toolName": tool, "args": {}}}
+    if result is not None:
+        value["result"] = oneof(*next(iter(result.items())))
+    call = {"tool": oneof("mcpToolCall", value)} if PROTOBUF else oneof("mcpToolCall", value)
+    emit({"type": "tool_call", "subtype": subtype, "call_id": tool, "tool_call": call})
+
+
+def main():
+    global PROTOBUF
+    argv = [arg for arg in sys.argv[1:] if arg != "--disable-auto-update"]
+    if argv[:1] == ["--version"]:
+        print(VERSION)
+        return
+    if not os.environ.get("CURSOR_API_KEY"):
+        sys.exit("Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.")
+    if argv[:2] == ["mcp", "list"]:
+        servers, _, _ = resolve(os.getcwd())
+        print("\n".join(f"{name}: \x1b[32mready\x1b[39m" for name in servers) or "No MCP servers configured")
+        return
+    if argv[:2] == ["mcp", "list-tools"]:
+        servers, _, behavior = resolve(os.getcwd())
+        tools = [tool["name"] for tool in catalog(servers[argv[2]])] + behavior.get("extraTools", [])
+        print(f"Tools for {argv[2]} ({len(tools)}):\n" + "\n".join(f"- {name} \x1b[2m()\x1b[22m" for name in sorted(tools)))
+        return
+    if argv[:1] != ["-p"]:
+        sys.exit(f"fake cursor-agent: unsupported {argv[:2]}")
+    prompt, args, options, index = argv[1], argv[2:], {}, 0
+    while index < len(args):
+        if args[index] in VALUE_FLAGS:
+            options[args[index]] = args[index + 1]
+            index += 2
+        elif args[index] in RUN_FLAGS:
+            options[args[index]] = True
+            index += 1
+        else:
+            sys.exit(f"error: unknown option '{args[index]}'")
+    workspace = options.get("--workspace", os.getcwd())
+    servers, config, behavior = resolve(workspace)
+    PROTOBUF = bool(behavior.get("protobuf"))
+    # Account-side servers never show in `mcp list`; they appear only at run time.
+    servers.update(behavior.get("teamMcpServers", {}))
+    emit({"type": "system", "subtype": "fake", "pid": os.getpid(), "home": os.environ.get("HOME"), "env": sorted(os.environ)})
+    emit({"type": "system", "subtype": "init", "apiKeySource": behavior.get("apiKeySource", "env"), "cwd": workspace,
+          "session_id": "fake", "model": options.get("--model", "Auto"),
+          "permissionMode": behavior.get("permissionMode", "default")})
+    if behavior.get("malformedEvent"):
+        emit({"type": "tool_call", "subtype": "started", "tool_call": {"mcpToolCall": {"args": ["x"]}}})
+        time.sleep(5)
+    if behavior.get("localTool"):
+        emit({"type": "tool_call", "subtype": "started", "call_id": "ls",
+              "tool_call": {"shellToolCall": {"args": {"command": "ls ~"}}}})
+    if behavior.get("webFetch"):
+        emit({"type": "interaction_query", "subtype": "request", "query_type": "webFetchRequestQuery", "query": {}})
+    for provider, server in {**behavior.get("teamMcpServers", {}), **behavior.get("callServers", {})}.items():
+        call_event("started", provider, "memory.save")
+        rpc(server, {"id": 3, "method": "tools/call", "params": {"name": "memory.save", "arguments": {}}})
+    allowed = set((config.get("permissions") or {}).get("allow") or [])
+    janusly = servers.get("janusly") or {}
+    names = {tool["name"] for tool in catalog(janusly)}
+    for tool in ("workflows.list", "runs.cancel"):
+        assert tool in names
+        call_event("started", "janusly", tool)
+        if f"Mcp(janusly:{tool})" not in allowed and config.get("approvalMode") == "allowlist" \
+                and not behavior.get("ignoreAllowlist"):
+            call_event("completed", "janusly", tool, {"rejected": {"reason": "not on the allowlist"}})
+            continue
+        rpc(janusly, {"id": 3, "method": "tools/call", "params": {"name": tool, "arguments": {}}})
+        call_event("completed", "janusly", tool, {"success": {"content": [], "isError": False}})
+    emit({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "fake answer"}]}})
+    emit({"type": "result", "subtype": "success", "is_error": False, "result": "fake answer to " + prompt[:20],
+          "usage": {"inputTokens": 10, "outputTokens": 5}})
+
+
+if __name__ == "__main__":
+    main()
