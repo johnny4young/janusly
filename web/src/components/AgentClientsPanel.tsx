@@ -300,7 +300,7 @@ export function AgentClientsPanel({ canWrite: permitted, canReadMembers }: { can
                     <tr key={`${client.id}-detail`} className="we-agent-clients__detail-row">
                       <td colSpan={7} id={`agent-client-detail-${client.id}`}>
                         <Suspense fallback={<LoadingSkeleton rows={2} label={t('common.loading')} />}>
-                          <AgentClientDetail clientId={client.id} />
+                          <AgentClientDetail clientId={client.id} nonce={nonce} />
                         </Suspense>
                       </td>
                     </tr>
