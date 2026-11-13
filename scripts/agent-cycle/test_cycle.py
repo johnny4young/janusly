@@ -81,7 +81,7 @@ class Cycle(unittest.TestCase):
                 PINNED_VERSION="", MODEL="", in_container=lambda: True)):
             patcher.start()
             self.addCleanup(patcher.stop)
-        fake_mcp.Handler.calls = []
+        fake_mcp.Handler.calls, fake_mcp.Handler.methods = [], []
 
     def behave(self, **behavior):
         write(os.path.join(self.bin, "behavior.json"), behavior)
@@ -236,11 +236,17 @@ class Cycle(unittest.TestCase):
         self.assertEqual(run["toolErrors"], 1)
         self.assertEqual(fake_mcp.Handler.calls, ["workflows.list"])
 
+    def test_cursor_strict_stops_a_destructive_call_that_runs(self):
+        self.behave(ignoreAllowlist=True)
+        with self.assertRaisesRegex(cycle.Refused, "ran runs.cancel outside the allowlist"):
+            self.run_client("cursor", "strict")
+
     def test_cursor_pins_its_version(self):
         cycle.PINNED_VERSION = "2026.01.01-0000000"
         with self.assertRaisesRegex(cycle.Refused, "pinned 2026.01.01"):
             self.run_client("cursor")
-        self.assertEqual(fake_mcp.Handler.calls, [])
+        self.assertEqual(fake_mcp.Handler.methods, ["initialize", "notifications/initialized", "tools/list"],
+                         "only the harness read the catalog")
 
     def test_cursor_refusals(self):
         engram = {"url": self.url + "/mcp", "headers": {"Authorization": "Bearer " + TOKEN}}
@@ -250,7 +256,9 @@ class Cycle(unittest.TestCase):
                  "catalog drift": ({"extraTools": ["memory.save"]}, r"tools \['memory.save'\]"),
                  "workspace write": ({"writeWorkspace": True}, r"wrote \['.cursor'\]"),
                  "login credential": ({"apiKeySource": "login"}, "model credential from login"),
+                 "account permission mode": ({"permissionMode": "auto"}, "permission mode auto"),
                  "local tool": ({"localTool": True}, "used shellToolCall"),
+                 "malformed event": ({"malformedEvent": True}, "unreadable event"),
                  "other server": ({"callServers": {"engram": engram}}, "called engram:memory.save")}
         for label, (behavior, message) in cases.items():
             with self.subTest(label):

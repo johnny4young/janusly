@@ -313,10 +313,11 @@ in `strict`). The CLI reads that directory from `CURSOR_CONFIG_DIR`, then
 preflight runs `cursor-agent --version`, `mcp list` and `mcp list-tools
 janusly` and refuses unless `janusly: ready` is the only server, its tools are
 exactly the catalog the token sees, and the workspace stays empty. During the
-run the `init` event must report the key from the environment and the
-session's workspace; an event type the harness does not know (such as an
-`interaction_query`) or any tool call other than a Janusly MCP call or listing
-stops the cycle. Each client gets only its own model key.
+run the `init` event must report the key from the environment, the
+session's workspace and the default permission mode; an event the harness
+cannot read or does not know (such as an `interaction_query`), any tool call
+other than a Janusly MCP call or listing, or a strict-mode call that runs a
+tool off the allowlist stops the cycle. Each client gets only its own model key.
 
 Two things a temporary home cannot isolate: on macOS the CLI reads the login
 keychain, and account rules, memories and team MCP servers live on Cursor's

@@ -404,8 +404,7 @@ def assert_blank(session):
 
 
 ISOLATION_KEYS = {"HOME", "PATH", "TMPDIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CURSOR_DATA_DIR",
-                  "JANUSLY_AGENT_TOKEN", "NO_OPEN_BROWSER"}
-ISOLATION_PREFIXES = ("XDG_", "CURSOR_FORCED_SHELL_EGRESS")
+                  "CURSOR_FORCED_SHELL_EGRESS", "JANUSLY_AGENT_TOKEN", "NO_OPEN_BROWSER"}
 OPERATOR_CREDENTIALS = {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"}
 
 
@@ -413,7 +412,7 @@ def passed_env():
     """The variables named in CYCLE_PASS_ENV, such as the model key."""
     names = [name for name in os.environ.get("CYCLE_PASS_ENV", "").split(",") if name]
     for name in names:
-        if name in ISOLATION_KEYS or name.startswith(ISOLATION_PREFIXES):
+        if name in ISOLATION_KEYS or name.startswith("XDG_"):
             raise Refused(f"CYCLE_PASS_ENV may not carry {name}")
         if name in OPERATOR_CREDENTIALS:
             raise Refused(f"{name} is a person's session; pass a dedicated API key instead")
@@ -507,7 +506,10 @@ def stream(command, env, cwd, log, watch, timeout):
                     event = json.loads(line)
                 except ValueError:
                     continue
-                verdict = watch(event) if isinstance(event, dict) else None
+                try:
+                    verdict = watch(event) if isinstance(event, dict) else None
+                except Exception as err:  # an event the watcher cannot read fails closed
+                    verdict = f"unreadable event {err!r}"
                 if verdict:
                     break
     finally:
@@ -626,7 +628,7 @@ def claude_preflight(prompt, token, allowed, expected):
 
 
 def claude(prompt, token, log):
-    require_key(("ANTHROPIC_API_KEY",))
+    require_key(CLIENT_KEYS["claude"])
     tools = janusly_tools(token)
     expected = {claude_name(tool) for tool in tools}
     allowed = claude_allowed(tools)
@@ -697,11 +699,14 @@ def codex_overrides(session):
     return args + shlex.split(os.environ.get("CYCLE_CODEX_ARGS", ""))
 
 
-def codex_output(args, session, token):
-    out = subprocess.run(["codex", *args], cwd=session.work, env=agent_env(session, token), capture_output=True, text=True, timeout=60)
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def client_output(base, args, session, token):
+    out = subprocess.run([*base, *args], cwd=session.work, env=agent_env(session, token), capture_output=True, text=True, timeout=60)
     if out.returncode:
-        raise Refused(f"codex {args[0]} failed: {out.stderr.strip()[:300]}")
-    return out.stdout
+        raise Refused(f"{base[0]} {args[0]} failed: {ANSI.sub('', out.stderr or out.stdout).strip()[:300]}")
+    return ANSI.sub("", out.stdout)
 
 
 def codex_preflight(token):
@@ -709,16 +714,16 @@ def codex_preflight(token):
     every feature that reaches beyond it as off."""
     with Session() as session:
         assert_blank(session)
-        version = codex_output(["--version"], session, token).split()[-1:] or [""]
+        version = client_output(("codex",), ["--version"], session, token).split()[-1:] or [""]
         overrides = codex_overrides(session)
         try:
-            servers = json.loads(codex_output(["mcp", "list", "--json", *overrides], session, token))
+            servers = json.loads(client_output(("codex",), ["mcp", "list", "--json", *overrides], session, token))
             names = [server["name"] for server in servers]
         except (ValueError, KeyError, TypeError):
             raise Refused("cannot read Codex's MCP servers")
         if names != ["janusly"] or not servers[0].get("enabled"):
             raise Refused(f"Codex MCP servers {names}")
-        listed = (line.split() for line in codex_output(["features", "list", *overrides], session, token).splitlines())
+        listed = (line.split() for line in client_output(("codex",), ["features", "list", *overrides], session, token).splitlines())
         on = sorted(parts[0] for parts in listed if len(parts) >= 2 and parts[0] in CODEX_OFF and parts[-1] == "true")
         if on:
             raise Refused(f"Codex features still on: {on}")
@@ -728,7 +733,7 @@ def codex_preflight(token):
 
 
 def codex(prompt, token, log):
-    require_key(("CODEX_API_KEY", "OPENAI_API_KEY"))
+    require_key(CLIENT_KEYS["codex"])
     version = codex_preflight(token)
     state = {"answer": "", "calls": [], "errors": 0, "tokens": 0}
 
@@ -767,7 +772,7 @@ def codex(prompt, token, log):
 # macOS the CLI reads the login keychain: a temporary HOME isolates neither.
 CURSOR_CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
 CURSOR_EVENTS = {"system", "user", "assistant", "thinking", "tool_call", "result"}
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
+CURSOR_CLI = ("cursor-agent", "--disable-auto-update")
 
 
 def in_container():
@@ -794,14 +799,6 @@ def cursor_configure(session, allowed):
                    "attribution": {"attributeCommitsToAgent": False, "attributePRsToAgent": False}}, out)
 
 
-def cursor_output(args, session, token):
-    out = subprocess.run(["cursor-agent", "--disable-auto-update", *args], cwd=session.work, env=agent_env(session, token), capture_output=True,
-                         text=True, timeout=60)
-    if out.returncode:
-        raise Refused(f"cursor-agent {args[0]} failed: {ANSI.sub('', out.stderr or out.stdout).strip()[:300]}")
-    return ANSI.sub("", out.stdout)
-
-
 def cursor_preflight(token, allowed, expected):
     """In the throwaway HOME, Cursor must list only janusly, ready, with
     exactly the catalog the harness read, and use the dedicated key."""
@@ -812,25 +809,25 @@ def cursor_preflight(token, allowed, expected):
     with Session() as session:
         assert_blank(session)
         cursor_configure(session, allowed)
-        version = cursor_output(["--version"], session, token).strip()
-        servers = [line.strip() for line in cursor_output(["mcp", "list"], session, token).splitlines() if line.strip()]
+        version = client_output(CURSOR_CLI, ["--version"], session, token).strip()
+        if PINNED_VERSION and version != PINNED_VERSION:
+            raise Refused(f"Cursor {version}, pinned {PINNED_VERSION}")
+        servers = [line.strip() for line in client_output(CURSOR_CLI, ["mcp", "list"], session, token).splitlines() if line.strip()]
         if servers != ["janusly: ready"]:
             raise Refused(f"Cursor MCP servers {servers}")
-        lines = cursor_output(["mcp", "list-tools", "janusly"], session, token).splitlines()
+        lines = client_output(CURSOR_CLI, ["mcp", "list-tools", "janusly"], session, token).splitlines()
         listed = {line[2:].split(" (")[0].strip() for line in lines if line.startswith("- ")}
         if listed != expected:
             raise Refused(f"Cursor lists janusly tools {sorted(listed ^ expected)} that the agent token does not")
         if sorted(os.listdir(session.work)):
             raise Refused(f"Cursor wrote {sorted(os.listdir(session.work))} into the workspace")
-    if PINNED_VERSION and version != PINNED_VERSION:
-        raise Refused(f"Cursor {version}, pinned {PINNED_VERSION}")
     return version
 
 
 def cursor_command(prompt, session):
     # No --force: anything outside the allowlist needs a person, and print
     # mode has none. --approve-mcps covers janusly, the only server.
-    command = ["cursor-agent", "--disable-auto-update", "-p", prompt, "--output-format", "stream-json", "--workspace",
+    command = [*CURSOR_CLI, "-p", prompt, "--output-format", "stream-json", "--workspace",
                session.work, "--trust", "--approve-mcps", "--sandbox", "enabled"]
     if MODEL:
         command += ["--model", MODEL]
@@ -842,9 +839,11 @@ def cursor_oneof(field):
     if not isinstance(field, dict):
         return None, {}
     if "case" in field:
-        return field.get("case"), field.get("value") or {}
-    cases = [key for key in field if not key.startswith("$")]
-    return (cases[0], field[cases[0]] or {}) if len(cases) == 1 else (str(cases), {})
+        case, value = field.get("case"), field.get("value")
+    else:
+        cases = [key for key in field if not key.startswith("$")]
+        case, value = (cases[0], field[cases[0]]) if len(cases) == 1 else (str(cases), {})
+    return case, value if isinstance(value, dict) else {}
 
 
 def cursor_call(event):
@@ -858,7 +857,7 @@ def cursor_failed(call):
 
 
 def cursor(prompt, token, log):
-    require_key(("CURSOR_API_KEY",))
+    require_key(CLIENT_KEYS["cursor"])
     tools = janusly_tools(token)
     expected = {tool["name"] for tool in tools}
     allowed = cursor_allowed(tools)
@@ -871,6 +870,8 @@ def cursor(prompt, token, log):
                 return f"model credential from {event.get('apiKeySource')}"
             if os.path.realpath(event.get("cwd") or "") != os.path.realpath(session.work):
                 return f"working directory {event.get('cwd')}"
+            if event.get("permissionMode") != "default":
+                return f"permission mode {event.get('permissionMode')}"
             state["init"] = event
             return None
         if event.get("type") not in CURSOR_EVENTS:
@@ -888,12 +889,15 @@ def cursor(prompt, token, log):
             if args.get("providerIdentifier") != "janusly" or name not in expected:
                 return f"called {args.get('providerIdentifier')}:{name}"
             if event.get("subtype") == "completed":
+                if f"Mcp(janusly:{name})" not in allowed and not cursor_failed(call):
+                    return f"ran {name} outside the allowlist"
                 state["calls"].append(name)
                 state["errors"] += cursor_failed(call)
         if event.get("type") == "result":
             state["answer"] = event.get("result", "")
             usage = event.get("usage") or {}
-            state["tokens"] = sum(int(usage.get(key) or 0) for key in ("inputTokens", "outputTokens", "input_tokens", "output_tokens"))
+            state["tokens"] = sum(int(usage.get(camel, usage.get(snake)) or 0)
+                                  for camel, snake in (("inputTokens", "input_tokens"), ("outputTokens", "output_tokens")))
         return None
 
     started = time.time()

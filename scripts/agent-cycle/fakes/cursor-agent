@@ -6,7 +6,7 @@ XDG_CONFIG_HOME/cursor, then HOME/.cursor) and the workspace's .cursor, and
 make two fixed MCP calls. behavior.json beside it simulates what lives on
 Cursor's servers."""
 
-import json, os, re, sys, urllib.request
+import json, os, re, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 VERSION = "2026.11.11-b912975"
@@ -104,7 +104,11 @@ def main():
     servers.update(behavior.get("teamMcpServers", {}))
     emit({"type": "system", "subtype": "fake", "pid": os.getpid(), "home": os.environ.get("HOME"), "env": sorted(os.environ)})
     emit({"type": "system", "subtype": "init", "apiKeySource": behavior.get("apiKeySource", "env"), "cwd": workspace,
-          "session_id": "fake", "model": options.get("--model", "Auto"), "permissionMode": "default"})
+          "session_id": "fake", "model": options.get("--model", "Auto"),
+          "permissionMode": behavior.get("permissionMode", "default")})
+    if behavior.get("malformedEvent"):
+        emit({"type": "tool_call", "subtype": "started", "tool_call": {"mcpToolCall": {"args": ["x"]}}})
+        time.sleep(5)
     if behavior.get("localTool"):
         emit({"type": "tool_call", "subtype": "started", "call_id": "ls",
               "tool_call": {"shellToolCall": {"args": {"command": "ls ~"}}}})
@@ -119,7 +123,8 @@ def main():
     for tool in ("workflows.list", "runs.cancel"):
         assert tool in names
         call_event("started", "janusly", tool)
-        if f"Mcp(janusly:{tool})" not in allowed and config.get("approvalMode") == "allowlist":
+        if f"Mcp(janusly:{tool})" not in allowed and config.get("approvalMode") == "allowlist" \
+                and not behavior.get("ignoreAllowlist"):
             call_event("completed", "janusly", tool, {"rejected": {"reason": "not on the allowlist"}})
             continue
         rpc(janusly, {"id": 3, "method": "tools/call", "params": {"name": tool, "arguments": {}}})

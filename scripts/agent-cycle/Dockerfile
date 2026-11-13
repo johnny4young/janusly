@@ -14,7 +14,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force \
-    && case "${TARGETARCH:-amd64}" in amd64) arch=x64 sum="${CURSOR_SHA256_X64}";; arm64) arch=arm64 sum="${CURSOR_SHA256_ARM64}";; *) exit 1;; esac \
+    && case "${TARGETARCH:-amd64}" in amd64) arch=x64 sum="${CURSOR_SHA256_X64}";; arm64) arch=arm64 sum="${CURSOR_SHA256_ARM64}";; *) echo "unsupported TARGETARCH ${TARGETARCH}" >&2; exit 1;; esac \
     && curl -fsSL -o /tmp/cursor.tar.gz "https://downloads.cursor.com/lab/${CURSOR_VERSION}/linux/${arch}/agent-cli-package.tar.gz" \
     && echo "${sum}  /tmp/cursor.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/cursor-agent && tar --strip-components=1 -xzf /tmp/cursor.tar.gz -C /opt/cursor-agent && rm /tmp/cursor.tar.gz \
