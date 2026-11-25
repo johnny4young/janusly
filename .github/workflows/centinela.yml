@@ -1,7 +1,7 @@
 name: Centinela
 
-# Copy to .github/workflows/centinela.yml. pull_request_target runs this file
-# from the base branch with a write token: never add a checkout of PR code here.
+# pull_request_target runs this file from the base branch with a write token:
+# never add a checkout of PR code here.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, labeled, unlabeled]
@@ -64,7 +64,7 @@ jobs:
       # Lets the job prove its identity to the Claude API (WIF).
       id-token: write
     steps:
-      - uses: johnny4young/centinela@v1
+      - uses: johnny4young/centinela@112e36b0ef133bf9b03cf857447294f82596de6a # v1.9.0
         with:
           shared-memory-repo: ${{ vars.CENTINELA_MEMORY_REPO }}
           app-client-id: ${{ vars.CENTINELA_APP_CLIENT_ID }}
@@ -89,7 +89,7 @@ jobs:
       statuses: write
       id-token: write
     steps:
-      - uses: johnny4young/centinela@v1
+      - uses: johnny4young/centinela@112e36b0ef133bf9b03cf857447294f82596de6a # v1.9.0
         with:
           shared-memory-repo: ${{ vars.CENTINELA_MEMORY_REPO }}
           allow-learning-prs: 'true'

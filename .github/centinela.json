@@ -4,10 +4,7 @@
     "productName": "Janusly"
   },
   "ai": {
-    "rules": [
-      "AGENTS.md",
-      "CLAUDE.md"
-    ]
+    "rules": ["AGENTS.md"]
   },
   "links": {
     "security": "SECURITY.md"
