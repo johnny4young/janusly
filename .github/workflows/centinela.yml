@@ -35,13 +35,16 @@ jobs:
   review:
     name: Centinela
     # Keep in sync with optInLabel, overrideLabel, issues.bugLabel and request labels.
+    # Comments start paid AI runs, so only maintainers may trigger them on this public repo.
     if: >-
       (github.event_name == 'issue_comment' &&
       github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
       (startsWith(github.event.comment.body, '/centinela') ||
       contains(github.event.comment.body, '@centinela'))) ||
       (github.event_name == 'pull_request_review_comment' &&
-      github.event.comment.user.type != 'Bot') ||
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       ((github.event_name == 'pull_request_target' || github.event_name == 'issues') &&
       ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
       contains(fromJSON('["triage", "triage: approved", "bug"]'), github.event.label.name) ||
